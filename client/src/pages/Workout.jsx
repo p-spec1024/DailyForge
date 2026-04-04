@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { api } from '../utils/api.js';
 import { useData } from '../contexts/DataProvider.jsx';
 import { useWorkoutSession } from '../hooks/useWorkoutSession.js';
@@ -266,7 +266,7 @@ function SetRow({ setNum, setData, onComplete, onWeightChange, onRepsChange, onS
         <button
           onClick={() => setShowTypeMenu(!showTypeMenu)}
           style={{
-            width: 30, height: 30, borderRadius: 6, border: 'none',
+            width: 44, height: 44, borderRadius: 6, border: 'none',
             background: isCompleted ? 'rgba(29,158,117,0.15)' : 'rgba(255,255,255,0.06)',
             color: isCompleted ? C.green : C.textSec,
             fontSize: 12, fontWeight: 600, fontFamily: MONO, cursor: 'pointer',
