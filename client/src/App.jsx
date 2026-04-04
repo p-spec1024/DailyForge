@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth.js';
+import { DataProvider } from './contexts/DataProvider.jsx';
 import NavBar from './components/NavBar.jsx';
 import Login from './pages/Login.jsx';
 import Register from './pages/Register.jsx';
@@ -54,7 +55,7 @@ export default function App() {
   }
 
   return (
-    <>
+    <DataProvider>
       <div style={{ paddingBottom: 80 }}>
         <Routes>
           <Route path="/" element={<Workout onLogout={logout} />} />
@@ -65,6 +66,6 @@ export default function App() {
         </Routes>
       </div>
       <NavBar />
-    </>
+    </DataProvider>
   );
 }

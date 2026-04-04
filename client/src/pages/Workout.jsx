@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api } from '../utils/api.js';
+import { useData } from '../contexts/DataProvider.jsx';
 import ExerciseLibrary from '../components/ExerciseLibrary.jsx';
 import { YOGA_LIBRARY, DUMBBELL_LIBRARY, BREATHWORK_LIBRARY, STRETCHING_LIBRARY } from '../data/exercise-library.js';
 
@@ -288,17 +289,13 @@ function PhaseBar({ phases }) {
 
 /* ── Today's Workout View ── */
 function TodayView({ onLogout }) {
-  const [workout, setWorkout] = useState(null);
+  const { workoutData: workout, workoutLoading: loading, fetchWorkout, invalidateWorkout } = useData();
   const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState(null);
 
   useEffect(() => {
-    api.get('/workout/today').then((data) => {
-      setWorkout(data);
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, []);
+    fetchWorkout();
+  }, [fetchWorkout]);
 
   async function startSession() {
     if (!workout || !workout.phases) return;
@@ -315,6 +312,7 @@ function TodayView({ onLogout }) {
     try {
       await api.put(`/session/${session.id}/complete`);
       setSession(prev => ({ ...prev, completed_at: new Date().toISOString() }));
+      invalidateWorkout();
     } catch (err) {
       console.error('Failed to complete session:', err);
     }
