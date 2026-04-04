@@ -81,7 +81,6 @@ export function useWorkoutSession() {
   // Check for active session on mount
   const checkActiveSession = useCallback(async () => {
     try {
-      const cached = loadFromStorage();
       const data = await api.get('/session/active');
 
       if (data.session) {
@@ -227,7 +226,15 @@ export function useWorkoutSession() {
     setIsLoading(true);
     try {
       const data = await api.put(`/session/${sessionId}/complete`);
+      setSessionId(null);
+      setWorkoutId(null);
       setIsActive(false);
+      setStartedAt(null);
+      setElapsedSeconds(0);
+      setExerciseSets({});
+      setTotalSets(0);
+      setTotalVolume(0);
+      setExercisesDone(0);
       clearStorage();
       return data;
     } catch (err) {

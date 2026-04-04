@@ -109,6 +109,16 @@ ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS set_type VARCHAR(20) DEFA
 ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS completed BOOLEAN DEFAULT false;
 ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS notes TEXT;
 
+-- Unique constraint for atomic set upsert (ON CONFLICT)
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'uq_session_exercise_set'
+  ) THEN
+    ALTER TABLE session_exercises ADD CONSTRAINT uq_session_exercise_set
+      UNIQUE (session_id, exercise_id, set_number);
+  END IF;
+END $$;
+
 ALTER TABLE workout_slots ADD COLUMN IF NOT EXISTS phase VARCHAR(30) DEFAULT 'main';
 ALTER TABLE workout_slots DROP CONSTRAINT IF EXISTS workout_slots_day_of_week_key;
 DO $$ BEGIN

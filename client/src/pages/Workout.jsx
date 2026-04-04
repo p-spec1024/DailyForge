@@ -399,18 +399,21 @@ function ExerciseSessionCard({ exercise, sets, onLogSet, nextSetRef }) {
     return null;
   })();
 
-  function handleComplete(setNum, data) {
+  async function handleComplete(setNum, data) {
     const setData = {
       set_number: setNum,
       weight: data.weight,
       reps: data.reps,
       set_type: data.set_type,
     };
-    setLocalSets(prev => ({
-      ...prev,
-      [setNum]: { ...prev[setNum], ...setData, completed: true },
-    }));
-    onLogSet(exercise.id, setData);
+    // Only mark completed after server confirms — prevents data loss on network failure
+    const result = await onLogSet(exercise.id, setData);
+    if (result) {
+      setLocalSets(prev => ({
+        ...prev,
+        [setNum]: { ...prev[setNum], ...setData, completed: true },
+      }));
+    }
   }
 
   function handleSetTypeChange(setNum, newType) {
@@ -859,14 +862,17 @@ function TodayView({ onLogout }) {
   }
 
   async function handleLogSet(exerciseId, setData) {
-    await session.logSet(exerciseId, setData);
-    // Scroll next incomplete set into view after a tick
-    setTimeout(() => {
-      if (nextSetRef.current) {
-        nextSetRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        nextSetRef.current.focus();
-      }
-    }, 100);
+    const result = await session.logSet(exerciseId, setData);
+    if (result) {
+      // Scroll next incomplete set into view after a tick
+      setTimeout(() => {
+        if (nextSetRef.current) {
+          nextSetRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          nextSetRef.current.focus();
+        }
+      }, 100);
+    }
+    return result;
   }
 
   async function handleFinish() {
