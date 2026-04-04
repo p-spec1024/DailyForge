@@ -54,20 +54,6 @@ router.put('/:id/complete', async (req, res, next) => {
       return res.status(404).json({ error: 'Session not found or already completed' });
     }
 
-    // Auto-log habits with auto_type = 'workout'
-    const autoHabits = await pool.query(
-      `SELECT id FROM habits WHERE user_id = $1 AND active = true AND auto_type IN ('workout', 'breathwork')`,
-      [req.user.id]
-    );
-    for (const habit of autoHabits.rows) {
-      await pool.query(
-        `INSERT INTO habit_entries (habit_id, entry_date, value)
-         VALUES ($1, CURRENT_DATE, 1)
-         ON CONFLICT (habit_id, entry_date) DO UPDATE SET value = 1`,
-        [habit.id]
-      );
-    }
-
     res.json(result.rows[0]);
   } catch (err) {
     next(err);

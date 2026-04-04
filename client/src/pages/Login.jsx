@@ -21,7 +21,7 @@ export default function Login({ onLogin }) {
   return (
     <div className="container auth-page">
       <h1>DailyForge</h1>
-      <p className="tagline">Build better habits, one day at a time</p>
+      <p className="tagline">Workout. Yoga. Breathwork.</p>
       <form onSubmit={handleSubmit} className="auth-form">
         <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />

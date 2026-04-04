@@ -5,7 +5,6 @@ import { errorHandler } from './middleware/errorHandler.js';
 import authRoutes from './routes/auth.js';
 import workoutRoutes from './routes/workout.js';
 import sessionRoutes from './routes/session.js';
-import habitRoutes from './routes/habits.js';
 
 const app = express();
 
@@ -19,7 +18,6 @@ app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 app.use('/api/auth', authRoutes);
 app.use('/api/workout', workoutRoutes);
 app.use('/api/session', sessionRoutes);
-app.use('/api/habits', habitRoutes);
 
 app.use(errorHandler);
 

@@ -35,7 +35,15 @@ const s = {
 const INACTIVE = 'rgba(255,255,255,0.3)';
 const ACTIVE_ICON = '#fff';
 const ACTIVE_LABEL = '#D85A30';
-const DISABLED = 'rgba(255,255,255,0.15)';
+
+function HomeIcon({ color }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </svg>
+  );
+}
 
 function DumbbellIcon({ color }) {
   return (
@@ -48,61 +56,55 @@ function DumbbellIcon({ color }) {
   );
 }
 
-function ChecklistIcon({ color }) {
+function YogaIcon({ color }) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 11l3 3L22 4" />
-      <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+      <circle cx="12" cy="4" r="2" />
+      <path d="M12 6v4" />
+      <path d="M8 14l4-4 4 4" />
+      <path d="M6 20l6-6 6 6" />
     </svg>
   );
 }
 
-function BookIcon({ color }) {
+function BreatheIcon({ color }) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
+      <path d="M12 22c-4-4-8-7.5-8-12a8 8 0 1116 0c0 4.5-4 8-8 12z" />
+      <circle cx="12" cy="10" r="3" />
     </svg>
   );
 }
 
-function ChartIcon({ color }) {
+function ProfileIcon({ color }) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="20" x2="18" y2="10" />
-      <line x1="12" y1="20" x2="12" y2="4" />
-      <line x1="6" y1="20" x2="6" y2="14" />
+      <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
     </svg>
+  );
+}
+
+function Tab({ to, end, icon: Icon, label }) {
+  return (
+    <NavLink to={to} end={end} style={s.tab}>
+      {({ isActive }) => (
+        <>
+          <Icon color={isActive ? ACTIVE_ICON : INACTIVE} />
+          <span style={{ ...s.label, color: isActive ? ACTIVE_LABEL : INACTIVE }}>{label}</span>
+        </>
+      )}
+    </NavLink>
   );
 }
 
 export default function NavBar() {
   return (
     <nav style={s.nav}>
-      <NavLink to="/" end style={s.tab}>
-        {({ isActive }) => (
-          <>
-            <DumbbellIcon color={isActive ? ACTIVE_ICON : INACTIVE} />
-            <span style={{ ...s.label, color: isActive ? ACTIVE_LABEL : INACTIVE }}>Workout</span>
-          </>
-        )}
-      </NavLink>
-      <NavLink to="/habits" style={s.tab}>
-        {({ isActive }) => (
-          <>
-            <ChecklistIcon color={isActive ? ACTIVE_ICON : INACTIVE} />
-            <span style={{ ...s.label, color: isActive ? ACTIVE_LABEL : INACTIVE }}>Habits</span>
-          </>
-        )}
-      </NavLink>
-      <div style={{ ...s.tab, cursor: 'default' }}>
-        <BookIcon color={DISABLED} />
-        <span style={{ ...s.label, color: DISABLED }}>Library</span>
-      </div>
-      <div style={{ ...s.tab, cursor: 'default' }}>
-        <ChartIcon color={DISABLED} />
-        <span style={{ ...s.label, color: DISABLED }}>Stats</span>
-      </div>
+      <Tab to="/" end icon={DumbbellIcon} label="Workout" />
+      <Tab to="/yoga" icon={YogaIcon} label="Yoga" />
+      <Tab to="/breathe" icon={BreatheIcon} label="Breathe" />
+      <Tab to="/profile" icon={ProfileIcon} label="Profile" />
     </nav>
   );
 }

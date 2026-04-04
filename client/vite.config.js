@@ -11,7 +11,7 @@ export default defineConfig({
       manifest: {
         name: 'DailyForge',
         short_name: 'DailyForge',
-        description: 'Workout + Breathwork + Habit Tracker',
+        description: 'Workout + Yoga + Breathwork',
         theme_color: '#1a1a2e',
         background_color: '#1a1a2e',
         display: 'standalone',
