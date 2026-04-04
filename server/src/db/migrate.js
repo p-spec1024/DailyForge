@@ -96,6 +96,19 @@ ALTER TABLE exercises ADD COLUMN IF NOT EXISTS url TEXT;
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS source VARCHAR(100);
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS difficulty VARCHAR(50);
 
+-- Sessions table: add missing columns for full session tracking
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS date DATE DEFAULT CURRENT_DATE;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS duration INTEGER; -- in seconds
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS type VARCHAR(20) DEFAULT 'strength';
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS completed BOOLEAN DEFAULT false;
+
+-- Session exercises: add per-set logging columns
+ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS set_number INTEGER;
+ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS rpe DECIMAL(3,1);
+ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS set_type VARCHAR(20) DEFAULT 'normal';
+ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS completed BOOLEAN DEFAULT false;
+ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS notes TEXT;
+
 ALTER TABLE workout_slots ADD COLUMN IF NOT EXISTS phase VARCHAR(30) DEFAULT 'main';
 ALTER TABLE workout_slots DROP CONSTRAINT IF EXISTS workout_slots_day_of_week_key;
 DO $$ BEGIN
@@ -114,6 +127,9 @@ CREATE INDEX IF NOT EXISTS idx_habit_entries_habit_id ON habit_entries(habit_id)
 CREATE INDEX IF NOT EXISTS idx_habit_entries_date ON habit_entries(entry_date);
 CREATE INDEX IF NOT EXISTS idx_habit_entries_habit_date ON habit_entries(habit_id, entry_date);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_date ON sessions(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_session_exercises_session ON session_exercises(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_exercises_exercise ON session_exercises(exercise_id);
 CREATE INDEX IF NOT EXISTS idx_exercises_workout_id ON exercises(workout_id);
 CREATE INDEX IF NOT EXISTS idx_workout_slots_day_phase ON workout_slots(day_of_week, phase);
 CREATE INDEX IF NOT EXISTS idx_user_slot_prefs_user_id ON user_slot_prefs(user_id);
