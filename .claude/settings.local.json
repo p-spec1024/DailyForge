@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python -c \":*)",
+      "Bash(python:*)",
+      "Bash(pip --version)",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(nlm login:*)",
+      "mcp__notebooklm-mcp__notebook_list",
+      "mcp__notebooklm-mcp__notebook_query",
+      "Bash(node:*)"
+    ]
+  }
+}
