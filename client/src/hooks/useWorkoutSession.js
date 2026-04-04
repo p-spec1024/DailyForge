@@ -3,15 +3,6 @@ import { api } from '../utils/api.js';
 
 const LS_KEY = 'dailyforge_active_session';
 
-function loadFromStorage() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
 function saveToStorage(data) {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(data));
