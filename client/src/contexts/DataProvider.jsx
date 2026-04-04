@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { api } from '../utils/api.js';
 
 const STALE_MS = 5 * 60 * 1000; // 5 minutes
@@ -16,7 +16,7 @@ export function DataProvider({ children }) {
   }, []);
 
   const fetchWorkout = useCallback(async (force = false) => {
-    if (!force && isFresh() && workoutData !== null) return;
+    if (!force && isFresh()) return;
     if (fetchingRef.current) return;
 
     fetchingRef.current = true;
@@ -25,13 +25,12 @@ export function DataProvider({ children }) {
       setWorkoutData(data);
       fetchedAtRef.current = Date.now();
     } catch {
-      // On error, keep existing data if available
-      if (workoutData === null) setWorkoutData(null);
+      // Keep existing cached data on error; loading state still clears in finally
     } finally {
       setWorkoutLoading(false);
       fetchingRef.current = false;
     }
-  }, [isFresh, workoutData]);
+  }, [isFresh]);
 
   const invalidateWorkout = useCallback(() => {
     fetchedAtRef.current = null;
@@ -49,13 +48,15 @@ export function DataProvider({ children }) {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [fetchWorkout, isFresh]);
 
+  const value = useMemo(() => ({
+    workoutData,
+    workoutLoading,
+    fetchWorkout,
+    invalidateWorkout,
+  }), [workoutData, workoutLoading, fetchWorkout, invalidateWorkout]);
+
   return (
-    <DataContext.Provider value={{
-      workoutData,
-      workoutLoading,
-      fetchWorkout,
-      invalidateWorkout,
-    }}>
+    <DataContext.Provider value={value}>
       {children}
     </DataContext.Provider>
   );
