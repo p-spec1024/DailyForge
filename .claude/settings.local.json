@@ -10,7 +10,9 @@
       "Bash(nlm login:*)",
       "mcp__notebooklm-mcp__notebook_list",
       "mcp__notebooklm-mcp__notebook_query",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(git add:*)",
+      "Bash(git rebase:*)"
     ]
   }
 }

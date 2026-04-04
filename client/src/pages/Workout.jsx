@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '../utils/api.js';
 import { useData } from '../contexts/DataProvider.jsx';
+import { useWorkoutSession } from '../hooks/useWorkoutSession.js';
 import ExerciseLibrary from '../components/ExerciseLibrary.jsx';
 import { YOGA_LIBRARY, DUMBBELL_LIBRARY, BREATHWORK_LIBRARY, STRETCHING_LIBRARY } from '../data/exercise-library.js';
 
@@ -13,6 +14,8 @@ const C = {
   textSec: 'rgba(255,255,255,0.6)',
   textMuted: 'rgba(255,255,255,0.35)',
   textHint: 'rgba(255,255,255,0.2)',
+  accent: '#D85A30',
+  green: '#1D9E75',
 };
 
 const MONO = "'SF Mono', 'Fira Code', monospace";
@@ -60,6 +63,15 @@ function extractVideoId(url) {
   return match ? match[1] : null;
 }
 
+function formatVolume(v) {
+  if (v >= 1000) return `${(v / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  return String(Math.round(v));
+}
+
+function isStrengthPhase(phase) {
+  return phase.phase === 'main';
+}
+
 /* ── YouTube play icon SVG ── */
 const YTIcon = () => (
   <svg width="20" height="14" viewBox="0 0 20 14" fill="none">
@@ -68,7 +80,7 @@ const YTIcon = () => (
   </svg>
 );
 
-/* ── Exercise Detail Expanded View ── */
+/* ── Exercise Detail Expanded View (view mode only) ── */
 function ExerciseDetail({ exercise }) {
   const muscles = exercise.target_muscles
     ? exercise.target_muscles.split(',').map(m => m.trim()).filter(Boolean)
@@ -78,7 +90,6 @@ function ExerciseDetail({ exercise }) {
 
   return (
     <div style={{ padding: '12px 0 4px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Muscle tags */}
       {muscles.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {muscles.map(m => (
@@ -89,8 +100,6 @@ function ExerciseDetail({ exercise }) {
           ))}
         </div>
       )}
-
-      {/* How to do it */}
       <div>
         <div style={{
           fontSize: 9, fontWeight: 600, textTransform: 'uppercase',
@@ -102,8 +111,6 @@ function ExerciseDetail({ exercise }) {
           <div style={{ fontSize: 12, color: C.textHint, fontStyle: 'italic' }}>No instructions added yet</div>
         )}
       </div>
-
-      {/* Video area */}
       {realUrl && videoId ? (
         <div>
           <div onClick={() => window.open(realUrl, '_blank', 'noopener')} style={{
@@ -149,8 +156,6 @@ function ExerciseDetail({ exercise }) {
           <YTIcon /> Watch on YouTube
         </button>
       )}
-
-      {/* Info pills */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
         {exercise.difficulty && (
           <span style={{
@@ -169,8 +174,6 @@ function ExerciseDetail({ exercise }) {
           }}>{exercise.source}</span>
         )}
       </div>
-
-      {/* Swap button */}
       <button onClick={(e) => {
         e.stopPropagation();
         const toast = document.createElement('div');
@@ -193,7 +196,7 @@ function ExerciseDetail({ exercise }) {
   );
 }
 
-/* ── Exercise Row ── */
+/* ── Exercise Row (view mode) ── */
 function ExerciseRow({ exercise, isExpanded, onToggle }) {
   const color = typeColor(exercise.exercise_type || exercise.type);
   const detail = formatExerciseDetail(exercise);
@@ -217,7 +220,545 @@ function ExerciseRow({ exercise, isExpanded, onToggle }) {
   );
 }
 
-/* ── Phase Section ── */
+/* ── Set Type Labels ── */
+const SET_TYPE_LABELS = {
+  normal: '',
+  warmup: 'W',
+  dropset: 'D',
+  failure: 'F',
+};
+
+const SET_TYPES = ['normal', 'warmup', 'dropset', 'failure'];
+
+/* ── Set Row (active session mode) ── */
+function SetRow({ setNum, setData, onComplete, onWeightChange, onRepsChange, onSetTypeChange, inputRef }) {
+  const [weight, setWeight] = useState(setData?.weight ?? '');
+  const [reps, setReps] = useState(setData?.reps ?? '');
+  const [showTypeMenu, setShowTypeMenu] = useState(false);
+  const isCompleted = setData?.completed || false;
+  const setType = setData?.set_type || 'normal';
+  const isWarmup = setType === 'warmup';
+
+  // Sync from parent state when setData changes (e.g. resume)
+  useEffect(() => {
+    if (setData?.weight != null) setWeight(setData.weight);
+    if (setData?.reps != null) setReps(setData.reps);
+  }, [setData?.weight, setData?.reps]);
+
+  function handleComplete() {
+    const w = parseFloat(weight) || 0;
+    const r = parseInt(reps) || 0;
+    if (w === 0 && r === 0) return; // don't allow empty sets
+    onComplete({ weight: w, reps: r, set_type: setType });
+  }
+
+  return (
+    <div style={{
+      display: 'grid', gridTemplateColumns: '36px 64px 1fr 1fr 40px',
+      gap: 6, alignItems: 'center', padding: '6px 0',
+      opacity: isWarmup && !isCompleted ? 0.5 : 1,
+      background: isCompleted ? 'rgba(29,158,117,0.06)' : 'transparent',
+      borderRadius: 6, paddingLeft: 4, paddingRight: 4,
+      transition: 'background 0.2s',
+    }}>
+      {/* Set number with type selector */}
+      <div style={{ position: 'relative' }}>
+        <button
+          onClick={() => setShowTypeMenu(!showTypeMenu)}
+          style={{
+            width: 30, height: 30, borderRadius: 6, border: 'none',
+            background: isCompleted ? 'rgba(29,158,117,0.15)' : 'rgba(255,255,255,0.06)',
+            color: isCompleted ? C.green : C.textSec,
+            fontSize: 12, fontWeight: 600, fontFamily: MONO, cursor: 'pointer',
+          }}
+        >
+          {SET_TYPE_LABELS[setType] || setNum}
+        </button>
+        {showTypeMenu && (
+          <div style={{
+            position: 'absolute', top: 34, left: 0, zIndex: 10,
+            background: '#1a2235', border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 8, overflow: 'hidden', minWidth: 100,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+          }}>
+            {SET_TYPES.map(t => (
+              <button key={t} onClick={() => { onSetTypeChange(t); setShowTypeMenu(false); }} style={{
+                display: 'block', width: '100%', padding: '8px 12px', border: 'none',
+                background: t === setType ? 'rgba(255,255,255,0.08)' : 'transparent',
+                color: C.text, fontSize: 12, textAlign: 'left', cursor: 'pointer',
+              }}>
+                {t === 'normal' ? 'Normal' : t === 'warmup' ? 'Warm-up' : t === 'dropset' ? 'Drop Set' : 'Failure'}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Previous (dashes for now — Ticket 5) */}
+      <div style={{ fontSize: 11, color: C.textHint, fontFamily: MONO, textAlign: 'center' }}>
+        — x —
+      </div>
+
+      {/* Weight input */}
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="decimal"
+        value={weight}
+        onChange={e => {
+          setWeight(e.target.value);
+          onWeightChange(e.target.value);
+        }}
+        onFocus={e => e.target.select()}
+        placeholder="kg"
+        style={{
+          height: 44, borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)',
+          background: isCompleted ? 'rgba(29,158,117,0.08)' : 'rgba(255,255,255,0.04)',
+          color: C.text, fontSize: 15, fontFamily: MONO, textAlign: 'center',
+          outline: 'none', width: '100%',
+        }}
+      />
+
+      {/* Reps input */}
+      <input
+        type="text"
+        inputMode="numeric"
+        value={reps}
+        onChange={e => {
+          setReps(e.target.value);
+          onRepsChange(e.target.value);
+        }}
+        onFocus={e => e.target.select()}
+        placeholder="reps"
+        style={{
+          height: 44, borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)',
+          background: isCompleted ? 'rgba(29,158,117,0.08)' : 'rgba(255,255,255,0.04)',
+          color: C.text, fontSize: 15, fontFamily: MONO, textAlign: 'center',
+          outline: 'none', width: '100%',
+        }}
+      />
+
+      {/* Checkmark button */}
+      <button
+        onClick={handleComplete}
+        disabled={isCompleted}
+        style={{
+          width: 40, height: 40, borderRadius: 8, border: 'none',
+          background: isCompleted ? 'rgba(29,158,117,0.2)' : 'rgba(255,255,255,0.06)',
+          color: isCompleted ? C.green : C.textMuted,
+          cursor: isCompleted ? 'default' : 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'all 0.2s',
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+/* ── Exercise Card (active session mode) ── */
+function ExerciseSessionCard({ exercise, sets, onLogSet, nextSetRef }) {
+  const defaultSetCount = exercise.default_sets || 3;
+  const [setCount, setSetCount] = useState(Math.max(defaultSetCount, sets.length));
+  const [localSets, setLocalSets] = useState(() => {
+    // Initialize local set data for inputs
+    const result = {};
+    for (const s of sets) {
+      result[s.set_number] = { ...s };
+    }
+    return result;
+  });
+  const inputRefs = useRef({});
+
+  // Sync when sets change from parent (e.g. resume)
+  useEffect(() => {
+    setLocalSets(prev => {
+      const next = { ...prev };
+      for (const s of sets) {
+        next[s.set_number] = { ...s };
+      }
+      return next;
+    });
+    if (sets.length > setCount) setSetCount(sets.length);
+  }, [sets]);
+
+  const color = typeColor(exercise.exercise_type || exercise.type);
+  const muscles = exercise.target_muscles
+    ? exercise.target_muscles.split(',').map(m => m.trim()).filter(Boolean)
+    : [];
+
+  // Find first incomplete set for auto-focus ref
+  const firstIncompleteSet = (() => {
+    for (let i = 1; i <= setCount; i++) {
+      if (!localSets[i]?.completed) return i;
+    }
+    return null;
+  })();
+
+  function handleComplete(setNum, data) {
+    const setData = {
+      set_number: setNum,
+      weight: data.weight,
+      reps: data.reps,
+      set_type: data.set_type,
+    };
+    setLocalSets(prev => ({
+      ...prev,
+      [setNum]: { ...prev[setNum], ...setData, completed: true },
+    }));
+    onLogSet(exercise.id, setData);
+  }
+
+  function handleSetTypeChange(setNum, newType) {
+    setLocalSets(prev => ({
+      ...prev,
+      [setNum]: { ...prev[setNum], set_type: newType },
+    }));
+  }
+
+  return (
+    <div style={{
+      background: C.card, border: C.border, borderRadius: 10,
+      borderTop: `2px solid ${color}`,
+      marginBottom: 6, overflow: 'hidden',
+    }}>
+      <div style={{ padding: 12 }}>
+        {/* Exercise name + muscle tags */}
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{exercise.name}</div>
+          {muscles.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+              {muscles.map(m => (
+                <span key={m} style={{
+                  fontSize: 9, color: 'rgba(255,255,255,0.4)',
+                  background: 'rgba(255,255,255,0.06)', borderRadius: 6, padding: '2px 6px',
+                }}>{m}</span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Column headers */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '36px 64px 1fr 1fr 40px',
+          gap: 6, padding: '4px 4px', marginBottom: 2,
+        }}>
+          {['SET', 'PREVIOUS', 'KG', 'REPS', ''].map((h, i) => (
+            <div key={i} style={{
+              fontSize: 9, fontWeight: 600, color: C.textMuted,
+              letterSpacing: '1px', textAlign: 'center',
+            }}>{h}</div>
+          ))}
+        </div>
+
+        {/* Set rows */}
+        {Array.from({ length: setCount }, (_, i) => i + 1).map(setNum => (
+          <SetRow
+            key={setNum}
+            setNum={setNum}
+            setData={localSets[setNum]}
+            onComplete={(data) => handleComplete(setNum, data)}
+            onWeightChange={(v) => setLocalSets(prev => ({
+              ...prev, [setNum]: { ...prev[setNum], weight: v },
+            }))}
+            onRepsChange={(v) => setLocalSets(prev => ({
+              ...prev, [setNum]: { ...prev[setNum], reps: v },
+            }))}
+            onSetTypeChange={(t) => handleSetTypeChange(setNum, t)}
+            inputRef={el => {
+              inputRefs.current[setNum] = el;
+              if (setNum === firstIncompleteSet && nextSetRef) {
+                nextSetRef.current = el;
+              }
+            }}
+          />
+        ))}
+
+        {/* Add Set button */}
+        <button
+          onClick={() => setSetCount(prev => prev + 1)}
+          style={{
+            width: '100%', padding: '8px', marginTop: 4, borderRadius: 6,
+            border: '1px dashed rgba(255,255,255,0.08)', background: 'transparent',
+            color: C.textMuted, fontSize: 12, cursor: 'pointer',
+          }}
+        >
+          + Add Set
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Phase Checkbox (non-strength phases in active mode) ── */
+function PhaseCheckbox({ phase, checked, onToggle }) {
+  return (
+    <div style={{
+      background: C.card, border: C.border, borderRadius: 10,
+      borderTop: `2px solid ${phase.color}`,
+      marginBottom: 6, overflow: 'hidden',
+    }}>
+      <div
+        onClick={onToggle}
+        style={{
+          padding: 14, display: 'flex', alignItems: 'center', gap: 12,
+          cursor: 'pointer', userSelect: 'none',
+        }}
+      >
+        <div style={{
+          width: 24, height: 24, borderRadius: 6,
+          border: checked ? 'none' : '1.5px solid rgba(255,255,255,0.15)',
+          background: checked ? 'rgba(29,158,117,0.2)' : 'transparent',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'all 0.2s',
+        }}>
+          {checked && (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke={C.green} strokeWidth="3" strokeLinecap="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          )}
+        </div>
+        <div>
+          <div style={{
+            fontSize: 12, fontWeight: 500,
+            color: checked ? C.green : C.text,
+            textDecoration: checked ? 'line-through' : 'none',
+          }}>
+            Complete {phase.label.toLowerCase()}
+          </div>
+          <div style={{ fontSize: 11, color: C.textMuted, marginTop: 1 }}>
+            {phase.duration_min} min &middot; {phase.exercises.length} exercise{phase.exercises.length !== 1 ? 's' : ''}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Session Timer Bar ── */
+function SessionBar({ elapsed, totalVolume, onFinish, onDiscard, formatTime }) {
+  const [showMenu, setShowMenu] = useState(false);
+
+  return (
+    <div style={{
+      position: 'sticky', top: 0, zIndex: 20,
+      background: 'rgba(12,18,34,0.95)', backdropFilter: 'blur(12px)',
+      borderBottom: '0.5px solid rgba(255,255,255,0.06)',
+      padding: '10px 0', marginBottom: 12, marginTop: -4,
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {/* Timer */}
+          <div style={{
+            fontSize: 20, fontFamily: MONO, fontWeight: 600, color: C.accent,
+            letterSpacing: '1px',
+          }}>
+            {formatTime(elapsed)}
+          </div>
+          {/* Volume */}
+          <div style={{ fontSize: 12, color: C.textSec }}>
+            <span style={{ fontFamily: MONO, fontWeight: 500 }}>{formatVolume(totalVolume)}</span> kg
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {/* More menu */}
+          <div style={{ position: 'relative' }}>
+            <button onClick={() => setShowMenu(!showMenu)} style={{
+              width: 32, height: 32, borderRadius: 8, border: 'none',
+              background: 'rgba(255,255,255,0.06)', color: C.textMuted,
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" />
+              </svg>
+            </button>
+            {showMenu && (
+              <div style={{
+                position: 'absolute', top: 36, right: 0, zIndex: 30,
+                background: '#1a2235', border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 8, overflow: 'hidden', minWidth: 150,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+              }}>
+                <button onClick={() => { setShowMenu(false); onDiscard(); }} style={{
+                  display: 'block', width: '100%', padding: '10px 14px', border: 'none',
+                  background: 'transparent', color: '#ef4444', fontSize: 13,
+                  textAlign: 'left', cursor: 'pointer',
+                }}>
+                  Discard workout
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Finish button */}
+          <button onClick={onFinish} style={{
+            padding: '8px 16px', borderRadius: 8, border: 'none',
+            background: 'rgba(29,158,117,0.2)', color: C.green,
+            fontSize: 13, fontWeight: 600, cursor: 'pointer',
+          }}>
+            Finish
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Workout Summary Card ── */
+function SummaryCard({ data, onDone }) {
+  if (!data) return null;
+  const { session, summary } = data;
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 100,
+      background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 20,
+    }}>
+      <div style={{
+        width: '100%', maxWidth: 360,
+        background: 'rgba(20,28,50,0.98)', border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: 16, padding: 28, textAlign: 'center',
+      }}>
+        <div style={{
+          fontSize: 11, fontWeight: 700, letterSpacing: '2px',
+          color: C.green, textTransform: 'uppercase', marginBottom: 8,
+        }}>WORKOUT COMPLETE</div>
+
+        <div style={{ fontSize: 32, marginBottom: 20 }}>&#127881;</div>
+
+        {/* Stats grid */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20,
+        }}>
+          {[
+            { label: 'Duration', value: summary.duration_formatted },
+            { label: 'Volume', value: `${formatVolume(summary.total_volume)} kg` },
+            { label: 'Sets', value: String(summary.total_sets) },
+            { label: 'Exercises', value: String(summary.exercises_completed) },
+          ].map(stat => (
+            <div key={stat.label} style={{
+              background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: '12px 8px',
+            }}>
+              <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '1px' }}>
+                {stat.label}
+              </div>
+              <div style={{ fontSize: 20, fontFamily: MONO, fontWeight: 600, color: C.text }}>
+                {stat.value}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Exercise list */}
+        {summary.exercises && summary.exercises.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{
+              height: 1, background: 'rgba(255,255,255,0.06)', marginBottom: 12,
+            }} />
+            <div style={{
+              fontSize: 10, fontWeight: 600, color: C.textMuted,
+              letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 8, textAlign: 'left',
+            }}>Exercises completed</div>
+            {summary.exercises.map(ex => (
+              <div key={ex.exercise_id} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '5px 0', fontSize: 13,
+              }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                  stroke={C.green} strokeWidth="2.5" strokeLinecap="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span style={{ color: C.text, flex: 1, textAlign: 'left' }}>{ex.name}</span>
+                <span style={{ color: C.textMuted, fontSize: 12, fontFamily: MONO }}>
+                  {ex.sets} set{ex.sets !== 1 ? 's' : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button onClick={onDone} style={{
+          width: '100%', padding: '14px', borderRadius: 10, border: 'none',
+          background: 'rgba(29,158,117,0.2)', color: C.green,
+          fontSize: 15, fontWeight: 600, cursor: 'pointer',
+        }}>
+          Done
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Confirm Dialog ── */
+function ConfirmDialog({ title, message, confirmLabel, confirmColor, onConfirm, onCancel }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 100,
+      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+    }}>
+      <div style={{
+        width: '100%', maxWidth: 320,
+        background: 'rgba(20,28,50,0.98)', border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: 14, padding: 24,
+      }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: C.text, marginBottom: 8 }}>{title}</div>
+        <div style={{ fontSize: 13, color: C.textSec, marginBottom: 20 }}>{message}</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onCancel} style={{
+            flex: 1, padding: '12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)',
+            background: 'transparent', color: C.textSec, fontSize: 14, cursor: 'pointer',
+          }}>Cancel</button>
+          <button onClick={onConfirm} style={{
+            flex: 1, padding: '12px', borderRadius: 8, border: 'none',
+            background: confirmColor || 'rgba(29,158,117,0.2)',
+            color: confirmColor ? '#fff' : C.green,
+            fontSize: 14, fontWeight: 600, cursor: 'pointer',
+          }}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Resume Banner ── */
+function ResumeBanner({ session, onResume, onDiscard }) {
+  const time = new Date(session.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return (
+    <div style={{
+      background: 'rgba(216,90,48,0.1)', border: '1px solid rgba(216,90,48,0.2)',
+      borderRadius: 10, padding: 14, marginBottom: 12,
+    }}>
+      <div style={{ fontSize: 13, color: C.text, marginBottom: 8 }}>
+        You have an unfinished workout from {time}.
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={onResume} style={{
+          flex: 1, padding: '10px', borderRadius: 8, border: 'none',
+          background: 'rgba(216,90,48,0.2)', color: C.accent,
+          fontSize: 13, fontWeight: 600, cursor: 'pointer',
+        }}>Resume</button>
+        <button onClick={onDiscard} style={{
+          flex: 1, padding: '10px', borderRadius: 8,
+          border: '1px solid rgba(255,255,255,0.08)', background: 'transparent',
+          color: C.textMuted, fontSize: 13, cursor: 'pointer',
+        }}>Discard</button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Phase Section (view mode) ── */
 function PhaseSection({ phase, expandedId, onToggleExpand }) {
   const [open, setOpen] = useState(true);
 
@@ -290,32 +831,60 @@ function PhaseBar({ phases }) {
 /* ── Today's Workout View ── */
 function TodayView({ onLogout }) {
   const { workoutData: workout, workoutLoading: loading, fetchWorkout, invalidateWorkout } = useData();
-  const [session, setSession] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
+  const [completedPhases, setCompletedPhases] = useState({});
+  const [confirmFinish, setConfirmFinish] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [summaryData, setSummaryData] = useState(null);
+  const [startDisabled, setStartDisabled] = useState(false);
+  const nextSetRef = useRef(null);
+
+  const session = useWorkoutSession();
 
   useEffect(() => {
     fetchWorkout();
   }, [fetchWorkout]);
 
-  async function startSession() {
-    if (!workout || !workout.phases) return;
-    try {
-      const workoutIds = workout.phases.map(p => p.workout_id).filter(Boolean);
-      const s = await api.post('/session/start', { workout_ids: workoutIds, workout_id: workoutIds[0] });
-      setSession(s);
-    } catch (err) {
-      console.error('Failed to start session:', err);
+  // Check for active session on mount
+  useEffect(() => {
+    session.checkActiveSession();
+  }, [session.checkActiveSession]);
+
+  async function handleStart() {
+    if (!workout || !workout.phases || startDisabled) return;
+    setStartDisabled(true);
+    const workoutIds = workout.phases.map(p => p.workout_id).filter(Boolean);
+    await session.startSession(workoutIds[0], workoutIds);
+    setStartDisabled(false);
+  }
+
+  async function handleLogSet(exerciseId, setData) {
+    await session.logSet(exerciseId, setData);
+    // Scroll next incomplete set into view after a tick
+    setTimeout(() => {
+      if (nextSetRef.current) {
+        nextSetRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        nextSetRef.current.focus();
+      }
+    }, 100);
+  }
+
+  async function handleFinish() {
+    setConfirmFinish(false);
+    const data = await session.completeSession();
+    if (data) {
+      setSummaryData(data);
+      invalidateWorkout();
     }
   }
 
-  async function completeSession() {
-    try {
-      await api.put(`/session/${session.id}/complete`);
-      setSession(prev => ({ ...prev, completed_at: new Date().toISOString() }));
-      invalidateWorkout();
-    } catch (err) {
-      console.error('Failed to complete session:', err);
-    }
+  async function handleDiscard() {
+    setConfirmDiscard(false);
+    await session.discardSession();
+  }
+
+  async function handleDiscardResume() {
+    await session.dismissResume();
   }
 
   function toggleExpand(id) {
@@ -363,8 +932,143 @@ function TodayView({ onLogout }) {
   const totalDuration = workout.phases.reduce((s, p) => s + p.duration_min, 0);
   const totalExercises = workout.phases.reduce((s, p) => s + p.exercises.length, 0);
 
+  /* ─── ACTIVE SESSION MODE ─── */
+  if (session.isActive) {
+    return (
+      <div style={{ paddingBottom: 40 }}>
+        {/* Session bar (timer + volume + finish) */}
+        <SessionBar
+          elapsed={session.elapsedSeconds}
+          totalVolume={session.totalVolume}
+          onFinish={() => setConfirmFinish(true)}
+          onDiscard={() => setConfirmDiscard(true)}
+          formatTime={session.formatTime}
+        />
+
+        {/* Header */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{
+            fontSize: 10, fontWeight: 600, letterSpacing: '1.5px',
+            color: C.textMuted, textTransform: 'uppercase', marginBottom: 4,
+          }}>{dayName}</div>
+          <h2 style={{ fontSize: 18, fontWeight: 500, color: C.text, marginBottom: 4 }}>
+            {workout.name}
+          </h2>
+          <div style={{ fontSize: 12, color: C.textSec }}>
+            {session.totalSets} sets &middot; {formatVolume(session.totalVolume)} kg &middot; {session.exercisesDone} exercises
+          </div>
+        </div>
+
+        {/* Phases */}
+        {workout.phases.map((phase, i) => {
+          if (isStrengthPhase(phase)) {
+            // Main workout — show set logging cards
+            return (
+              <div key={phase.phase || i}>
+                <div style={{
+                  fontSize: 10, fontWeight: 600, letterSpacing: '1.5px',
+                  color: phase.color, textTransform: 'uppercase',
+                  padding: '8px 0 4px',
+                }}>
+                  {phase.label}
+                </div>
+                {phase.exercises.map(ex => {
+                  const exSets = session.exerciseSets[ex.id]?.sets || [];
+                  return (
+                    <ExerciseSessionCard
+                      key={ex.id}
+                      exercise={ex}
+                      sets={exSets}
+                      onLogSet={handleLogSet}
+                      nextSetRef={nextSetRef}
+                    />
+                  );
+                })}
+              </div>
+            );
+          } else {
+            // Non-strength phase — show as checkbox
+            return (
+              <PhaseCheckbox
+                key={phase.phase || i}
+                phase={phase}
+                checked={!!completedPhases[phase.phase]}
+                onToggle={() => setCompletedPhases(prev => ({
+                  ...prev, [phase.phase]: !prev[phase.phase],
+                }))}
+              />
+            );
+          }
+        })}
+
+        {/* Finish Workout button (sticky at bottom) */}
+        <div style={{
+          position: 'sticky', bottom: 70, zIndex: 15, paddingTop: 12,
+        }}>
+          <button onClick={() => setConfirmFinish(true)} style={{
+            width: '100%', padding: '16px', borderRadius: 12,
+            background: 'rgba(29,158,117,0.15)', border: '1px solid rgba(29,158,117,0.25)',
+            color: C.green, fontSize: 16, fontWeight: 600, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            backdropFilter: 'blur(8px)',
+          }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            Finish Workout
+          </button>
+        </div>
+
+        {/* Confirm finish dialog */}
+        {confirmFinish && (
+          <ConfirmDialog
+            title="Finish this workout?"
+            message="Your session will be saved with all logged sets."
+            confirmLabel="Finish"
+            onConfirm={handleFinish}
+            onCancel={() => setConfirmFinish(false)}
+          />
+        )}
+
+        {/* Confirm discard dialog */}
+        {confirmDiscard && (
+          <ConfirmDialog
+            title="Discard this workout?"
+            message="All logged sets will be lost. This cannot be undone."
+            confirmLabel="Discard"
+            confirmColor="rgba(239,68,68,0.3)"
+            onConfirm={handleDiscard}
+            onCancel={() => setConfirmDiscard(false)}
+          />
+        )}
+
+        {/* Summary card */}
+        {summaryData && (
+          <SummaryCard
+            data={summaryData}
+            onDone={() => {
+              setSummaryData(null);
+              // Reset all session state is already handled by completeSession
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  /* ─── VIEW MODE (no active session) ─── */
   return (
     <div>
+      {/* Resume banner */}
+      {session.resumeData && (
+        <ResumeBanner
+          session={session.resumeData.session}
+          onResume={session.resumeSession}
+          onDiscard={handleDiscardResume}
+        />
+      )}
+
       {/* Header */}
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
@@ -405,44 +1109,34 @@ function TodayView({ onLogout }) {
         />
       ))}
 
-      {/* Start / Complete Session */}
-      <div style={{ marginTop: 12 }}>
-        {!session && (
-          <button onClick={startSession} style={{
-            width: '100%', padding: '14px', borderRadius: 10,
-            background: 'rgba(255,255,255,0.08)',
-            border: '0.5px solid rgba(255,255,255,0.15)',
-            color: '#fff', fontSize: 15, fontWeight: 500, cursor: 'pointer',
-            transition: 'background 0.2s, transform 0.1s',
-          }}>
-            Start session
-          </button>
-        )}
-        {session && !session.completed_at && (
-          <button onClick={completeSession} style={{
-            width: '100%', padding: '14px', borderRadius: 10,
-            background: 'rgba(255,255,255,0.08)',
-            border: '0.5px solid rgba(255,255,255,0.15)',
-            color: '#fff', fontSize: 15, fontWeight: 500, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-          }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            Complete session
-          </button>
-        )}
-        {session?.completed_at && (
-          <div style={{
-            textAlign: 'center', padding: 14, borderRadius: 10,
-            background: 'rgba(29,158,117,0.1)',
-            border: '0.5px solid rgba(29,158,117,0.2)',
-            color: '#1D9E75', fontSize: 14, fontWeight: 500,
-          }}>
-            Session complete
-          </div>
-        )}
+      {/* Start Workout (sticky at bottom) */}
+      <div style={{
+        position: 'sticky', bottom: 70, zIndex: 15, paddingTop: 12,
+      }}>
+        <button
+          onClick={handleStart}
+          disabled={startDisabled}
+          style={{
+            width: '100%', padding: '16px', borderRadius: 12,
+            background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+            color: '#fff', fontSize: 16, fontWeight: 600, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            backdropFilter: 'blur(8px)',
+            opacity: startDisabled ? 0.5 : 1,
+            transition: 'all 0.2s',
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5,3 19,12 5,21" />
+          </svg>
+          Start Workout
+        </button>
       </div>
+
+      {/* Summary card (shows after completing via summary) */}
+      {summaryData && (
+        <SummaryCard data={summaryData} onDone={() => setSummaryData(null)} />
+      )}
     </div>
   );
 }
