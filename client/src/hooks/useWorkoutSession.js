@@ -28,6 +28,10 @@ export function useWorkoutSession() {
   const timerRef = useRef(null);
   const loadingRef = useRef(false); // ref-based guard to prevent stale-closure double-taps
   const pendingSets = useRef(new Set()); // per-set concurrency guard
+  const sessionIdRef = useRef(null); // avoids stale-closure reads of sessionId
+
+  // Keep sessionIdRef in sync with state
+  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
 
   // Timer: calculate from startedAt, not from ticks
   useEffect(() => {
@@ -168,12 +172,13 @@ export function useWorkoutSession() {
 
   // Log a single set
   const logSet = useCallback(async (exerciseId, setData) => {
-    if (!sessionId) return null;
+    const sid = sessionIdRef.current;
+    if (!sid) return null;
     const key = `${exerciseId}-${setData.set_number}`;
     if (pendingSets.current.has(key)) return null;
     pendingSets.current.add(key);
     try {
-      const data = await api.put(`/session/${sessionId}/log-set`, {
+      const data = await api.put(`/session/${sid}/log-set`, {
         exercise_id: exerciseId,
         set_number: setData.set_number,
         weight: setData.weight,
@@ -218,15 +223,16 @@ export function useWorkoutSession() {
     } finally {
       pendingSets.current.delete(key);
     }
-  }, [sessionId]);
+  }, []);
 
   // Complete the session
   const completeSession = useCallback(async () => {
-    if (!sessionId || loadingRef.current) return null;
+    const sid = sessionIdRef.current;
+    if (!sid || loadingRef.current) return null;
     loadingRef.current = true;
     setIsLoading(true);
     try {
-      const data = await api.put(`/session/${sessionId}/complete`);
+      const data = await api.put(`/session/${sid}/complete`);
       setSessionId(null);
       setWorkoutId(null);
       setIsActive(false);
@@ -245,13 +251,14 @@ export function useWorkoutSession() {
       loadingRef.current = false;
       setIsLoading(false);
     }
-  }, [sessionId]);
+  }, []);
 
   // Discard active session
   const discardSession = useCallback(async () => {
-    if (!sessionId) return;
+    const sid = sessionIdRef.current;
+    if (!sid) return;
     try {
-      await api.delete(`/session/${sessionId}`);
+      await api.delete(`/session/${sid}`);
     } catch (err) {
       console.error('Failed to discard session:', err);
     }
@@ -265,7 +272,7 @@ export function useWorkoutSession() {
     setTotalVolume(0);
     setExercisesDone(0);
     clearStorage();
-  }, [sessionId]);
+  }, []);
 
   // Format elapsed time
   const formatTime = useCallback((secs) => {
