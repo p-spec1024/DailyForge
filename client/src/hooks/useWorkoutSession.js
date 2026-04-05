@@ -26,6 +26,8 @@ export function useWorkoutSession() {
   const [isLoading, setIsLoading] = useState(false);
   const [resumeData, setResumeData] = useState(null); // set when an unfinished session is found
   const timerRef = useRef(null);
+  const loadingRef = useRef(false); // ref-based guard to prevent stale-closure double-taps
+  const pendingSets = useRef(new Set()); // per-set concurrency guard
 
   // Timer: calculate from startedAt, not from ticks
   useEffect(() => {
@@ -136,7 +138,8 @@ export function useWorkoutSession() {
 
   // Start a new session
   const startSession = useCallback(async (wId, workoutIds) => {
-    if (isLoading) return null;
+    if (loadingRef.current) return null;
+    loadingRef.current = true;
     setIsLoading(true);
     try {
       const data = await api.post('/session/start', {
@@ -158,13 +161,17 @@ export function useWorkoutSession() {
       console.error('Failed to start session:', err);
       return null;
     } finally {
+      loadingRef.current = false;
       setIsLoading(false);
     }
-  }, [isLoading]);
+  }, []);
 
   // Log a single set
   const logSet = useCallback(async (exerciseId, setData) => {
     if (!sessionId) return null;
+    const key = `${exerciseId}-${setData.set_number}`;
+    if (pendingSets.current.has(key)) return null;
+    pendingSets.current.add(key);
     try {
       const data = await api.put(`/session/${sessionId}/log-set`, {
         exercise_id: exerciseId,
@@ -208,12 +215,15 @@ export function useWorkoutSession() {
     } catch (err) {
       console.error('Failed to log set:', err);
       return null;
+    } finally {
+      pendingSets.current.delete(key);
     }
   }, [sessionId]);
 
   // Complete the session
   const completeSession = useCallback(async () => {
-    if (!sessionId) return null;
+    if (!sessionId || loadingRef.current) return null;
+    loadingRef.current = true;
     setIsLoading(true);
     try {
       const data = await api.put(`/session/${sessionId}/complete`);
@@ -232,6 +242,7 @@ export function useWorkoutSession() {
       console.error('Failed to complete session:', err);
       return null;
     } finally {
+      loadingRef.current = false;
       setIsLoading(false);
     }
   }, [sessionId]);

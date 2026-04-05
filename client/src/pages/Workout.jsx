@@ -341,12 +341,11 @@ function SetRow({ setNum, setData, onComplete, onWeightChange, onRepsChange, onS
       {/* Checkmark button */}
       <button
         onClick={handleComplete}
-        disabled={isCompleted}
         style={{
           width: 40, height: 40, borderRadius: 8, border: 'none',
           background: isCompleted ? 'rgba(29,158,117,0.2)' : 'rgba(255,255,255,0.06)',
           color: isCompleted ? C.green : C.textMuted,
-          cursor: isCompleted ? 'default' : 'pointer',
+          cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           transition: 'all 0.2s',
         }}
@@ -544,7 +543,7 @@ function PhaseCheckbox({ phase, checked, onToggle }) {
 }
 
 /* ── Session Timer Bar ── */
-function SessionBar({ elapsed, totalVolume, onFinish, onDiscard, formatTime }) {
+function SessionBar({ elapsed, totalVolume, onFinish, onDiscard, formatTime, isFinishing }) {
   const [showMenu, setShowMenu] = useState(false);
 
   return (
@@ -602,12 +601,13 @@ function SessionBar({ elapsed, totalVolume, onFinish, onDiscard, formatTime }) {
           </div>
 
           {/* Finish button */}
-          <button onClick={onFinish} style={{
+          <button onClick={onFinish} disabled={isFinishing} style={{
             padding: '8px 16px', borderRadius: 8, border: 'none',
             background: 'rgba(29,158,117,0.2)', color: C.green,
-            fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            fontSize: 13, fontWeight: 600, cursor: isFinishing ? 'default' : 'pointer',
+            opacity: isFinishing ? 0.5 : 1, transition: 'opacity 0.2s',
           }}>
-            Finish
+            {isFinishing ? 'Finishing...' : 'Finish'}
           </button>
         </div>
       </div>
@@ -876,6 +876,7 @@ function TodayView({ onLogout }) {
   }
 
   async function handleFinish() {
+    if (session.isLoading) return;
     setConfirmFinish(false);
     const data = await session.completeSession();
     if (data) {
@@ -949,6 +950,7 @@ function TodayView({ onLogout }) {
           onFinish={() => setConfirmFinish(true)}
           onDiscard={() => setConfirmDiscard(true)}
           formatTime={session.formatTime}
+          isFinishing={session.isLoading}
         />
 
         {/* Header */}
@@ -1009,7 +1011,7 @@ function TodayView({ onLogout }) {
 
         {/* Finish Workout button (sticky at bottom) */}
         <div style={{
-          position: 'sticky', bottom: 70, zIndex: 15, paddingTop: 12,
+          position: 'sticky', bottom: 'calc(70px + env(safe-area-inset-bottom, 0px))', zIndex: 15, paddingTop: 12,
         }}>
           <button onClick={() => setConfirmFinish(true)} style={{
             width: '100%', padding: '16px', borderRadius: 12,
@@ -1117,7 +1119,7 @@ function TodayView({ onLogout }) {
 
       {/* Start Workout (sticky at bottom) */}
       <div style={{
-        position: 'sticky', bottom: 70, zIndex: 15, paddingTop: 12,
+        position: 'sticky', bottom: 'calc(70px + env(safe-area-inset-bottom, 0px))', zIndex: 15, paddingTop: 12,
       }}>
         <button
           onClick={handleStart}
@@ -1125,17 +1127,23 @@ function TodayView({ onLogout }) {
           style={{
             width: '100%', padding: '16px', borderRadius: 12,
             background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
-            color: '#fff', fontSize: 16, fontWeight: 600, cursor: 'pointer',
+            color: '#fff', fontSize: 16, fontWeight: 600, cursor: startDisabled ? 'default' : 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
             backdropFilter: 'blur(8px)',
             opacity: startDisabled ? 0.5 : 1,
             transition: 'all 0.2s',
           }}
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-            <polygon points="5,3 19,12 5,21" />
-          </svg>
-          Start Workout
+          {startDisabled ? (
+            <>Starting...</>
+          ) : (
+            <>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5,3 19,12 5,21" />
+              </svg>
+              Start Workout
+            </>
+          )}
         </button>
       </div>
 
