@@ -16,7 +16,9 @@
       "Bash(taskkill:*)",
       "Bash(npx vite:*)",
       "Bash(grep -A 15 \"-- Sessions table:\")",
-      "Bash(git commit -m ':*)"
+      "Bash(git commit -m ':*)",
+      "Bash(git checkout:*)",
+      "Bash(git merge:*)"
     ]
   }
 }
