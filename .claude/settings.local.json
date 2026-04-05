@@ -12,7 +12,11 @@
       "mcp__notebooklm-mcp__notebook_query",
       "Bash(node:*)",
       "Bash(git add:*)",
-      "Bash(git rebase:*)"
+      "Bash(git rebase:*)",
+      "Bash(taskkill:*)",
+      "Bash(npx vite:*)",
+      "Bash(grep -A 15 \"-- Sessions table:\")",
+      "Bash(git commit -m ':*)"
     ]
   }
 }
