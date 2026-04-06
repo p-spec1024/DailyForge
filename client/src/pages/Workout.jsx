@@ -224,7 +224,6 @@ function TodayView({ onLogout }) {
       if (restEnabled && restAutoStart && !isLastSetOfLastExercise(exerciseId, setData)) {
         setRestTimerKey(k => k + 1);
         restTimerActivatedAtRef.current = Date.now();
-        console.log('REST TIMER: activating');
         setIsRestTimerActive(true);
       }
       setTimeout(() => {
@@ -242,10 +241,8 @@ function TodayView({ onLogout }) {
     // the auto-focus scroll from immediately killing the timer
     const elapsed = Date.now() - (restTimerActivatedAtRef.current || 0);
     if (elapsed < 500) {
-      console.log(`REST TIMER: dismissing BLOCKED (${elapsed}ms since activation), reason=${reason}`);
       return;
     }
-    console.log(`REST TIMER: dismissing, reason=${reason}`);
     setIsRestTimerActive(false);
   }
 
