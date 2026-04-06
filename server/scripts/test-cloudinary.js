@@ -2,7 +2,6 @@ import 'dotenv/config';
 import { writeFileSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { createHash } from 'crypto';
 import cloudinary, { uploadToCloudinary } from '../src/lib/cloudinary.js';
 
 const TMP_PATH = join(tmpdir(), 'dailyforge-test.png');
@@ -80,18 +79,20 @@ async function main() {
   console.log('Creating test image...');
   const filePath = createTestPng();
 
-  console.log('Uploading to Cloudinary...');
-  const { url, public_id } = await uploadToCloudinary(filePath, 'dailyforge-test');
-  console.log('Upload successful!');
-  console.log('  URL:', url);
-  console.log('  Public ID:', public_id);
+  try {
+    console.log('Uploading to Cloudinary...');
+    const { url, public_id } = await uploadToCloudinary(filePath, 'dailyforge-test');
+    console.log('Upload successful!');
+    console.log('  URL:', url);
+    console.log('  Public ID:', public_id);
 
-  console.log('Cleaning up — deleting test upload from Cloudinary...');
-  await cloudinary.uploader.destroy(public_id);
-  console.log('Remote cleanup done.');
-
-  unlinkSync(filePath);
-  console.log('Local temp file removed.');
+    console.log('Cleaning up — deleting test upload from Cloudinary...');
+    await cloudinary.uploader.destroy(public_id);
+    console.log('Remote cleanup done.');
+  } finally {
+    try { unlinkSync(filePath); } catch {}
+    console.log('Local temp file removed.');
+  }
   console.log('Cloudinary connection verified!');
 }
 

@@ -105,6 +105,7 @@ ALTER TABLE exercises ADD COLUMN IF NOT EXISTS description TEXT;
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS url TEXT;
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS source VARCHAR(100);
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS difficulty VARCHAR(50);
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS media_url TEXT;
 
 -- Sessions table: add missing columns for full session tracking
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS date DATE DEFAULT CURRENT_DATE;
@@ -128,8 +129,6 @@ DO $$ BEGIN
       UNIQUE (session_id, exercise_id, set_number);
   END IF;
 END $$;
-
-ALTER TABLE exercises ADD COLUMN IF NOT EXISTS media_url TEXT;
 
 ALTER TABLE workout_slots ADD COLUMN IF NOT EXISTS phase VARCHAR(30) DEFAULT 'main';
 ALTER TABLE workout_slots DROP CONSTRAINT IF EXISTS workout_slots_day_of_week_key;
