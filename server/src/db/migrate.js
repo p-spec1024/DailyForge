@@ -83,6 +83,16 @@ CREATE TABLE IF NOT EXISTS habit_entries (
   value NUMERIC DEFAULT 0,
   UNIQUE (habit_id, entry_date)
 );
+
+CREATE TABLE IF NOT EXISTS user_settings (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) UNIQUE,
+  rest_timer_duration INTEGER DEFAULT 90,
+  rest_timer_enabled BOOLEAN DEFAULT true,
+  rest_timer_auto_start BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 `;
 
 const alterations = `
