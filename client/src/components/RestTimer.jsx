@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { MONO } from './workout/tokens.jsx';
 
 const TIMER_Z = 90;
@@ -84,7 +85,10 @@ export default function RestTimer({ duration = 90, isActive, onSkip, onFinish, o
   const color = getColor(fraction);
   const dashOffset = RING_CIRCUMFERENCE * (1 - fraction);
 
-  return (
+  // Portal to document.body to avoid ancestor stacking context issues
+  // (backdrop-filter on SessionHeader creates a new containing block,
+  //  which breaks position:fixed relative to viewport on iOS Safari)
+  return createPortal(
     <div style={{
       position: 'fixed',
       bottom: 'calc(70px + env(safe-area-inset-bottom, 0px) + 12px)',
@@ -191,6 +195,7 @@ export default function RestTimer({ duration = 90, isActive, onSkip, onFinish, o
           </button>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
