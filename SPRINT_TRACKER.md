@@ -1,5 +1,21 @@
 # DailyForge — Sprint Tracker
 
+## Sprint 2 — Week of Apr 6, 2026
+
+**Goal:** Infrastructure upgrade + core UX features
+
+| # | Ticket | Branch | Status | Started | Shipped | Notes |
+|---|---|---|---|---|---|---|
+| 1 | Neon DB Migration | db/neon-migration | ✅ Shipped | Apr 6 | Apr 6 | Migrated from Railway PG. Neon Singapore, SSL enabled. Cloudinary keys scaffolded. |
+| 2 | Cloudinary Setup | feature/cloudinary-setup | 📋 Not Started | — | — | |
+| 3 | Exercise Swap UI | feature/exercise-swap-ui | 📋 Not Started | — | — | |
+| 4 | Workout Completion Summary | feature/workout-completion | 📋 Not Started | — | — | |
+| 5 | PR Detection + Celebration | feature/pr-detection | 📋 Not Started | — | — | |
+
+**Progress: 1/5 tickets shipped**
+
+---
+
 ## Sprint 1 (Started: April 5, 2026)
 
 **Sprint 1 COMPLETE** — 5/5 tickets shipped.
