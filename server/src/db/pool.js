@@ -3,7 +3,7 @@ import { config } from '../config/env.js';
 
 export const pool = new pg.Pool({
   connectionString: config.databaseUrl,
-  ssl: config.databaseUrl.includes('neon.tech')
+  ssl: config.databaseUrl.includes('sslmode=require')
     ? { rejectUnauthorized: false }
     : false,
 });
