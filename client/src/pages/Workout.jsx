@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { api } from '../utils/api.js';
 import { useData } from '../contexts/DataProvider.jsx';
 import { useWorkoutSession } from '../hooks/useWorkoutSession.js';
-import { C, MONO, formatVolume, isStrengthPhase } from '../components/workout/tokens.jsx';
+import { C, formatVolume, isStrengthPhase } from '../components/workout/tokens.jsx';
 import SessionHeader from '../components/SessionHeader.jsx';
 import { PhaseCheckbox, PhaseSection, PhaseBar } from '../components/PhaseCard.jsx';
 import { ExerciseSessionCard } from '../components/ExerciseCard.jsx';
