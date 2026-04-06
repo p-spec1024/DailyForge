@@ -60,9 +60,12 @@ function TodayView({ onLogout }) {
   async function handleStart() {
     if (!workout || !workout.phases || startDisabled) return;
     setStartDisabled(true);
-    const workoutIds = workout.phases.map(p => p.workout_id).filter(Boolean);
-    await session.startSession(workoutIds[0], workoutIds);
-    setStartDisabled(false);
+    try {
+      const workoutIds = workout.phases.map(p => p.workout_id).filter(Boolean);
+      await session.startSession(workoutIds[0], workoutIds);
+    } finally {
+      setStartDisabled(false);
+    }
   }
 
   async function handleLogSet(exerciseId, setData) {
@@ -153,7 +156,6 @@ function TodayView({ onLogout }) {
           totalVolume={session.totalVolume}
           onFinish={() => setConfirmFinish(true)}
           onDiscard={() => setConfirmDiscard(true)}
-          onSettings={() => {}}
           formatTime={session.formatTime}
           isFinishing={session.isLoading}
         />
