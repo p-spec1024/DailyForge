@@ -84,6 +84,22 @@ CREATE TABLE IF NOT EXISTS habit_entries (
   UNIQUE (habit_id, entry_date)
 );
 
+CREATE TABLE IF NOT EXISTS slot_alternatives (
+  id SERIAL PRIMARY KEY,
+  exercise_id INT REFERENCES exercises(id) ON DELETE CASCADE,
+  alternative_exercise_id INT REFERENCES exercises(id) ON DELETE CASCADE,
+  UNIQUE (exercise_id, alternative_exercise_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_exercise_prefs (
+  id SERIAL PRIMARY KEY,
+  user_id INT REFERENCES users(id) ON DELETE CASCADE,
+  exercise_id INT REFERENCES exercises(id) ON DELETE CASCADE,
+  chosen_exercise_id INT REFERENCES exercises(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (user_id, exercise_id)
+);
+
 CREATE TABLE IF NOT EXISTS user_settings (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id) UNIQUE,
@@ -155,6 +171,9 @@ CREATE INDEX IF NOT EXISTS idx_exercises_workout_id ON exercises(workout_id);
 CREATE INDEX IF NOT EXISTS idx_workout_slots_day_phase ON workout_slots(day_of_week, phase);
 CREATE INDEX IF NOT EXISTS idx_user_slot_prefs_user_id ON user_slot_prefs(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_slot_prefs_slot_id ON user_slot_prefs(slot_id);
+CREATE INDEX IF NOT EXISTS idx_slot_alternatives_exercise ON slot_alternatives(exercise_id);
+CREATE INDEX IF NOT EXISTS idx_user_exercise_prefs_user ON user_exercise_prefs(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_exercise_prefs_exercise ON user_exercise_prefs(user_id, exercise_id);
 `;
 
 async function migrate() {
