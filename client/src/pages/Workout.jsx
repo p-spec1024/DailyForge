@@ -168,6 +168,7 @@ function TodayView({ onLogout }) {
   const [summaryData, setSummaryData] = useState(null);
   const [startDisabled, setStartDisabled] = useState(false);
   const [isRestTimerActive, setIsRestTimerActive] = useState(false);
+  const [restTimerKey, setRestTimerKey] = useState(0);
   const [userSettings, setUserSettings] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const nextSetRef = useRef(null);
@@ -220,6 +221,7 @@ function TodayView({ onLogout }) {
     if (result) {
       // Trigger rest timer if enabled and not the last set of the last exercise
       if (restEnabled && restAutoStart && !isLastSetOfLastExercise(exerciseId, setData)) {
+        setRestTimerKey(k => k + 1);
         setIsRestTimerActive(true);
       }
       setTimeout(() => {
@@ -392,6 +394,7 @@ function TodayView({ onLogout }) {
 
         {/* Rest Timer */}
         <RestTimer
+          key={restTimerKey}
           duration={restDuration}
           isActive={isRestTimerActive}
           onSkip={handleDismissTimer}
