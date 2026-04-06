@@ -49,7 +49,7 @@ export function PhaseCheckbox({ phase, checked, onToggle }) {
 }
 
 /* ── Phase Section (view mode) ── */
-export function PhaseSection({ phase, expandedId, onToggleExpand }) {
+export function PhaseSection({ phase, expandedId, onToggleExpand, onSwap, onReset }) {
   const [open, setOpen] = useState(true);
 
   return (
@@ -81,6 +81,8 @@ export function PhaseSection({ phase, expandedId, onToggleExpand }) {
               exercise={ex}
               isExpanded={expandedId === (ex.id || `${ex.name}-${i}`)}
               onToggle={() => onToggleExpand(ex.id || `${ex.name}-${i}`)}
+              onSwap={onSwap}
+              onReset={onReset}
             />
           ))}
         </div>

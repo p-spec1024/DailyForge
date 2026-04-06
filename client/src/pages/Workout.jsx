@@ -8,6 +8,8 @@ import { PhaseCheckbox, PhaseSection, PhaseBar } from '../components/PhaseCard.j
 import { ExerciseSessionCard } from '../components/ExerciseCard.jsx';
 import SessionSummary, { ConfirmDialog } from '../components/SessionSummary.jsx';
 import RestTimer from '../components/RestTimer.jsx';
+import AlternativePicker from '../components/AlternativePicker.jsx';
+import SavePreferencePrompt from '../components/SavePreferencePrompt.jsx';
 
 const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 
@@ -172,6 +174,9 @@ function TodayView({ onLogout }) {
   const [userSettings, setUserSettings] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [previousPerformance, setPreviousPerformance] = useState({});
+  const [swapPickerExercise, setSwapPickerExercise] = useState(null); // exercise to show picker for
+  const [swappedExercises, setSwappedExercises] = useState({}); // { originalExId: { chosen, originalExId } } — session-level swaps
+  const [savePromptData, setSavePromptData] = useState(null); // { exerciseName, originalExerciseId, chosenExerciseId }
   const nextSetRef = useRef(null);
   const restTimerActivatedAtRef = useRef(null);
 
@@ -233,13 +238,13 @@ function TodayView({ onLogout }) {
     const mainPhases = workout.phases.filter(isStrengthPhase);
     if (mainPhases.length === 0) return false;
     const lastMainPhase = mainPhases[mainPhases.length - 1];
-    const exercises = lastMainPhase.exercises;
+    const exercises = getPhaseExercises(lastMainPhase);
     if (exercises.length === 0) return false;
     const lastEx = exercises[exercises.length - 1];
     if (Number(lastEx.id) !== Number(exerciseId)) return false;
     const targetSets = Number(lastEx.default_sets) || 3;
     return Number(setData.set_number) >= targetSets;
-  }, [workout]);
+  }, [workout, swappedExercises]);
 
   async function handleLogSet(exerciseId, setData) {
     const result = await session.logSet(exerciseId, setData);
@@ -256,6 +261,22 @@ function TodayView({ onLogout }) {
           nextSetRef.current.focus();
         }
       }, 100);
+
+      // Check if this completes all sets of a session-swapped exercise → show save prompt
+      setTimeout(() => {
+        // Find if this exercise was swapped in this session
+        for (const [origId, swap] of Object.entries(swappedExercises)) {
+          if (swap.chosen.id === exerciseId && swap._swapped_in_session !== false) {
+            if (checkExerciseComplete(exerciseId)) {
+              setSavePromptData({
+                exerciseName: swap.chosen.name,
+                originalExerciseId: parseInt(origId),
+                chosenExerciseId: exerciseId,
+              });
+            }
+          }
+        }
+      }, 300);
     }
     return result;
   }
@@ -268,6 +289,84 @@ function TodayView({ onLogout }) {
       return;
     }
     setIsRestTimerActive(false);
+  }
+
+  // --- Exercise Swap Handlers ---
+  function handleOpenSwapPicker(exercise) {
+    // Use original_exercise_id if this exercise was already swapped via saved pref
+    setSwapPickerExercise(exercise);
+  }
+
+  function handleSwapSelect(alternative) {
+    if (!swapPickerExercise) return;
+    const originalId = swapPickerExercise.original_exercise_id || swapPickerExercise.id;
+    setSwappedExercises(prev => ({
+      ...prev,
+      [originalId]: {
+        chosen: alternative,
+        originalExId: originalId,
+        originalName: swapPickerExercise.original_exercise_name || swapPickerExercise.name,
+      },
+    }));
+    setSwapPickerExercise(null);
+  }
+
+  async function handleResetToDefault(originalExerciseId) {
+    try {
+      const token = localStorage.getItem('token');
+      await fetch(`/api/workout/slot/${originalExerciseId}/reset`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      // Remove from session swaps too
+      setSwappedExercises(prev => {
+        const next = { ...prev };
+        delete next[originalExerciseId];
+        return next;
+      });
+      // Refresh workout data to get defaults back
+      invalidateWorkout();
+      fetchWorkout();
+    } catch (err) {
+      console.error('Failed to reset preference:', err);
+    }
+  }
+
+  // Check if all sets for an exercise are complete (for save prompt trigger)
+  function checkExerciseComplete(exerciseId) {
+    const exSets = session.exerciseSets[exerciseId]?.sets || [];
+    if (exSets.length === 0) return false;
+    // Find the exercise to check default_sets
+    for (const phase of (workout?.phases || [])) {
+      const ex = getPhaseExercises(phase).find(e => e.id === exerciseId);
+      if (ex) {
+        const targetSets = ex.default_sets || 3;
+        const completedSets = exSets.filter(s => s.completed).length;
+        return completedSets >= targetSets;
+      }
+    }
+    return false;
+  }
+
+  // Helper: get exercises for a phase, with session-level swaps applied
+  function getPhaseExercises(phase) {
+    return phase.exercises.map(ex => {
+      const originalId = ex.original_exercise_id || ex.id;
+      const swap = swappedExercises[originalId];
+      if (swap) {
+        return {
+          ...swap.chosen,
+          exercise_type: swap.chosen.exercise_type || ex.exercise_type,
+          default_sets: swap.chosen.default_sets || ex.default_sets,
+          default_reps: swap.chosen.default_reps || ex.default_reps,
+          default_duration_secs: swap.chosen.default_duration_secs || ex.default_duration_secs,
+          original_exercise_id: originalId,
+          original_exercise_name: swap.originalName,
+          _swapped_in_session: true,
+        };
+      }
+      return ex;
+    });
   }
 
   async function handleFinish() {
@@ -369,6 +468,7 @@ function TodayView({ onLogout }) {
         {/* Phases */}
         {workout.phases.map((phase, i) => {
           if (isStrengthPhase(phase)) {
+            const exercises = getPhaseExercises(phase);
             return (
               <div key={phase.phase || i}>
                 <div style={{
@@ -378,7 +478,7 @@ function TodayView({ onLogout }) {
                 }}>
                   {phase.label}
                 </div>
-                {phase.exercises.map(ex => {
+                {exercises.map(ex => {
                   const exSets = session.exerciseSets[ex.id]?.sets || [];
                   return (
                     <ExerciseSessionCard
@@ -389,6 +489,7 @@ function TodayView({ onLogout }) {
                       onLogSet={handleLogSet}
                       onInputFocus={() => handleDismissTimer('inputFocus')}
                       nextSetRef={nextSetRef}
+                      onSwap={handleOpenSwapPicker}
                     />
                   );
                 })}
@@ -479,6 +580,27 @@ function TodayView({ onLogout }) {
             onDone={() => setSummaryData(null)}
           />
         )}
+
+        {/* Alternative Picker (active session mode — swap in UI only) */}
+        {swapPickerExercise && workout && (
+          <AlternativePicker
+            exerciseId={swapPickerExercise.original_exercise_id || swapPickerExercise.id}
+            workoutId={workout.phases.find(p => p.phase === 'main')?.workout_id || workout.phases[0]?.workout_id}
+            onSelect={handleSwapSelect}
+            onClose={() => setSwapPickerExercise(null)}
+          />
+        )}
+
+        {/* Save Preference Prompt (after completing swapped exercise) */}
+        {savePromptData && (
+          <SavePreferencePrompt
+            exerciseName={savePromptData.exerciseName}
+            originalExerciseId={savePromptData.originalExerciseId}
+            chosenExerciseId={savePromptData.chosenExerciseId}
+            onSave={() => setSavePromptData(null)}
+            onDismiss={() => setSavePromptData(null)}
+          />
+        )}
       </div>
     );
   }
@@ -532,6 +654,8 @@ function TodayView({ onLogout }) {
           phase={phase}
           expandedId={expandedId}
           onToggleExpand={toggleExpand}
+          onSwap={handleOpenSwapPicker}
+          onReset={handleResetToDefault}
         />
       ))}
 
@@ -568,6 +692,32 @@ function TodayView({ onLogout }) {
       {/* Summary card (shows after completing via summary) */}
       {summaryData && (
         <SessionSummary data={summaryData} onDone={() => setSummaryData(null)} />
+      )}
+
+      {/* Alternative Picker Bottom Sheet */}
+      {swapPickerExercise && workout && (
+        <AlternativePicker
+          exerciseId={swapPickerExercise.original_exercise_id || swapPickerExercise.id}
+          workoutId={workout.phases.find(p => p.phase === 'main')?.workout_id || workout.phases[0]?.workout_id}
+          onSelect={async (alt) => {
+            const originalId = swapPickerExercise.original_exercise_id || swapPickerExercise.id;
+            setSwapPickerExercise(null);
+            // In view mode, save preference immediately
+            try {
+              const token = localStorage.getItem('token');
+              await fetch(`/api/workout/slot/${originalId}/choose`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ chosen_exercise_id: alt.id }),
+              });
+              invalidateWorkout();
+              fetchWorkout();
+            } catch (err) {
+              console.error('Failed to save preference:', err);
+            }
+          }}
+          onClose={() => setSwapPickerExercise(null)}
+        />
       )}
     </div>
   );

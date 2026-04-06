@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { C, MONO, typeColor, formatExerciseDetail, youtubeSearchUrl, extractVideoId, YTIcon } from './workout/tokens.jsx';
 
 /* ── Exercise Detail Expanded View (view mode only) ── */
-function ExerciseDetail({ exercise }) {
+function ExerciseDetail({ exercise, onSwap, onReset }) {
   const muscles = exercise.target_muscles
     ? exercise.target_muscles.split(',').map(m => m.trim()).filter(Boolean)
     : [];
@@ -97,15 +97,7 @@ function ExerciseDetail({ exercise }) {
       </div>
       <button onClick={(e) => {
         e.stopPropagation();
-        const toast = document.createElement('div');
-        toast.textContent = 'Exercise alternatives coming soon';
-        Object.assign(toast.style, {
-          position: 'fixed', bottom: '100px', left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.8)',
-          padding: '8px 16px', borderRadius: '8px', fontSize: '12px', zIndex: '999',
-        });
-        document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 2000);
+        if (onSwap) onSwap(exercise);
       }} style={{
         width: '100%', padding: '10px', border: '1px dashed rgba(255,255,255,0.1)',
         borderRadius: 8, background: 'rgba(255,255,255,0.03)',
@@ -113,12 +105,25 @@ function ExerciseDetail({ exercise }) {
       }}>
         Swap exercise &rarr;
       </button>
+      {exercise.original_exercise_id && onReset && (
+        <button onClick={(e) => {
+          e.stopPropagation();
+          onReset(exercise.original_exercise_id);
+        }} style={{
+          width: '100%', padding: '6px', marginTop: 4, border: 'none',
+          background: 'transparent', color: C.textMuted, fontSize: 11,
+          cursor: 'pointer', textDecoration: 'underline',
+          textDecorationColor: 'rgba(255,255,255,0.15)',
+        }}>
+          Reset to default: {exercise.original_exercise_name}
+        </button>
+      )}
     </div>
   );
 }
 
 /* ── Exercise Row (view mode) ── */
-export default function ExerciseRow({ exercise, isExpanded, onToggle }) {
+export default function ExerciseRow({ exercise, isExpanded, onToggle, onSwap, onReset }) {
   const color = typeColor(exercise.exercise_type || exercise.type);
   const detail = formatExerciseDetail(exercise);
 
@@ -129,14 +134,23 @@ export default function ExerciseRow({ exercise, isExpanded, onToggle }) {
         padding: '10px 0', cursor: 'pointer',
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{exercise.name}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{exercise.name}</div>
+            {exercise.original_exercise_id && (
+              <span style={{
+                fontSize: 8, color: C.green, background: 'rgba(29,158,117,0.12)',
+                borderRadius: 4, padding: '1px 5px', fontWeight: 600,
+                letterSpacing: '0.5px', textTransform: 'uppercase',
+              }}>SWAPPED</span>
+            )}
+          </div>
           {detail && (
             <div style={{ fontSize: 11, color: C.textMuted, fontFamily: MONO, marginTop: 2 }}>{detail}</div>
           )}
         </div>
         <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
       </div>
-      {isExpanded && <ExerciseDetail exercise={exercise} />}
+      {isExpanded && <ExerciseDetail exercise={exercise} onSwap={onSwap} onReset={onReset} />}
     </div>
   );
 }
@@ -282,7 +296,7 @@ function SetRow({ setNum, setData, previousSet, onComplete, onWeightChange, onRe
 }
 
 /* ── Exercise Card (active session mode) ── */
-export function ExerciseSessionCard({ exercise, sets, previousData, onLogSet, onInputFocus, nextSetRef }) {
+export function ExerciseSessionCard({ exercise, sets, previousData, onLogSet, onInputFocus, nextSetRef, onSwap }) {
   const defaultSetCount = exercise.default_sets || 3;
   const [setCount, setSetCount] = useState(Math.max(defaultSetCount, sets.length));
   const [localSets, setLocalSets] = useState(() => {
@@ -347,9 +361,36 @@ export function ExerciseSessionCard({ exercise, sets, previousData, onLogSet, on
       marginBottom: 6, overflow: 'hidden',
     }}>
       <div style={{ padding: 12 }}>
-        {/* Exercise name + muscle tags */}
+        {/* Exercise name + muscle tags + swap */}
         <div style={{ marginBottom: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{exercise.name}</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ fontSize: 14, fontWeight: 500, color: C.text }}>{exercise.name}</div>
+              {exercise.original_exercise_id && (
+                <span style={{
+                  fontSize: 8, color: C.green, background: 'rgba(29,158,117,0.12)',
+                  borderRadius: 4, padding: '1px 5px', fontWeight: 600,
+                  letterSpacing: '0.5px', textTransform: 'uppercase',
+                }}>SWAPPED</span>
+              )}
+            </div>
+            {onSwap && (
+              <button onClick={() => onSwap(exercise)} style={{
+                padding: '4px 8px', borderRadius: 6, border: 'none',
+                background: 'rgba(255,255,255,0.06)', color: C.textMuted,
+                fontSize: 10, cursor: 'pointer',
+              }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <polyline points="16 3 21 3 21 8" />
+                  <line x1="4" y1="20" x2="21" y2="3" />
+                  <polyline points="21 16 21 21 16 21" />
+                  <line x1="15" y1="15" x2="21" y2="21" />
+                  <line x1="4" y1="4" x2="9" y2="9" />
+                </svg>
+              </button>
+            )}
+          </div>
           {muscles.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
               {muscles.map(m => (
