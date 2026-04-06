@@ -79,6 +79,7 @@ export default function RestTimer({ duration = 90, isActive, onSkip, onFinish, o
     }
   }, [finished, isActive, onFinish]);
 
+  console.log(`REST TIMER: rendering, isActive=${isActive}, visible=${visible}`);
   if (!visible) return null;
 
   const fraction = Math.max(0, Math.min(1, remaining / duration));

@@ -172,6 +172,7 @@ function TodayView({ onLogout }) {
   const [userSettings, setUserSettings] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const nextSetRef = useRef(null);
+  const restTimerActivatedAtRef = useRef(null);
 
   const session = useWorkoutSession();
 
@@ -222,6 +223,8 @@ function TodayView({ onLogout }) {
       // Trigger rest timer if enabled and not the last set of the last exercise
       if (restEnabled && restAutoStart && !isLastSetOfLastExercise(exerciseId, setData)) {
         setRestTimerKey(k => k + 1);
+        restTimerActivatedAtRef.current = Date.now();
+        console.log('REST TIMER: activating');
         setIsRestTimerActive(true);
       }
       setTimeout(() => {
@@ -234,7 +237,15 @@ function TodayView({ onLogout }) {
     return result;
   }
 
-  function handleDismissTimer() {
+  function handleDismissTimer(reason = 'unknown') {
+    // Ignore dismiss calls within 500ms of activation to prevent
+    // the auto-focus scroll from immediately killing the timer
+    const elapsed = Date.now() - (restTimerActivatedAtRef.current || 0);
+    if (elapsed < 500) {
+      console.log(`REST TIMER: dismissing BLOCKED (${elapsed}ms since activation), reason=${reason}`);
+      return;
+    }
+    console.log(`REST TIMER: dismissing, reason=${reason}`);
     setIsRestTimerActive(false);
   }
 
@@ -352,7 +363,7 @@ function TodayView({ onLogout }) {
                       exercise={ex}
                       sets={exSets}
                       onLogSet={handleLogSet}
-                      onInputFocus={handleDismissTimer}
+                      onInputFocus={() => handleDismissTimer('inputFocus')}
                       nextSetRef={nextSetRef}
                     />
                   );
@@ -397,9 +408,9 @@ function TodayView({ onLogout }) {
           key={restTimerKey}
           duration={restDuration}
           isActive={isRestTimerActive}
-          onSkip={handleDismissTimer}
-          onFinish={handleDismissTimer}
-          onDismiss={handleDismissTimer}
+          onSkip={() => handleDismissTimer('skip')}
+          onFinish={() => handleDismissTimer('finish')}
+          onDismiss={() => handleDismissTimer('dismiss')}
         />
 
         {/* Settings Modal */}
