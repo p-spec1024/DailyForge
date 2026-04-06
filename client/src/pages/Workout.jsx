@@ -2,8 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from '../utils/api.js';
 import { useData } from '../contexts/DataProvider.jsx';
 import { useWorkoutSession } from '../hooks/useWorkoutSession.js';
-import ExerciseLibrary from '../components/ExerciseLibrary.jsx';
-import { YOGA_LIBRARY, DUMBBELL_LIBRARY, BREATHWORK_LIBRARY, STRETCHING_LIBRARY } from '../data/exercise-library.js';
 
 /* ── Design tokens ── */
 const C = {
@@ -1155,49 +1153,11 @@ function TodayView({ onLogout }) {
   );
 }
 
-/* ── Sub-tab definitions ── */
-const TABS = [
-  { key: 'today', label: 'Today', color: '#D85A30' },
-  { key: 'yoga', label: 'Yoga', color: '#1D9E75' },
-  { key: 'dumbbell', label: 'Dumbbell', color: '#D85A30' },
-  { key: 'breathwork', label: 'Breathwork', color: '#a78bfa' },
-  { key: 'stretching', label: 'Stretching', color: '#5DCAA5' },
-];
-
-/* ── Main Component with Tabs ── */
+/* ── Main Component ── */
 export default function Workout({ onLogout }) {
-  const [activeTab, setActiveTab] = useState('today');
-
   return (
     <div style={{ maxWidth: 420, margin: '0 auto', padding: '20px 16px' }}>
-      {/* Sub-tab bar */}
-      <div style={{
-        display: 'flex', gap: 4, marginBottom: 16,
-        overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none',
-      }}>
-        {TABS.map(tab => {
-          const isActive = activeTab === tab.key;
-          return (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
-              padding: '7px 14px', borderRadius: 8, fontSize: 12, fontWeight: 500,
-              whiteSpace: 'nowrap', cursor: 'pointer',
-              background: isActive ? 'rgba(255,255,255,0.08)' : 'transparent',
-              border: isActive ? '0.5px solid rgba(255,255,255,0.15)' : '0.5px solid transparent',
-              color: isActive ? tab.color : C.textMuted,
-              transition: 'all 0.2s',
-            }}>
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Tab content */}
-      {activeTab === 'today' && <TodayView onLogout={onLogout} />}
-      {activeTab === 'yoga' && <ExerciseLibrary exercises={YOGA_LIBRARY} accentColor="#1D9E75" />}
-      {activeTab === 'dumbbell' && <ExerciseLibrary exercises={DUMBBELL_LIBRARY} accentColor="#D85A30" />}
-      {activeTab === 'breathwork' && <ExerciseLibrary exercises={BREATHWORK_LIBRARY} accentColor="#a78bfa" />}
-      {activeTab === 'stretching' && <ExerciseLibrary exercises={STRETCHING_LIBRARY} accentColor="#5DCAA5" />}
+      <TodayView onLogout={onLogout} />
     </div>
   );
 }
