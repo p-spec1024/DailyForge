@@ -152,7 +152,7 @@ const SET_TYPE_LABELS = {
 const SET_TYPES = ['normal', 'warmup', 'dropset', 'failure'];
 
 /* ── Set Row (active session mode) ── */
-function SetRow({ setNum, setData, onComplete, onWeightChange, onRepsChange, onSetTypeChange, onInputFocus, inputRef }) {
+function SetRow({ setNum, setData, previousSet, onComplete, onWeightChange, onRepsChange, onSetTypeChange, onInputFocus, inputRef }) {
   const [weight, setWeight] = useState(setData?.weight ?? '');
   const [reps, setReps] = useState(setData?.reps ?? '');
   const [showTypeMenu, setShowTypeMenu] = useState(false);
@@ -174,7 +174,7 @@ function SetRow({ setNum, setData, onComplete, onWeightChange, onRepsChange, onS
 
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: '36px 64px 1fr 1fr 40px',
+      display: 'grid', gridTemplateColumns: '36px 72px 1fr 1fr 40px',
       gap: 6, alignItems: 'center', padding: '6px 0',
       opacity: isWarmup && !isCompleted ? 0.5 : 1,
       background: isCompleted ? 'rgba(29,158,117,0.06)' : 'transparent',
@@ -214,9 +214,11 @@ function SetRow({ setNum, setData, onComplete, onWeightChange, onRepsChange, onS
         )}
       </div>
 
-      {/* Previous (dashes for now) */}
-      <div style={{ fontSize: 11, color: C.textHint, fontFamily: MONO, textAlign: 'center' }}>
-        — x —
+      {/* Previous performance */}
+      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: MONO, textAlign: 'center', whiteSpace: 'nowrap' }}>
+        {previousSet
+          ? `${previousSet.weight ?? 0}kg × ${previousSet.reps ?? 0}`
+          : '—'}
       </div>
 
       {/* Weight input */}
@@ -280,7 +282,7 @@ function SetRow({ setNum, setData, onComplete, onWeightChange, onRepsChange, onS
 }
 
 /* ── Exercise Card (active session mode) ── */
-export function ExerciseSessionCard({ exercise, sets, onLogSet, onInputFocus, nextSetRef }) {
+export function ExerciseSessionCard({ exercise, sets, previousData, onLogSet, onInputFocus, nextSetRef }) {
   const defaultSetCount = exercise.default_sets || 3;
   const [setCount, setSetCount] = useState(Math.max(defaultSetCount, sets.length));
   const [localSets, setLocalSets] = useState(() => {
@@ -362,7 +364,7 @@ export function ExerciseSessionCard({ exercise, sets, onLogSet, onInputFocus, ne
 
         {/* Column headers */}
         <div style={{
-          display: 'grid', gridTemplateColumns: '36px 64px 1fr 1fr 40px',
+          display: 'grid', gridTemplateColumns: '36px 72px 1fr 1fr 40px',
           gap: 6, padding: '4px 4px', marginBottom: 2,
         }}>
           {['SET', 'PREVIOUS', 'KG', 'REPS', ''].map((h, i) => (
@@ -379,6 +381,7 @@ export function ExerciseSessionCard({ exercise, sets, onLogSet, onInputFocus, ne
             key={setNum}
             setNum={setNum}
             setData={localSets[setNum]}
+            previousSet={previousData?.sets?.find(s => s.setNumber === setNum) || null}
             onComplete={(data) => handleComplete(setNum, data)}
             onWeightChange={(v) => setLocalSets(prev => ({
               ...prev, [setNum]: { ...prev[setNum], weight: v },
