@@ -204,17 +204,18 @@ function TodayView({ onLogout }) {
     }
   }
 
-  // Check if this is the last set of the last strength exercise
+  // Check if this is the last set of the last exercise in the main (strength) phase
   const isLastSetOfLastExercise = useCallback((exerciseId, setData) => {
     if (!workout?.phases) return false;
-    const strengthExercises = workout.phases
-      .filter(isStrengthPhase)
-      .flatMap(p => p.exercises);
-    if (strengthExercises.length === 0) return false;
-    const lastEx = strengthExercises[strengthExercises.length - 1];
-    if (lastEx.id !== exerciseId) return false;
-    const targetSets = lastEx.default_sets || 3;
-    return setData.set_number >= targetSets;
+    const mainPhases = workout.phases.filter(isStrengthPhase);
+    if (mainPhases.length === 0) return false;
+    const lastMainPhase = mainPhases[mainPhases.length - 1];
+    const exercises = lastMainPhase.exercises;
+    if (exercises.length === 0) return false;
+    const lastEx = exercises[exercises.length - 1];
+    if (Number(lastEx.id) !== Number(exerciseId)) return false;
+    const targetSets = Number(lastEx.default_sets) || 3;
+    return Number(setData.set_number) >= targetSets;
   }, [workout]);
 
   async function handleLogSet(exerciseId, setData) {
