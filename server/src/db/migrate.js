@@ -129,6 +129,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS media_url TEXT;
+
 ALTER TABLE workout_slots ADD COLUMN IF NOT EXISTS phase VARCHAR(30) DEFAULT 'main';
 ALTER TABLE workout_slots DROP CONSTRAINT IF EXISTS workout_slots_day_of_week_key;
 DO $$ BEGIN
