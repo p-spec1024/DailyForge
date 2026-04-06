@@ -8,11 +8,11 @@
 |---|---|---|---|---|---|---|
 | 1 | Neon DB Migration | db/neon-migration | ✅ Shipped | Apr 6 | Apr 6 | Migrated from Railway PG. Neon Singapore, SSL enabled. Cloudinary keys scaffolded. |
 | 2 | Cloudinary Setup | feature/cloudinary-setup | ✅ Shipped | Apr 7 | Apr 7 | SDK installed, upload utility created, media_url column added to exercises table. |
-| 3 | Exercise Swap UI | feature/exercise-swap-ui | 📋 Not Started | — | — | |
+| 3 | Exercise Swap UI | feature/exercise-swap-ui | ✅ Shipped | Apr 7 | Apr 7 | Alternative picker, save preference, reset to default. New tables: slot_alternatives, user_exercise_prefs. |
 | 4 | Workout Completion Summary | feature/workout-completion | 📋 Not Started | — | — | |
 | 5 | PR Detection + Celebration | feature/pr-detection | 📋 Not Started | — | — | |
 
-**Progress: 2/5 tickets shipped**
+**Progress: 3/5 tickets shipped**
 
 ---
 
