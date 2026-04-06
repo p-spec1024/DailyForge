@@ -266,4 +266,104 @@ router.delete('/:id', async (req, res, next) => {
   }
 });
 
+// GET /api/session/previous-performance — get last completed session data per exercise
+router.get('/previous-performance', async (req, res, next) => {
+  try {
+    const { exerciseIds } = req.query;
+    if (!exerciseIds) {
+      return res.status(400).json({ error: 'exerciseIds query parameter is required' });
+    }
+
+    const ids = exerciseIds.split(',').map(id => parseIntParam(id.trim())).filter(id => id !== null);
+    if (ids.length === 0) {
+      return res.json({ previousPerformance: {} });
+    }
+
+    // Find current active session to exclude it
+    const activeSession = await pool.query(
+      `SELECT id FROM sessions WHERE user_id = $1 AND completed = false ORDER BY started_at DESC LIMIT 1`,
+      [req.user.id]
+    );
+    const activeSessionId = activeSession.rows[0]?.id ?? -1;
+
+    // For each exercise, find the most recent completed session that included it,
+    // then return all sets from that session for that exercise
+    const previousPerformance = {};
+
+    // Build a single query using DISTINCT ON to get the most recent session per exercise
+    // Then fetch all sets from those sessions
+    const placeholders = ids.map((_, i) => `$${i + 3}`).join(',');
+    const latestSessions = await pool.query(
+      `SELECT DISTINCT ON (se.exercise_id)
+         se.exercise_id, s.id as session_id, s.date as session_date
+       FROM session_exercises se
+       JOIN sessions s ON se.session_id = s.id
+       WHERE s.user_id = $1
+         AND s.completed = true
+         AND s.id != $2
+         AND se.exercise_id IN (${placeholders})
+         AND se.set_number IS NOT NULL
+         AND se.completed = true
+       ORDER BY se.exercise_id, s.date DESC, s.id DESC`,
+      [req.user.id, activeSessionId, ...ids]
+    );
+
+    if (latestSessions.rows.length > 0) {
+      // Build map of exercise_id -> { session_id, session_date }
+      const sessionMap = {};
+      for (const row of latestSessions.rows) {
+        sessionMap[row.exercise_id] = { sessionId: row.session_id, sessionDate: row.session_date };
+      }
+
+      // Fetch all sets from those sessions for those exercises in one query
+      const exIds = latestSessions.rows.map(r => r.exercise_id);
+      const sessIds = latestSessions.rows.map(r => r.session_id);
+
+      const exPlaceholders = exIds.map((_, i) => `$${i + 1}`).join(',');
+      const sessPlaceholders = sessIds.map((_, i) => `$${i + exIds.length + 1}`).join(',');
+
+      const setsResult = await pool.query(
+        `SELECT se.exercise_id, se.set_number, se.weight, se.reps_completed as reps, se.rpe
+         FROM session_exercises se
+         WHERE se.exercise_id IN (${exPlaceholders})
+           AND se.session_id IN (${sessPlaceholders})
+           AND se.set_number IS NOT NULL
+           AND se.completed = true
+         ORDER BY se.exercise_id, se.set_number`,
+        [...exIds, ...sessIds]
+      );
+
+      // Group sets by exercise, only keeping sets from the correct session
+      for (const row of setsResult.rows) {
+        const info = sessionMap[row.exercise_id];
+        if (!info) continue;
+
+        if (!previousPerformance[row.exercise_id]) {
+          previousPerformance[row.exercise_id] = {
+            sessionDate: info.sessionDate,
+            sets: [],
+          };
+        }
+        previousPerformance[row.exercise_id].sets.push({
+          setNumber: row.set_number,
+          weight: row.weight != null ? parseFloat(row.weight) : null,
+          reps: row.reps != null ? parseInt(row.reps) : null,
+          rpe: row.rpe != null ? parseFloat(row.rpe) : null,
+        });
+      }
+    }
+
+    // Fill in nulls for exercises with no previous data
+    for (const id of ids) {
+      if (!previousPerformance[id]) {
+        previousPerformance[id] = null;
+      }
+    }
+
+    res.json({ previousPerformance });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
