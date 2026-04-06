@@ -171,6 +171,7 @@ function TodayView({ onLogout }) {
   const [restTimerKey, setRestTimerKey] = useState(0);
   const [userSettings, setUserSettings] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [previousPerformance, setPreviousPerformance] = useState({});
   const nextSetRef = useRef(null);
   const restTimerActivatedAtRef = useRef(null);
 
@@ -192,6 +193,28 @@ function TodayView({ onLogout }) {
   useEffect(() => {
     api.get('/settings').then(setUserSettings).catch(() => {});
   }, []);
+
+  // Fetch previous performance data for all exercises in the workout
+  const fetchPreviousPerformance = useCallback(async () => {
+    if (!workout?.phases) return;
+    const exerciseIds = workout.phases
+      .filter(isStrengthPhase)
+      .flatMap(p => p.exercises.map(ex => ex.id));
+    if (exerciseIds.length === 0) return;
+    try {
+      const data = await api.get(`/session/previous-performance?exerciseIds=${exerciseIds.join(',')}`);
+      setPreviousPerformance(data.previousPerformance || {});
+    } catch {
+      setPreviousPerformance({});
+    }
+  }, [workout]);
+
+  // Fetch previous performance when session becomes active
+  useEffect(() => {
+    if (session.isActive && workout?.phases) {
+      fetchPreviousPerformance();
+    }
+  }, [session.isActive, fetchPreviousPerformance]);
 
   async function handleStart() {
     if (!workout || !workout.phases || startDisabled) return;
@@ -360,6 +383,7 @@ function TodayView({ onLogout }) {
                       key={ex.id}
                       exercise={ex}
                       sets={exSets}
+                      previousData={previousPerformance[ex.id] || null}
                       onLogSet={handleLogSet}
                       onInputFocus={() => handleDismissTimer('inputFocus')}
                       nextSetRef={nextSetRef}
