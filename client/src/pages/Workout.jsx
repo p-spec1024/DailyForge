@@ -275,6 +275,7 @@ function TodayView({ onLogout }) {
     setConfirmFinish(false);
     const data = await session.completeSession();
     if (data) {
+      setPreviousPerformance({});
       setSummaryData(data);
       invalidateWorkout();
     }
@@ -282,6 +283,7 @@ function TodayView({ onLogout }) {
 
   async function handleDiscard() {
     setConfirmDiscard(false);
+    setPreviousPerformance({});
     await session.discardSession();
   }
 

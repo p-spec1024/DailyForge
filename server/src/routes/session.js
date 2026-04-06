@@ -278,6 +278,9 @@ router.get('/previous-performance', async (req, res, next) => {
     if (ids.length === 0) {
       return res.json({ previousPerformance: {} });
     }
+    if (ids.length > 50) {
+      return res.status(400).json({ error: 'Maximum 50 exercise IDs allowed' });
+    }
 
     // Find current active session to exclude it
     const activeSession = await pool.query(
@@ -323,7 +326,7 @@ router.get('/previous-performance', async (req, res, next) => {
       const sessPlaceholders = sessIds.map((_, i) => `$${i + exIds.length + 1}`).join(',');
 
       const setsResult = await pool.query(
-        `SELECT se.exercise_id, se.set_number, se.weight, se.reps_completed as reps, se.rpe
+        `SELECT se.exercise_id, se.session_id, se.set_number, se.weight, se.reps_completed as reps, se.rpe
          FROM session_exercises se
          WHERE se.exercise_id IN (${exPlaceholders})
            AND se.session_id IN (${sessPlaceholders})
@@ -336,7 +339,7 @@ router.get('/previous-performance', async (req, res, next) => {
       // Group sets by exercise, only keeping sets from the correct session
       for (const row of setsResult.rows) {
         const info = sessionMap[row.exercise_id];
-        if (!info) continue;
+        if (!info || row.session_id !== info.sessionId) continue;
 
         if (!previousPerformance[row.exercise_id]) {
           previousPerformance[row.exercise_id] = {
