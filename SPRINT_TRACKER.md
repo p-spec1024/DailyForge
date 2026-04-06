@@ -7,11 +7,13 @@
 | 1 | Remove Habit Tracking | Claude Code | Small | ✅ Done | Apr 5, 2026 |
 | 2 | Fix Tab Switching Performance | Claude Code | Small | ✅ Done | Apr 5, 2026 |
 | 3 | Workout Session Logging | Claude Code | Large | ✅ Done | Apr 5, 2026 |
-| 4 | Rest Timer Between Sets | Claude Code | Medium | ⬜ Next | |
+| 4 | Rest Timer Between Sets | Claude Code | Medium | 🧪 Testing | Apr 6, 2026 |
 | 4A | Codebase Cleanup | Claude Code | Medium | ✅ Shipped | Apr 6, 2026 |
 | 5 | Previous Performance Display | Claude Code | Medium | ⬜ Waiting on #3 | |
 
 ---
+
+**Ticket 4 Notes:** Built, ready for iPhone testing
 
 ## Deferred from Reviews (fix in future refactor ticket)
 
