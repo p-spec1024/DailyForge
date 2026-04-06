@@ -1,11 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useData } from '../contexts/DataProvider.jsx';
 import { useWorkoutSession } from '../hooks/useWorkoutSession.js';
-import { C, formatVolume, isStrengthPhase } from '../components/workout/tokens.jsx';
+import { api } from '../utils/api.js';
+import { C, formatVolume, isStrengthPhase, MONO } from '../components/workout/tokens.jsx';
 import SessionHeader from '../components/SessionHeader.jsx';
 import { PhaseCheckbox, PhaseSection, PhaseBar } from '../components/PhaseCard.jsx';
 import { ExerciseSessionCard } from '../components/ExerciseCard.jsx';
 import SessionSummary, { ConfirmDialog } from '../components/SessionSummary.jsx';
+import RestTimer from '../components/RestTimer.jsx';
 
 const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 
@@ -36,6 +38,126 @@ function ResumeBanner({ session, onResume, onDiscard }) {
   );
 }
 
+/* ── Rest Timer Settings Modal ── */
+const DURATION_OPTIONS = [30, 60, 90, 120, 180, 300];
+
+function SettingsModal({ settings, onClose, onSave }) {
+  const [duration, setDuration] = useState(settings?.rest_timer_duration ?? 90);
+  const [enabled, setEnabled] = useState(settings?.rest_timer_enabled ?? true);
+  const [autoStart, setAutoStart] = useState(settings?.rest_timer_auto_start ?? true);
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const updated = await api.put('/settings', {
+        rest_timer_duration: duration,
+        rest_timer_enabled: enabled,
+        rest_timer_auto_start: autoStart,
+      });
+      onSave(updated);
+    } catch {
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function Toggle({ value, onChange }) {
+    return (
+      <div
+        onClick={() => onChange(!value)}
+        style={{
+          width: 44, height: 24, borderRadius: 12, cursor: 'pointer',
+          background: value ? 'rgba(29,158,117,0.4)' : 'rgba(255,255,255,0.1)',
+          position: 'relative', transition: 'background 0.2s', flexShrink: 0,
+        }}
+      >
+        <div style={{
+          width: 20, height: 20, borderRadius: 10,
+          background: value ? C.green : 'rgba(255,255,255,0.3)',
+          position: 'absolute', top: 2,
+          left: value ? 22 : 2,
+          transition: 'left 0.2s, background 0.2s',
+        }} />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 100,
+      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+    }}>
+      <div style={{
+        width: '100%', maxWidth: 340,
+        background: 'rgba(20,28,50,0.98)', border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: 14, padding: 24,
+      }}>
+        <div style={{ fontSize: 16, fontWeight: 600, color: C.text, marginBottom: 20 }}>
+          Rest Timer Settings
+        </div>
+
+        {/* Duration */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: C.textSec, marginBottom: 8 }}>Duration</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {DURATION_OPTIONS.map(d => (
+              <button key={d} onClick={() => setDuration(d)} style={{
+                padding: '8px 12px', borderRadius: 8, border: 'none',
+                background: d === duration ? 'rgba(29,158,117,0.2)' : 'rgba(255,255,255,0.06)',
+                color: d === duration ? C.green : C.textSec,
+                fontSize: 13, fontFamily: MONO, fontWeight: 500, cursor: 'pointer',
+              }}>
+                {d >= 60 ? `${d / 60}m` : `${d}s`}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Enabled */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 0', borderTop: '1px solid rgba(255,255,255,0.06)',
+        }}>
+          <div>
+            <div style={{ fontSize: 13, color: C.text }}>Rest timer</div>
+            <div style={{ fontSize: 11, color: C.textMuted }}>Show timer between sets</div>
+          </div>
+          <Toggle value={enabled} onChange={setEnabled} />
+        </div>
+
+        {/* Auto-start */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 0', borderTop: '1px solid rgba(255,255,255,0.06)',
+        }}>
+          <div>
+            <div style={{ fontSize: 13, color: C.text }}>Auto-start</div>
+            <div style={{ fontSize: 11, color: C.textMuted }}>Start timer after each set</div>
+          </div>
+          <Toggle value={autoStart} onChange={setAutoStart} />
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+          <button onClick={onClose} style={{
+            flex: 1, padding: '12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)',
+            background: 'transparent', color: C.textSec, fontSize: 14, cursor: 'pointer',
+          }}>Cancel</button>
+          <button onClick={handleSave} disabled={saving} style={{
+            flex: 1, padding: '12px', borderRadius: 8, border: 'none',
+            background: 'rgba(29,158,117,0.2)', color: C.green,
+            fontSize: 14, fontWeight: 600, cursor: saving ? 'default' : 'pointer',
+            opacity: saving ? 0.5 : 1,
+          }}>{saving ? 'Saving...' : 'Save'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Today's Workout View ── */
 function TodayView({ onLogout }) {
   const { workoutData: workout, workoutLoading: loading, fetchWorkout, invalidateWorkout } = useData();
@@ -45,9 +167,16 @@ function TodayView({ onLogout }) {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [summaryData, setSummaryData] = useState(null);
   const [startDisabled, setStartDisabled] = useState(false);
+  const [isRestTimerActive, setIsRestTimerActive] = useState(false);
+  const [userSettings, setUserSettings] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
   const nextSetRef = useRef(null);
 
   const session = useWorkoutSession();
+
+  const restDuration = userSettings?.rest_timer_duration ?? 90;
+  const restEnabled = userSettings?.rest_timer_enabled ?? true;
+  const restAutoStart = userSettings?.rest_timer_auto_start ?? true;
 
   useEffect(() => {
     fetchWorkout();
@@ -56,6 +185,11 @@ function TodayView({ onLogout }) {
   useEffect(() => {
     session.checkActiveSession();
   }, [session.checkActiveSession]);
+
+  // Fetch user settings for rest timer
+  useEffect(() => {
+    api.get('/settings').then(setUserSettings).catch(() => {});
+  }, []);
 
   async function handleStart() {
     if (!workout || !workout.phases || startDisabled) return;
@@ -68,9 +202,26 @@ function TodayView({ onLogout }) {
     }
   }
 
+  // Check if this is the last set of the last strength exercise
+  const isLastSetOfLastExercise = useCallback((exerciseId, setData) => {
+    if (!workout?.phases) return false;
+    const strengthExercises = workout.phases
+      .filter(isStrengthPhase)
+      .flatMap(p => p.exercises);
+    if (strengthExercises.length === 0) return false;
+    const lastEx = strengthExercises[strengthExercises.length - 1];
+    if (lastEx.id !== exerciseId) return false;
+    const targetSets = lastEx.default_sets || 3;
+    return setData.set_number >= targetSets;
+  }, [workout]);
+
   async function handleLogSet(exerciseId, setData) {
     const result = await session.logSet(exerciseId, setData);
     if (result) {
+      // Trigger rest timer if enabled and not the last set of the last exercise
+      if (restEnabled && restAutoStart && !isLastSetOfLastExercise(exerciseId, setData)) {
+        setIsRestTimerActive(true);
+      }
       setTimeout(() => {
         if (nextSetRef.current) {
           nextSetRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -79,6 +230,10 @@ function TodayView({ onLogout }) {
       }, 100);
     }
     return result;
+  }
+
+  function handleDismissTimer() {
+    setIsRestTimerActive(false);
   }
 
   async function handleFinish() {
@@ -156,6 +311,7 @@ function TodayView({ onLogout }) {
           totalVolume={session.totalVolume}
           onFinish={() => setConfirmFinish(true)}
           onDiscard={() => setConfirmDiscard(true)}
+          onSettings={() => setShowSettings(true)}
           formatTime={session.formatTime}
           isFinishing={session.isLoading}
         />
@@ -194,7 +350,7 @@ function TodayView({ onLogout }) {
                       exercise={ex}
                       sets={exSets}
                       onLogSet={handleLogSet}
-                      onInputFocus={() => {}}
+                      onInputFocus={handleDismissTimer}
                       nextSetRef={nextSetRef}
                     />
                   );
@@ -233,6 +389,27 @@ function TodayView({ onLogout }) {
             Finish Workout
           </button>
         </div>
+
+        {/* Rest Timer */}
+        <RestTimer
+          duration={restDuration}
+          isActive={isRestTimerActive}
+          onSkip={handleDismissTimer}
+          onFinish={handleDismissTimer}
+          onDismiss={handleDismissTimer}
+        />
+
+        {/* Settings Modal */}
+        {showSettings && (
+          <SettingsModal
+            settings={userSettings}
+            onClose={() => setShowSettings(false)}
+            onSave={(updated) => {
+              setUserSettings(updated);
+              setShowSettings(false);
+            }}
+          />
+        )}
 
         {/* Confirm finish dialog */}
         {confirmFinish && (
