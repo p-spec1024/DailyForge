@@ -174,6 +174,7 @@ CREATE INDEX IF NOT EXISTS idx_user_slot_prefs_slot_id ON user_slot_prefs(slot_i
 CREATE INDEX IF NOT EXISTS idx_slot_alternatives_exercise ON slot_alternatives(exercise_id);
 CREATE INDEX IF NOT EXISTS idx_user_exercise_prefs_user ON user_exercise_prefs(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_exercise_prefs_exercise ON user_exercise_prefs(user_id, exercise_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lib_exercises_name_source ON exercises (name, source) WHERE workout_id IS NULL;
 `;
 
 async function migrate() {

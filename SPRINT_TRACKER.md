@@ -1,5 +1,22 @@
 # DailyForge — Sprint Tracker
 
+## Sprint 3 — Week of Apr 7, 2026
+
+**Goal:** Data seeding + media infrastructure
+
+**Infrastructure Decision:** Neon (DB) + ImageKit (Media CDN) — replacing Cloudinary
+
+| # | Ticket | Branch | Status | Started | Shipped | Notes |
+|---|---|---|---|---|---|---|
+| 1 | ImageKit Setup | infra/imagekit-setup | ✅ Shipped | Apr 7 | Apr 7 | Replace Cloudinary SDK with ImageKit |
+| 2 | Strength Exercise Seeding | data/strength-exercises | 🔲 Ready | | | ExerciseDB + free-exercise-db (11K+) |
+| 3 | Yoga Pose Library Seeding | data/yoga-poses | 🔲 Ready | | | yoga-api + Yogism + HF (~280 poses) |
+| 4 | Breathwork Technique Seeding | data/breathwork-techniques | 🔲 Ready | | | 52 techniques with protocols |
+| 5 | Exercise Illustrations (Gemini) | content/exercise-illustrations | 🔲 Ready | | | Generate via Gemini MCP, upload to ImageKit |
+
+**Progress: 1/5 tickets shipped**
+
+
 ## Sprint 2 — Week of Apr 6, 2026
 
 **Goal:** Infrastructure upgrade + core UX features
