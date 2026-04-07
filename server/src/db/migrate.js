@@ -100,6 +100,20 @@ CREATE TABLE IF NOT EXISTS user_exercise_prefs (
   UNIQUE (user_id, exercise_id)
 );
 
+CREATE TABLE IF NOT EXISTS breathwork_techniques (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  tradition VARCHAR(50) NOT NULL CHECK (tradition IN ('pranayama', 'western', 'therapeutic', 'performance', 'advanced')),
+  purpose VARCHAR(50)[] NOT NULL,
+  difficulty VARCHAR(50) NOT NULL CHECK (difficulty IN ('beginner', 'intermediate', 'advanced')),
+  protocol_json JSONB NOT NULL,
+  safety_notes TEXT,
+  contraindications TEXT[],
+  description TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS user_settings (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id) UNIQUE,
@@ -175,6 +189,9 @@ CREATE INDEX IF NOT EXISTS idx_slot_alternatives_exercise ON slot_alternatives(e
 CREATE INDEX IF NOT EXISTS idx_user_exercise_prefs_user ON user_exercise_prefs(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_exercise_prefs_exercise ON user_exercise_prefs(user_id, exercise_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lib_exercises_name_source ON exercises (name, source) WHERE workout_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_breathwork_name ON breathwork_techniques (name);
+CREATE INDEX IF NOT EXISTS idx_breathwork_tradition ON breathwork_techniques (tradition);
+CREATE INDEX IF NOT EXISTS idx_breathwork_difficulty ON breathwork_techniques (difficulty);
 `;
 
 async function migrate() {
