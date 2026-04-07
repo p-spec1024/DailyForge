@@ -24,19 +24,30 @@ export default function SessionSummary({ data, onDone }) {
       position: 'fixed', inset: 0, zIndex: 100,
       background: '#0a1628',
       display: 'flex', flexDirection: 'column', alignItems: 'center',
-      overflowY: 'auto',
+      overflow: 'hidden',
     }}>
       <div style={{
-        width: '100%', maxWidth: 400, padding: '48px 20px 32px',
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        width: '100%', maxWidth: 400,
+        display: 'flex', flexDirection: 'column',
+        height: '100%',
       }}>
-        {/* Header */}
+        {/* Fixed header */}
         <div style={{
-          fontSize: 11, fontWeight: 700, letterSpacing: '2px',
-          color: C.green, textTransform: 'uppercase', marginBottom: 8,
-        }}>WORKOUT COMPLETE</div>
+          flexShrink: 0, padding: '48px 20px 0',
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+        }}>
+          <div style={{
+            fontSize: 11, fontWeight: 700, letterSpacing: '2px',
+            color: C.green, textTransform: 'uppercase', marginBottom: 8,
+          }}>WORKOUT COMPLETE</div>
+          <div style={{ fontSize: 32, marginBottom: 24 }}>&#127881;</div>
+        </div>
 
-        <div style={{ fontSize: 32, marginBottom: 24 }}>&#127881;</div>
+        {/* Scrollable middle section */}
+        <div style={{
+          flex: 1, overflowY: 'auto', padding: '0 20px',
+          minHeight: 0,
+        }}>
 
         {/* Stats grid */}
         <div style={{
@@ -144,14 +155,21 @@ export default function SessionSummary({ data, onDone }) {
           </div>
         )}
 
-        {/* Done button */}
-        <button onClick={onDone} style={{
-          width: '100%', padding: '16px', borderRadius: 12, border: 'none',
-          background: 'rgba(29,158,117,0.2)', color: C.green,
-          fontSize: 16, fontWeight: 600, cursor: 'pointer',
+        </div>{/* end scrollable middle */}
+
+        {/* Fixed footer — Done button above bottom nav */}
+        <div style={{
+          flexShrink: 0, padding: '16px 20px',
+          paddingBottom: 96,
         }}>
-          Done
-        </button>
+          <button onClick={onDone} style={{
+            width: '100%', padding: '16px', borderRadius: 12, border: 'none',
+            background: 'rgba(29,158,117,0.2)', color: C.green,
+            fontSize: 16, fontWeight: 600, cursor: 'pointer',
+          }}>
+            Done
+          </button>
+        </div>
       </div>
     </div>
   );
