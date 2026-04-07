@@ -102,17 +102,49 @@ CREATE TABLE IF NOT EXISTS user_exercise_prefs (
 
 CREATE TABLE IF NOT EXISTS breathwork_techniques (
   id SERIAL PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  tradition VARCHAR(50) NOT NULL CHECK (tradition IN ('pranayama', 'western', 'therapeutic', 'performance', 'advanced')),
-  purpose VARCHAR(50)[] NOT NULL,
-  difficulty VARCHAR(50) NOT NULL CHECK (difficulty IN ('beginner', 'intermediate', 'advanced')),
-  protocol_json JSONB NOT NULL,
-  safety_notes TEXT,
-  contraindications TEXT[],
+  name VARCHAR(100) NOT NULL,
+  sanskrit_name VARCHAR(100),
+  tradition VARCHAR(50) NOT NULL CHECK (tradition IN ('pranayama', 'western', 'therapeutic', 'goal_specific', 'advanced')),
+  category VARCHAR(50) NOT NULL CHECK (category IN ('energizing', 'calming', 'focus', 'sleep', 'performance', 'recovery', 'therapeutic')),
+  purposes TEXT[] NOT NULL,
+  difficulty VARCHAR(20) NOT NULL CHECK (difficulty IN ('beginner', 'intermediate', 'advanced')),
+  safety_level VARCHAR(10) NOT NULL DEFAULT 'green' CHECK (safety_level IN ('green', 'yellow', 'red')),
+  protocol JSONB NOT NULL,
   description TEXT NOT NULL,
+  instructions TEXT NOT NULL,
+  benefits TEXT[],
+  contraindications TEXT[],
+  caution_note TEXT,
+  source VARCHAR(100),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Evolve breathwork_techniques from v1 (52-technique) to v2 (48-technique with safety tiers)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='breathwork_techniques' AND column_name='sanskrit_name') THEN
+    ALTER TABLE breathwork_techniques
+      ADD COLUMN sanskrit_name VARCHAR(100),
+      ADD COLUMN category VARCHAR(50) NOT NULL DEFAULT 'calming',
+      ADD COLUMN safety_level VARCHAR(10) NOT NULL DEFAULT 'green',
+      ADD COLUMN instructions TEXT NOT NULL DEFAULT '',
+      ADD COLUMN benefits TEXT[],
+      ADD COLUMN caution_note TEXT,
+      ADD COLUMN source VARCHAR(100);
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='breathwork_techniques' AND column_name='purpose') THEN
+    ALTER TABLE breathwork_techniques RENAME COLUMN purpose TO purposes;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='breathwork_techniques' AND column_name='protocol_json') THEN
+    ALTER TABLE breathwork_techniques RENAME COLUMN protocol_json TO protocol;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='breathwork_techniques' AND column_name='safety_notes') THEN
+    ALTER TABLE breathwork_techniques DROP COLUMN safety_notes;
+  END IF;
+  ALTER TABLE breathwork_techniques DROP CONSTRAINT IF EXISTS breathwork_techniques_tradition_check;
+  ALTER TABLE breathwork_techniques ADD CONSTRAINT breathwork_techniques_tradition_check
+    CHECK (tradition IN ('pranayama', 'western', 'therapeutic', 'goal_specific', 'advanced'));
+END $$;
 
 CREATE TABLE IF NOT EXISTS user_settings (
   id SERIAL PRIMARY KEY,
@@ -192,6 +224,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_lib_exercises_name_source ON exercises (na
 CREATE UNIQUE INDEX IF NOT EXISTS idx_breathwork_name ON breathwork_techniques (name);
 CREATE INDEX IF NOT EXISTS idx_breathwork_tradition ON breathwork_techniques (tradition);
 CREATE INDEX IF NOT EXISTS idx_breathwork_difficulty ON breathwork_techniques (difficulty);
+CREATE INDEX IF NOT EXISTS idx_breathwork_safety ON breathwork_techniques (safety_level);
+CREATE INDEX IF NOT EXISTS idx_breathwork_category ON breathwork_techniques (category);
 `;
 
 async function migrate() {
