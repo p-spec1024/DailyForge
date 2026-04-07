@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { C, MONO, typeColor, formatExerciseDetail, youtubeSearchUrl, extractVideoId, YTIcon } from './workout/tokens.jsx';
+import { C, MONO, GOLD, typeColor, formatExerciseDetail, youtubeSearchUrl, extractVideoId, YTIcon } from './workout/tokens.jsx';
 
 /* ── Exercise Detail Expanded View (view mode only) ── */
 function ExerciseDetail({ exercise, onSwap, onReset }) {
@@ -180,19 +180,49 @@ const SET_TYPE_LABELS = {
 
 const SET_TYPES = ['normal', 'warmup', 'dropset', 'failure'];
 
+/* ── PR Badge (inline, mid-workout) ── */
+function PrBadgeInline({ prs }) {
+  if (!prs || prs.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', gridColumn: '1 / -1', padding: '2px 4px 4px' }}>
+      {prs.map(pr => (
+        <span key={pr.type} style={{
+          fontSize: 9, fontWeight: 700, letterSpacing: '0.5px',
+          padding: '2px 6px', borderRadius: 4,
+          background: 'rgba(255,215,0,0.15)', color: GOLD,
+          textTransform: 'uppercase',
+        }}>
+          {'\u{1F3C6}'} {pr.type} PR
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /* ── Set Row (active session mode) ── */
-function SetRow({ setNum, setData, previousSet, onComplete, onWeightChange, onRepsChange, onSetTypeChange, onInputFocus, inputRef }) {
+function SetRow({ setNum, setData, previousSet, prs, onComplete, onWeightChange, onRepsChange, onSetTypeChange, onInputFocus, inputRef }) {
   const [weight, setWeight] = useState(setData?.weight ?? '');
   const [reps, setReps] = useState(setData?.reps ?? '');
   const [showTypeMenu, setShowTypeMenu] = useState(false);
+  const [glowing, setGlowing] = useState(false);
   const isCompleted = setData?.completed || false;
   const setType = setData?.set_type || 'normal';
   const isWarmup = setType === 'warmup';
+  const hasPrs = prs && prs.length > 0;
 
   useEffect(() => {
     if (setData?.weight != null) setWeight(setData.weight);
     if (setData?.reps != null) setReps(setData.reps);
   }, [setData?.weight, setData?.reps]);
+
+  // Trigger glow animation when PRs appear
+  useEffect(() => {
+    if (hasPrs) {
+      setGlowing(true);
+      const timer = setTimeout(() => setGlowing(false), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [hasPrs]);
 
   function handleComplete() {
     const w = parseFloat(weight) || 0;
@@ -206,9 +236,10 @@ function SetRow({ setNum, setData, previousSet, onComplete, onWeightChange, onRe
       display: 'grid', gridTemplateColumns: '36px 72px 1fr 1fr 40px',
       gap: 6, alignItems: 'center', padding: '6px 0',
       opacity: isWarmup && !isCompleted ? 0.5 : 1,
-      background: isCompleted ? 'rgba(29,158,117,0.06)' : 'transparent',
+      background: hasPrs ? 'rgba(255,215,0,0.06)' : isCompleted ? 'rgba(29,158,117,0.06)' : 'transparent',
       borderRadius: 6, paddingLeft: 4, paddingRight: 4,
-      transition: 'background 0.2s',
+      transition: 'background 0.2s, box-shadow 0.3s',
+      boxShadow: glowing ? `0 0 12px rgba(255,215,0,0.4), 0 0 24px rgba(255,215,0,0.2)` : 'none',
     }}>
       {/* Set number with type selector */}
       <div style={{ position: 'relative' }}>
@@ -294,8 +325,8 @@ function SetRow({ setNum, setData, previousSet, onComplete, onWeightChange, onRe
         onClick={handleComplete}
         style={{
           width: 40, height: 40, borderRadius: 8, border: 'none',
-          background: isCompleted ? 'rgba(29,158,117,0.2)' : 'rgba(255,255,255,0.06)',
-          color: isCompleted ? C.green : C.textMuted,
+          background: hasPrs ? 'rgba(255,215,0,0.15)' : isCompleted ? 'rgba(29,158,117,0.2)' : 'rgba(255,255,255,0.06)',
+          color: hasPrs ? GOLD : isCompleted ? C.green : C.textMuted,
           cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           transition: 'all 0.2s',
@@ -306,13 +337,13 @@ function SetRow({ setNum, setData, previousSet, onComplete, onWeightChange, onRe
           <polyline points="20 6 9 17 4 12" />
         </svg>
       </button>
+      <PrBadgeInline prs={prs} />
     </div>
   );
 }
 
 /* ── Exercise Card (active session mode) ── */
-export function ExerciseSessionCard({ exercise, sets, previousData, onLogSet, onInputFocus, onSwap, onReset }) {
-  console.log('[ExerciseSessionCard]', exercise.name, { original_exercise_id: exercise.original_exercise_id, id: exercise.id, hasOnReset: !!onReset, shouldShowReset: !!(exercise.original_exercise_id && onReset) });
+export function ExerciseSessionCard({ exercise, sets, previousData, prData, onLogSet, onInputFocus, onSwap, onReset }) {
   const defaultSetCount = exercise.default_sets || 3;
   const [setCount, setSetCount] = useState(Math.max(defaultSetCount, sets.length));
   const [localSets, setLocalSets] = useState(() => {
@@ -447,6 +478,7 @@ export function ExerciseSessionCard({ exercise, sets, previousData, onLogSet, on
             setNum={setNum}
             setData={localSets[setNum]}
             previousSet={previousData?.sets?.find(s => s.setNumber === setNum) || null}
+            prs={prData?.[setNum] || null}
             onComplete={(data) => handleComplete(setNum, data)}
             onWeightChange={(v) => setLocalSets(prev => ({
               ...prev, [setNum]: { ...prev[setNum], weight: v },

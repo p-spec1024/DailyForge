@@ -1,9 +1,7 @@
-import { C, MONO, formatVolume } from './workout/tokens.jsx';
-
-const GOLD = '#f59e0b';
+import { C, MONO, GOLD, formatVolume } from './workout/tokens.jsx';
 
 function PrBadge({ type }) {
-  const label = type === 'weight' ? 'WEIGHT' : 'REPS';
+  const label = type === 'weight' ? 'WEIGHT' : type === 'volume' ? 'VOLUME' : 'REPS';
   return (
     <span style={{
       fontSize: 9, fontWeight: 700, letterSpacing: '0.5px',
@@ -90,7 +88,8 @@ export default function SessionSummary({ data, onDone }) {
               fontSize: 14, fontWeight: 700, color: GOLD,
               marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8,
             }}>
-              <span style={{ fontSize: 18 }}>&#127942;</span> PRs Hit!
+              <span style={{ fontSize: 18 }}>&#127942;</span>
+              {prs.length >= 3 ? `${prs.length} Personal Records!` : 'PRs Hit!'}
             </div>
             {prs.map((pr, i) => (
               <div key={`${pr.exercise_id}-${pr.pr_type}`} style={{
@@ -104,11 +103,11 @@ export default function SessionSummary({ data, onDone }) {
                   </div>
                   <div style={{ fontSize: 11, color: C.textSec, marginTop: 2 }}>
                     <span style={{ fontFamily: MONO, color: GOLD, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-                      {pr.new_value}{pr.unit === 'kg' ? ' kg' : ''}
+                      {pr.new_value}{pr.unit === 'kg' ? ' kg' : pr.unit === 'vol' ? ' vol' : ''}
                     </span>
-                    {' '}
+                    {' \u2192 '}
                     <span style={{ color: C.textMuted }}>
-                      (prev: {pr.previous_best}{pr.unit === 'kg' ? ' kg' : ''})
+                      was {pr.previous_best}{pr.unit === 'kg' ? ' kg' : pr.unit === 'vol' ? ' vol' : ''}
                     </span>
                   </div>
                 </div>

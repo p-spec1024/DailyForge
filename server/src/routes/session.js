@@ -141,16 +141,56 @@ router.put('/:id/log-set', async (req, res, next) => {
       [sessionId, exId, setNum, weightVal, repsVal, rpeVal, validatedSetType]
     );
 
-    // Calculate running totals
-    const totals = await pool.query(
-      `SELECT
-        COUNT(*) as total_sets,
-        COALESCE(SUM(weight * reps_completed), 0) as total_volume,
-        COUNT(DISTINCT exercise_id) as exercises_done
-       FROM session_exercises
-       WHERE session_id = $1 AND completed = true AND set_number IS NOT NULL`,
-      [sessionId]
-    );
+    // Calculate running totals and detect PRs in parallel
+    const currentWeight = weightVal;
+    const currentReps = repsVal;
+    const currentVolume = weightVal * repsVal;
+
+    const [totals, historicalBests] = await Promise.all([
+      pool.query(
+        `SELECT
+          COUNT(*) as total_sets,
+          COALESCE(SUM(weight * reps_completed), 0) as total_volume,
+          COUNT(DISTINCT exercise_id) as exercises_done
+         FROM session_exercises
+         WHERE session_id = $1 AND completed = true AND set_number IS NOT NULL`,
+        [sessionId]
+      ),
+      // Historical bests from completed past sessions only
+      pool.query(
+        `SELECT
+           MAX(se.weight) as best_weight,
+           MAX(se.weight * se.reps_completed) as best_volume,
+           MAX(se.reps_completed) FILTER (WHERE se.weight = $3) as best_reps_at_weight
+         FROM session_exercises se
+         JOIN sessions s ON s.id = se.session_id
+         WHERE s.user_id = $1 AND s.completed = true
+           AND se.exercise_id = $2
+           AND se.completed = true AND se.set_number IS NOT NULL
+           AND se.weight IS NOT NULL AND se.weight > 0`,
+        [req.user.id, exId, currentWeight]
+      ),
+    ]);
+
+    // Build PR list for this set
+    const prs = [];
+    const hist = historicalBests.rows[0];
+    const prevBestWeight = hist?.best_weight != null ? parseFloat(hist.best_weight) : null;
+    const prevBestVolume = hist?.best_volume != null ? parseFloat(hist.best_volume) : null;
+    const prevBestReps = hist?.best_reps_at_weight != null ? parseInt(hist.best_reps_at_weight) : null;
+
+    // Weight PR — only if there's previous history to beat
+    if (currentWeight > 0 && prevBestWeight !== null && prevBestWeight > 0 && currentWeight > prevBestWeight) {
+      prs.push({ type: 'weight', previous: `${prevBestWeight}kg`, new: `${currentWeight}kg` });
+    }
+    // Volume PR — weight × reps
+    if (currentVolume > 0 && prevBestVolume !== null && prevBestVolume > 0 && currentVolume > prevBestVolume) {
+      prs.push({ type: 'volume', previous: `${prevBestVolume}`, new: `${currentVolume}` });
+    }
+    // Reps PR — most reps at this exact weight
+    if (currentWeight > 0 && currentReps > 0 && prevBestReps !== null && prevBestReps > 0 && currentReps > prevBestReps) {
+      prs.push({ type: 'reps', previous: `${prevBestReps}`, new: `${currentReps}` });
+    }
 
     res.json({
       set: setResult.rows[0],
@@ -159,6 +199,7 @@ router.put('/:id/log-set', async (req, res, next) => {
         total_volume: parseFloat(totals.rows[0].total_volume),
         exercises_done: parseInt(totals.rows[0].exercises_done),
       },
+      prs,
     });
   } catch (err) {
     next(err);
@@ -211,11 +252,12 @@ router.put('/:id/complete', async (req, res, next) => {
          ORDER BY MIN(se.id)`,
         [sessionId]
       ),
-      // Current session bests per exercise (max weight and max reps)
+      // Current session bests per exercise (max weight, max reps, max volume)
       pool.query(
         `SELECT se.exercise_id, e.name,
            MAX(se.weight) as best_weight,
-           MAX(se.reps_completed) as best_reps
+           MAX(se.reps_completed) as best_reps,
+           MAX(se.weight * se.reps_completed) as best_volume
          FROM session_exercises se
          JOIN exercises e ON e.id = se.exercise_id
          WHERE se.session_id = $1 AND se.completed = true AND se.set_number IS NOT NULL
@@ -230,7 +272,8 @@ router.put('/:id/complete', async (req, res, next) => {
       pool.query(
         `SELECT se.exercise_id,
            MAX(se.weight) as prev_best_weight,
-           MAX(se.reps_completed) as prev_best_reps
+           MAX(se.reps_completed) as prev_best_reps,
+           MAX(se.weight * se.reps_completed) as prev_best_volume
          FROM session_exercises se
          JOIN sessions s ON s.id = se.session_id
          WHERE s.user_id = $1 AND se.session_id != $2
@@ -253,8 +296,10 @@ router.put('/:id/complete', async (req, res, next) => {
       const prev = prevMap[cur.exercise_id];
       const prevWeight = prev ? parseFloat(prev.prev_best_weight) : 0;
       const prevReps = prev ? parseInt(prev.prev_best_reps) : 0;
+      const prevVolume = prev ? parseFloat(prev.prev_best_volume) : 0;
       const curWeight = parseFloat(cur.best_weight);
       const curReps = parseInt(cur.best_reps);
+      const curVolume = parseFloat(cur.best_volume);
 
       if (curWeight > prevWeight && prevWeight > 0) {
         prs.push({
@@ -264,6 +309,16 @@ router.put('/:id/complete', async (req, res, next) => {
           new_value: curWeight,
           previous_best: prevWeight,
           unit: 'kg',
+        });
+      }
+      if (curVolume > prevVolume && prevVolume > 0) {
+        prs.push({
+          exercise_id: cur.exercise_id,
+          exercise_name: cur.name,
+          pr_type: 'volume',
+          new_value: curVolume,
+          previous_best: prevVolume,
+          unit: 'vol',
         });
       }
       if (curReps > prevReps && prevReps > 0) {

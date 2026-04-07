@@ -14,6 +14,8 @@ export const C = {
 
 export const MONO = "'SF Mono', 'Fira Code', monospace";
 
+export const GOLD = '#f59e0b';
+
 export function typeColor(type) {
   if (!type) return '#D85A30';
   const t = type.toLowerCase();

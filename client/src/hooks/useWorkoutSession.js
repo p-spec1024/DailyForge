@@ -25,6 +25,7 @@ export function useWorkoutSession() {
   const [exercisesDone, setExercisesDone] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [resumeData, setResumeData] = useState(null); // set when an unfinished session is found
+  const [sessionPrs, setSessionPrs] = useState({}); // { [exerciseId]: { [setNumber]: [{ type, previous, new }] } }
   const timerRef = useRef(null);
   const loadingRef = useRef(false); // ref-based guard to prevent stale-closure double-taps
   const pendingSets = useRef(new Set()); // per-set concurrency guard
@@ -160,6 +161,7 @@ export function useWorkoutSession() {
       setTotalSets(0);
       setTotalVolume(0);
       setExercisesDone(0);
+      setSessionPrs({});
       return session;
     } catch (err) {
       console.error('Failed to start session:', err);
@@ -216,6 +218,22 @@ export function useWorkoutSession() {
         setExercisesDone(data.session_totals.exercises_done);
       }
 
+      // Track PRs from this set (always update — clear stale PRs on re-log)
+      setSessionPrs(prev => {
+        const exPrs = { ...prev[exerciseId] };
+        if (data.prs && data.prs.length > 0) {
+          exPrs[setData.set_number] = data.prs;
+        } else {
+          delete exPrs[setData.set_number];
+        }
+        if (Object.keys(exPrs).length === 0) {
+          const next = { ...prev };
+          delete next[exerciseId];
+          return next;
+        }
+        return { ...prev, [exerciseId]: exPrs };
+      });
+
       return data;
     } catch (err) {
       console.error('Failed to log set:', err);
@@ -242,6 +260,7 @@ export function useWorkoutSession() {
       setTotalSets(0);
       setTotalVolume(0);
       setExercisesDone(0);
+      setSessionPrs({});
       clearStorage();
       return data;
     } catch (err) {
@@ -271,6 +290,7 @@ export function useWorkoutSession() {
     setTotalSets(0);
     setTotalVolume(0);
     setExercisesDone(0);
+    setSessionPrs({});
     clearStorage();
   }, []);
 
@@ -297,6 +317,7 @@ export function useWorkoutSession() {
     exercisesDone,
     isLoading,
     resumeData,
+    sessionPrs,
 
     // Actions
     checkActiveSession,

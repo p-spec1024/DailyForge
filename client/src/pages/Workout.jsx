@@ -297,6 +297,10 @@ function TodayView({ onLogout }) {
   async function handleLogSet(exerciseId, setData) {
     const result = await session.logSet(exerciseId, setData);
     if (result) {
+      // Haptic feedback on PR
+      if (result.prs && result.prs.length > 0 && navigator.vibrate) {
+        navigator.vibrate(100);
+      }
       // Trigger rest timer if enabled and not the last set of the last exercise
       if (restEnabled && restAutoStart && !isLastSetOfLastExercise(exerciseId, setData)) {
         const endTime = Date.now() + restDuration * 1000;
@@ -306,8 +310,6 @@ function TodayView({ onLogout }) {
         restTimerActivatedAtRef.current = Date.now();
         setIsRestTimerActive(true);
       }
-      // Don't auto-scroll or focus — on mobile this causes the page to jump
-      // and the keyboard to reopen unexpectedly
     }
     return result;
   }
@@ -512,6 +514,7 @@ function TodayView({ onLogout }) {
                       exercise={ex}
                       sets={exSets}
                       previousData={previousPerformance[ex.id] || null}
+                      prData={session.sessionPrs[ex.id] || null}
                       onLogSet={handleLogSet}
                       onInputFocus={handleDismissTimer}
                       onSwap={handleOpenSwapPicker}
