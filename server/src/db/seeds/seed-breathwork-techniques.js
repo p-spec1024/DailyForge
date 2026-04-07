@@ -2,8 +2,8 @@ import 'dotenv/config';
 import { pool } from '../pool.js';
 
 // ---------------------------------------------------------------------------
-// 48 Breathwork Techniques — verified, deduplicated, with safety tiers
-// Categories: pranayama (15), western (12), therapeutic (8),
+// 49 Breathwork Techniques — verified, deduplicated, with safety tiers
+// Categories: pranayama (15), western (13), therapeutic (8),
 //             goal_specific (8), advanced (5)
 // Sources: Hatha Yoga Pradipika, Stanford 2023, HRV biofeedback, NIH
 // ---------------------------------------------------------------------------
@@ -386,7 +386,7 @@ const techniques = [
   },
 
   // =========================================================================
-  // MODERN WESTERN METHODS (12)
+  // MODERN WESTERN METHODS (13)
   // =========================================================================
   {
     name: 'Box Breathing',
@@ -685,6 +685,32 @@ const techniques = [
     contraindications: [],
     caution_note: null,
     source: 'Variation of Box Breathing',
+  },
+  {
+    name: 'A52 Breath Method',
+    sanskrit_name: null,
+    tradition: 'western',
+    category: 'calming',
+    purposes: ['calming', 'HRV', 'stress_relief', 'balance'],
+    difficulty: 'beginner',
+    safety_level: 'green',
+    protocol: {
+      phases: [
+        { type: 'inhale', duration: 5 },
+        { type: 'exhale', duration: 5 },
+        { type: 'hold_out', duration: 2 },
+      ],
+      cycles: 10,
+      ratio: '5-0-5-2',
+      breaths_per_minute: 5,
+      notes: 'Slight pause after exhale activates parasympathetic response.',
+    },
+    description: 'A synthesized breathing method from 2025 research combining the most effective elements — slow nasal breathing at 5 breaths per minute with a brief post-exhale pause.',
+    instructions: 'Inhale through nose for 5 seconds. Exhale through nose for 5 seconds. Hold empty for 2 seconds. Repeat.',
+    benefits: ['Maximizes HRV', 'Reduces stress', 'Improves vagal tone', 'Evidence-based'],
+    contraindications: [],
+    caution_note: null,
+    source: '2025 Review (Little et al.) - Stress and Health Journal',
   },
 
   // =========================================================================
