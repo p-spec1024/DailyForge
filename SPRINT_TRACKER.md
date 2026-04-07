@@ -11,10 +11,10 @@
 | 1 | ImageKit Setup | infra/imagekit-setup | ✅ Shipped | Apr 7 | Apr 7 | Replace Cloudinary SDK with ImageKit |
 | 2 | Strength Exercise Seeding | data/strength-exercises | ✅ Shipped | Apr 7 | Apr 7 | 736 strength exercises seeded from free-exercise-db |
 | 3 | Yoga Pose Library Seeding | data/yoga-poses | ✅ Shipped | Apr 7 | Apr 7 | 265 yoga poses seeded from 4 sources (dailyforge, yoga-api, yogism, huggingface). Dedup by Sanskrit name, FK-safe cleanup, unique index added. |
-| 4 | Breathwork Technique Seeding | data/breathwork-techniques | 🔲 Ready | | | 52 techniques with protocols |
+| 4 | Breathwork Technique Seeding | data/breathwork-techniques | ✅ Shipped | Apr 7 | Apr 8 | 49 verified techniques (48 deduplicated + A52 from 2025 research). Safety tiers (green/yellow/red) + caution notes for advanced techniques. |
 | 5 | Exercise Illustrations (Gemini) | content/exercise-illustrations | 🔲 Ready | | | Generate via Gemini MCP, upload to ImageKit |
 
-**Progress: 3/5 tickets shipped**
+**Progress: 4/5 tickets shipped**
 
 
 ## Sprint 2 — Week of Apr 6, 2026
