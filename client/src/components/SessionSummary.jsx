@@ -17,14 +17,14 @@ function PrBadge({ type }) {
 /* ── Workout Summary Card ── */
 export default function SessionSummary({ data, onDone }) {
   if (!data) return null;
-  const { session, summary, prs = [] } = data;
+  const { summary, prs = [] } = data;
 
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 100,
       background: '#0a1628',
       display: 'flex', flexDirection: 'column', alignItems: 'center',
-      overflowY: 'auto', WebkitOverflowScrolling: 'touch',
+      overflowY: 'auto',
     }}>
       <div style={{
         width: '100%', maxWidth: 400, padding: '48px 20px 32px',
@@ -53,7 +53,6 @@ export default function SessionSummary({ data, onDone }) {
               background: 'rgba(255,255,255,0.05)',
               border: '1px solid rgba(255,255,255,0.1)',
               borderRadius: 12, padding: '14px 10px',
-              backdropFilter: 'blur(8px)',
               textAlign: 'center',
             }}>
               <div style={{

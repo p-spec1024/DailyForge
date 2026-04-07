@@ -223,7 +223,10 @@ router.put('/:id/complete', async (req, res, next) => {
          GROUP BY se.exercise_id, e.name`,
         [sessionId]
       ),
-      // Previous session bests per exercise (excluding current session)
+      // Previous session bests per exercise (excluding current session).
+      // Note: rep PRs compare global max reps, not per-weight. E.g. doing 8 reps
+      // at 60kg beats a previous best of 5 reps at 100kg. This is intentional —
+      // per-weight comparison gets noisy with fractional weight differences.
       pool.query(
         `SELECT se.exercise_id,
            MAX(se.weight) as prev_best_weight,
