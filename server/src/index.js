@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.js';
 import workoutRoutes from './routes/workout.js';
 import sessionRoutes from './routes/session.js';
 import settingsRoutes from './routes/settings.js';
+import mediaRoutes from './routes/media.js';
 
 const app = express();
 
@@ -20,6 +21,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/workout', workoutRoutes);
 app.use('/api/session', sessionRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/media', mediaRoutes);
 
 app.use(errorHandler);
 
