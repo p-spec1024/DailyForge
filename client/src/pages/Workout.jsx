@@ -15,14 +15,17 @@ const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRID
 
 /* ── Resume Banner ── */
 function ResumeBanner({ session, onResume, onDiscard }) {
-  const time = new Date(session.started_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const startDate = new Date(session.started_at);
+  const isToday = new Date().toDateString() === startDate.toDateString();
+  const time = startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const label = isToday ? time : `${startDate.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${time}`;
   return (
     <div style={{
       background: 'rgba(216,90,48,0.1)', border: '1px solid rgba(216,90,48,0.2)',
       borderRadius: 10, padding: 14, marginBottom: 12,
     }}>
       <div style={{ fontSize: 13, color: C.text, marginBottom: 8 }}>
-        You have an unfinished workout from {time}.
+        You have an unfinished workout from {label}.
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
         <button onClick={onResume} style={{
@@ -174,10 +177,11 @@ function TodayView({ onLogout }) {
   const [userSettings, setUserSettings] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [previousPerformance, setPreviousPerformance] = useState({});
+  const [restTimerEndTime, setRestTimerEndTime] = useState(null);
   const [swapPickerExercise, setSwapPickerExercise] = useState(null); // exercise to show picker for
   const [swappedExercises, setSwappedExercises] = useState({}); // { originalExId: { chosen, originalExId } } — session-level swaps
   const [savePromptData, setSavePromptData] = useState(null); // { exerciseName, originalExerciseId, chosenExerciseId }
-  const nextSetRef = useRef(null);
+  const [promptedExercises, setPromptedExercises] = useState(new Set());
   const restTimerActivatedAtRef = useRef(null);
 
   const session = useWorkoutSession();
@@ -198,6 +202,26 @@ function TodayView({ onLogout }) {
   useEffect(() => {
     api.get('/settings').then(setUserSettings).catch(() => {});
   }, []);
+
+  // Restore rest timer after tab switch
+  const restoredTimerRef = useRef(false);
+  useEffect(() => {
+    if (session.isActive && !restoredTimerRef.current) {
+      restoredTimerRef.current = true;
+      const saved = parseInt(sessionStorage.getItem('dailyforge_rest_timer_end'), 10);
+      if (saved && saved > Date.now()) {
+        setRestTimerEndTime(saved);
+        setRestTimerKey(k => k + 1);
+        restTimerActivatedAtRef.current = Date.now() - 1000;
+        setIsRestTimerActive(true);
+      } else {
+        sessionStorage.removeItem('dailyforge_rest_timer_end');
+      }
+    }
+    if (!session.isActive) {
+      restoredTimerRef.current = false;
+    }
+  }, [session.isActive]);
 
   // Fetch previous performance data for all exercises in the workout
   const fetchPreviousPerformance = useCallback(async () => {
@@ -232,6 +256,30 @@ function TodayView({ onLogout }) {
     }
   }
 
+  // Helper: get exercises for a phase, with session-level swaps applied
+  const getPhaseExercises = useCallback((phase) => {
+    return phase.exercises.map(ex => {
+      const originalId = ex.original_exercise_id || ex.id;
+      const swap = swappedExercises[originalId];
+      if (swap) {
+        return {
+          ...swap.chosen,
+          exercise_type: swap.chosen.exercise_type ?? ex.exercise_type,
+          default_sets: swap.chosen.default_sets ?? ex.default_sets,
+          default_reps: swap.chosen.default_reps ?? ex.default_reps,
+          default_duration_secs: swap.chosen.default_duration_secs ?? ex.default_duration_secs,
+          target_muscles: swap.chosen.target_muscles || ex.target_muscles,
+          default_exercise_id: ex.default_exercise_id ?? originalId,
+          default_exercise_name: ex.default_exercise_name ?? ex.name,
+          original_exercise_id: originalId,
+          original_exercise_name: swap.originalName,
+          _swapped_in_session: true,
+        };
+      }
+      return ex;
+    });
+  }, [swappedExercises]);
+
   // Check if this is the last set of the last exercise in the main (strength) phase
   const isLastSetOfLastExercise = useCallback((exerciseId, setData) => {
     if (!workout?.phases) return false;
@@ -244,51 +292,34 @@ function TodayView({ onLogout }) {
     if (Number(lastEx.id) !== Number(exerciseId)) return false;
     const targetSets = Number(lastEx.default_sets) || 3;
     return Number(setData.set_number) >= targetSets;
-  }, [workout, swappedExercises]);
+  }, [workout, getPhaseExercises]);
 
   async function handleLogSet(exerciseId, setData) {
     const result = await session.logSet(exerciseId, setData);
     if (result) {
       // Trigger rest timer if enabled and not the last set of the last exercise
       if (restEnabled && restAutoStart && !isLastSetOfLastExercise(exerciseId, setData)) {
+        const endTime = Date.now() + restDuration * 1000;
+        setRestTimerEndTime(endTime);
+        sessionStorage.setItem('dailyforge_rest_timer_end', String(endTime));
         setRestTimerKey(k => k + 1);
         restTimerActivatedAtRef.current = Date.now();
         setIsRestTimerActive(true);
       }
-      setTimeout(() => {
-        if (nextSetRef.current) {
-          nextSetRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          nextSetRef.current.focus();
-        }
-      }, 100);
-
-      // Check if this completes all sets of a session-swapped exercise → show save prompt
-      setTimeout(() => {
-        // Find if this exercise was swapped in this session
-        for (const [origId, swap] of Object.entries(swappedExercises)) {
-          if (swap.chosen.id === exerciseId && swap._swapped_in_session !== false) {
-            if (checkExerciseComplete(exerciseId)) {
-              setSavePromptData({
-                exerciseName: swap.chosen.name,
-                originalExerciseId: parseInt(origId),
-                chosenExerciseId: exerciseId,
-              });
-            }
-          }
-        }
-      }, 300);
+      // Don't auto-scroll or focus — on mobile this causes the page to jump
+      // and the keyboard to reopen unexpectedly
     }
     return result;
   }
 
-  function handleDismissTimer(reason = 'unknown') {
+  function handleDismissTimer() {
     // Ignore dismiss calls within 500ms of activation to prevent
-    // the auto-focus scroll from immediately killing the timer
+    // accidental double-taps from immediately killing the timer
     const elapsed = Date.now() - (restTimerActivatedAtRef.current || 0);
-    if (elapsed < 500) {
-      return;
-    }
+    if (elapsed < 500) return;
     setIsRestTimerActive(false);
+    setRestTimerEndTime(null);
+    sessionStorage.removeItem('dailyforge_rest_timer_end');
   }
 
   // --- Exercise Swap Handlers ---
@@ -306,6 +337,7 @@ function TodayView({ onLogout }) {
         chosen: alternative,
         originalExId: originalId,
         originalName: swapPickerExercise.original_exercise_name || swapPickerExercise.name,
+        _swapped_in_session: true,
       },
     }));
     setSwapPickerExercise(null);
@@ -313,11 +345,7 @@ function TodayView({ onLogout }) {
 
   async function handleResetToDefault(originalExerciseId) {
     try {
-      const token = localStorage.getItem('token');
-      await fetch(`/api/workout/slot/${originalExerciseId}/reset`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await api.put(`/workout/slot/${originalExerciseId}/reset`);
       // Remove from session swaps too
       setSwappedExercises(prev => {
         const next = { ...prev };
@@ -327,51 +355,45 @@ function TodayView({ onLogout }) {
       // Refresh workout data to get defaults back
       invalidateWorkout();
       fetchWorkout();
-    } catch (err) {
-      console.error('Failed to reset preference:', err);
+    } catch {
+      // Network or server error — leave state unchanged
     }
   }
 
-  // Check if all sets for an exercise are complete (for save prompt trigger)
-  function checkExerciseComplete(exerciseId) {
-    const exSets = session.exerciseSets[exerciseId]?.sets || [];
-    if (exSets.length === 0) return false;
-    // Find the exercise to check default_sets
-    for (const phase of (workout?.phases || [])) {
-      const ex = getPhaseExercises(phase).find(e => e.id === exerciseId);
-      if (ex) {
-        const targetSets = ex.default_sets || 3;
-        const completedSets = exSets.filter(s => s.completed).length;
-        return completedSets >= targetSets;
+  // Show save-preference prompt when all sets of a session-swapped exercise complete
+  useEffect(() => {
+    if (!session.isActive || savePromptData) return;
+    for (const [origId, swap] of Object.entries(swappedExercises)) {
+      if (!swap._swapped_in_session) continue;
+      const exerciseId = swap.chosen.id;
+      if (promptedExercises.has(exerciseId)) continue;
+      const exSets = session.exerciseSets[exerciseId]?.sets || [];
+      if (exSets.length === 0) continue;
+      for (const phase of (workout?.phases || [])) {
+        const ex = getPhaseExercises(phase).find(e => e.id === exerciseId);
+        if (ex) {
+          const targetSets = ex.default_sets || 3;
+          const completedSets = exSets.filter(s => s.completed).length;
+          if (completedSets >= targetSets) {
+            setPromptedExercises(prev => new Set(prev).add(exerciseId));
+            setSavePromptData({
+              exerciseName: swap.chosen.name,
+              originalExerciseId: parseInt(origId),
+              chosenExerciseId: exerciseId,
+            });
+          }
+          break;
+        }
       }
     }
-    return false;
-  }
-
-  // Helper: get exercises for a phase, with session-level swaps applied
-  function getPhaseExercises(phase) {
-    return phase.exercises.map(ex => {
-      const originalId = ex.original_exercise_id || ex.id;
-      const swap = swappedExercises[originalId];
-      if (swap) {
-        return {
-          ...swap.chosen,
-          exercise_type: swap.chosen.exercise_type || ex.exercise_type,
-          default_sets: swap.chosen.default_sets || ex.default_sets,
-          default_reps: swap.chosen.default_reps || ex.default_reps,
-          default_duration_secs: swap.chosen.default_duration_secs || ex.default_duration_secs,
-          original_exercise_id: originalId,
-          original_exercise_name: swap.originalName,
-          _swapped_in_session: true,
-        };
-      }
-      return ex;
-    });
-  }
+  }, [session.exerciseSets, swappedExercises, workout, getPhaseExercises, session.isActive, savePromptData, promptedExercises]);
 
   async function handleFinish() {
     if (session.isLoading) return;
     setConfirmFinish(false);
+    setIsRestTimerActive(false);
+    setRestTimerEndTime(null);
+    sessionStorage.removeItem('dailyforge_rest_timer_end');
     const data = await session.completeSession();
     if (data) {
       setPreviousPerformance({});
@@ -382,11 +404,15 @@ function TodayView({ onLogout }) {
 
   async function handleDiscard() {
     setConfirmDiscard(false);
+    setIsRestTimerActive(false);
+    setRestTimerEndTime(null);
+    sessionStorage.removeItem('dailyforge_rest_timer_end');
     setPreviousPerformance({});
     await session.discardSession();
   }
 
   async function handleDiscardResume() {
+    sessionStorage.removeItem('dailyforge_rest_timer_end');
     await session.dismissResume();
   }
 
@@ -487,9 +513,9 @@ function TodayView({ onLogout }) {
                       sets={exSets}
                       previousData={previousPerformance[ex.id] || null}
                       onLogSet={handleLogSet}
-                      onInputFocus={() => handleDismissTimer('inputFocus')}
-                      nextSetRef={nextSetRef}
+                      onInputFocus={handleDismissTimer}
                       onSwap={handleOpenSwapPicker}
+                      onReset={handleResetToDefault}
                     />
                   );
                 })}
@@ -532,10 +558,11 @@ function TodayView({ onLogout }) {
         <RestTimer
           key={restTimerKey}
           duration={restDuration}
+          endTime={restTimerEndTime}
           isActive={isRestTimerActive}
-          onSkip={() => handleDismissTimer('skip')}
-          onFinish={() => handleDismissTimer('finish')}
-          onDismiss={() => handleDismissTimer('dismiss')}
+          onSkip={handleDismissTimer}
+          onFinish={handleDismissTimer}
+          onDismiss={handleDismissTimer}
         />
 
         {/* Settings Modal */}
@@ -704,16 +731,11 @@ function TodayView({ onLogout }) {
             setSwapPickerExercise(null);
             // In view mode, save preference immediately
             try {
-              const token = localStorage.getItem('token');
-              await fetch(`/api/workout/slot/${originalId}/choose`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                body: JSON.stringify({ chosen_exercise_id: alt.id }),
-              });
+              await api.put(`/workout/slot/${originalId}/choose`, { chosen_exercise_id: alt.id });
               invalidateWorkout();
               fetchWorkout();
-            } catch (err) {
-              console.error('Failed to save preference:', err);
+            } catch {
+              // Network or server error — no action needed
             }
           }}
           onClose={() => setSwapPickerExercise(null)}

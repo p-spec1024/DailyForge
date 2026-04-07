@@ -20,11 +20,10 @@ function formatMmSs(secs) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-export default function RestTimer({ duration = 90, isActive, onSkip, onFinish, onDismiss }) {
+export default function RestTimer({ duration = 90, endTime, isActive, onSkip, onFinish, onDismiss }) {
   const [remaining, setRemaining] = useState(duration);
   const [visible, setVisible] = useState(false);
   const [finished, setFinished] = useState(false);
-  const startedAtRef = useRef(null);
   const rafRef = useRef(null);
   const finishTimeoutRef = useRef(null);
 
@@ -35,29 +34,32 @@ export default function RestTimer({ duration = 90, isActive, onSkip, onFinish, o
     finishTimeoutRef.current = null;
   }, []);
 
-  // Start/stop timer based on isActive
+  // Start/stop timer based on isActive and endTime
   useEffect(() => {
-    if (isActive) {
-      startedAtRef.current = Date.now();
-      setRemaining(duration);
-      setFinished(false);
+    if (isActive && endTime) {
+      const left = (endTime - Date.now()) / 1000;
       setVisible(true);
 
-      function tick() {
-        const elapsed = (Date.now() - startedAtRef.current) / 1000;
-        const left = duration - elapsed;
+      if (left <= 0) {
+        setRemaining(0);
+        setFinished(true);
+      } else {
+        setRemaining(left);
+        setFinished(false);
 
-        if (left <= 0) {
-          setRemaining(0);
-          setFinished(true);
-          return; // stop ticking
+        function tick() {
+          const left = (endTime - Date.now()) / 1000;
+          if (left <= 0) {
+            setRemaining(0);
+            setFinished(true);
+            return; // stop ticking
+          }
+          setRemaining(left);
+          rafRef.current = requestAnimationFrame(tick);
         }
 
-        setRemaining(left);
         rafRef.current = requestAnimationFrame(tick);
       }
-
-      rafRef.current = requestAnimationFrame(tick);
     } else {
       cleanup();
       setVisible(false);
@@ -65,7 +67,7 @@ export default function RestTimer({ duration = 90, isActive, onSkip, onFinish, o
     }
 
     return cleanup;
-  }, [isActive, duration, cleanup]);
+  }, [isActive, endTime, cleanup]);
 
   // Auto-dismiss 2 seconds after finished
   useEffect(() => {

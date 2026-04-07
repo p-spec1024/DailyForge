@@ -110,12 +110,13 @@ function ExerciseDetail({ exercise, onSwap, onReset }) {
           e.stopPropagation();
           onReset(exercise.original_exercise_id);
         }} style={{
-          width: '100%', padding: '6px', marginTop: 4, border: 'none',
-          background: 'transparent', color: C.textMuted, fontSize: 11,
-          cursor: 'pointer', textDecoration: 'underline',
-          textDecorationColor: 'rgba(255,255,255,0.15)',
+          width: '100%', padding: '8px', marginTop: 4,
+          border: '1px dashed rgba(255,255,255,0.1)',
+          background: 'rgba(255,255,255,0.04)', borderRadius: 6,
+          color: C.textSec, fontSize: 12,
+          cursor: 'pointer',
         }}>
-          Reset to default: {exercise.original_exercise_name}
+          ← Reset to default: {exercise.original_exercise_name}
         </button>
       )}
     </div>
@@ -150,6 +151,20 @@ export default function ExerciseRow({ exercise, isExpanded, onToggle, onSwap, on
         </div>
         <div style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0 }} />
       </div>
+      {/* Reset to default link — always visible for swapped exercises */}
+      {exercise.original_exercise_id && onReset && !isExpanded && (
+        <button onClick={(e) => {
+          e.stopPropagation();
+          onReset(exercise.original_exercise_id);
+        }} style={{
+          display: 'block', padding: '2px 0 8px', border: 'none',
+          background: 'transparent', color: C.textMuted, fontSize: 11,
+          cursor: 'pointer', textDecoration: 'underline',
+          textDecorationColor: 'rgba(255,255,255,0.15)',
+        }}>
+          Reset to default: {exercise.original_exercise_name}
+        </button>
+      )}
       {isExpanded && <ExerciseDetail exercise={exercise} onSwap={onSwap} onReset={onReset} />}
     </div>
   );
@@ -296,7 +311,8 @@ function SetRow({ setNum, setData, previousSet, onComplete, onWeightChange, onRe
 }
 
 /* ── Exercise Card (active session mode) ── */
-export function ExerciseSessionCard({ exercise, sets, previousData, onLogSet, onInputFocus, nextSetRef, onSwap }) {
+export function ExerciseSessionCard({ exercise, sets, previousData, onLogSet, onInputFocus, onSwap, onReset }) {
+  console.log('[ExerciseSessionCard]', exercise.name, { original_exercise_id: exercise.original_exercise_id, id: exercise.id, hasOnReset: !!onReset, shouldShowReset: !!(exercise.original_exercise_id && onReset) });
   const defaultSetCount = exercise.default_sets || 3;
   const [setCount, setSetCount] = useState(Math.max(defaultSetCount, sets.length));
   const [localSets, setLocalSets] = useState(() => {
@@ -323,13 +339,6 @@ export function ExerciseSessionCard({ exercise, sets, previousData, onLogSet, on
   const muscles = exercise.target_muscles
     ? exercise.target_muscles.split(',').map(m => m.trim()).filter(Boolean)
     : [];
-
-  const firstIncompleteSet = (() => {
-    for (let i = 1; i <= setCount; i++) {
-      if (!localSets[i]?.completed) return i;
-    }
-    return null;
-  })();
 
   async function handleComplete(setNum, data) {
     const setData = {
@@ -403,6 +412,21 @@ export function ExerciseSessionCard({ exercise, sets, previousData, onLogSet, on
           )}
         </div>
 
+        {/* Reset to default link for swapped exercises */}
+        {exercise.original_exercise_id && onReset && (
+          <button onClick={(e) => {
+            e.stopPropagation();
+            onReset(exercise.original_exercise_id);
+          }} style={{
+            display: 'block', padding: '2px 0 6px', border: 'none',
+            background: 'transparent', color: C.textMuted, fontSize: 11,
+            cursor: 'pointer', textDecoration: 'underline',
+            textDecorationColor: 'rgba(255,255,255,0.15)',
+          }}>
+            Reset to default: {exercise.original_exercise_name}
+          </button>
+        )}
+
         {/* Column headers */}
         <div style={{
           display: 'grid', gridTemplateColumns: '36px 72px 1fr 1fr 40px',
@@ -432,12 +456,7 @@ export function ExerciseSessionCard({ exercise, sets, previousData, onLogSet, on
             }))}
             onSetTypeChange={(t) => handleSetTypeChange(setNum, t)}
             onInputFocus={onInputFocus}
-            inputRef={el => {
-              inputRefs.current[setNum] = el;
-              if (setNum === firstIncompleteSet && nextSetRef) {
-                nextSetRef.current = el;
-              }
-            }}
+            inputRef={el => { inputRefs.current[setNum] = el; }}
           />
         ))}
 

@@ -97,6 +97,9 @@ router.get('/today', async (req, res, next) => {
         url: src.url,
         source: src.source,
         difficulty: src.difficulty,
+        // Always include the slot default exercise id for reset comparison
+        default_exercise_id: ex.id,
+        default_exercise_name: ex.name,
         // Include original exercise info if swapped, for reset functionality
         ...(pref ? { original_exercise_id: ex.id, original_exercise_name: ex.name } : {}),
       });
@@ -145,9 +148,10 @@ router.get('/today', async (req, res, next) => {
 // GET /api/workout/:workoutId/slots/:exerciseId/alternatives
 router.get('/:workoutId/slots/:exerciseId/alternatives', async (req, res, next) => {
   try {
+    const workoutId = parseInt(req.params.workoutId, 10);
     const exerciseId = parseInt(req.params.exerciseId, 10);
-    if (isNaN(exerciseId)) {
-      return res.status(400).json({ error: 'Invalid exercise ID' });
+    if (isNaN(workoutId) || isNaN(exerciseId)) {
+      return res.status(400).json({ error: 'Invalid workout or exercise ID' });
     }
 
     // Get the default exercise info
@@ -189,6 +193,7 @@ router.get('/:workoutId/slots/:exerciseId/alternatives', async (req, res, next) 
       alternatives: alts.rows.map(a => ({
         id: a.id,
         name: a.name,
+        target_muscles: a.target_muscles || '',
         muscle_groups: a.target_muscles ? a.target_muscles.split(',').map(m => m.trim()) : [],
         difficulty: a.difficulty || 'intermediate',
       })),
@@ -205,16 +210,16 @@ router.get('/:workoutId/slots/:exerciseId/alternatives', async (req, res, next) 
 router.put('/slot/:exerciseId/choose', async (req, res, next) => {
   try {
     const exerciseId = parseInt(req.params.exerciseId, 10);
-    const { chosen_exercise_id } = req.body;
-    if (isNaN(exerciseId) || !chosen_exercise_id) {
-      return res.status(400).json({ error: 'exercise_id and chosen_exercise_id are required' });
+    const chosenId = parseInt(req.body.chosen_exercise_id, 10);
+    if (isNaN(exerciseId) || isNaN(chosenId)) {
+      return res.status(400).json({ error: 'exercise_id and chosen_exercise_id must be valid integers' });
     }
 
     // Verify the chosen exercise is a valid alternative for this slot
     const valid = await pool.query(
       `SELECT 1 FROM slot_alternatives
        WHERE exercise_id = $1 AND alternative_exercise_id = $2`,
-      [exerciseId, chosen_exercise_id]
+      [exerciseId, chosenId]
     );
     if (valid.rows.length === 0) {
       return res.status(400).json({ error: 'Invalid alternative for this exercise' });
@@ -226,10 +231,10 @@ router.put('/slot/:exerciseId/choose', async (req, res, next) => {
        VALUES ($1, $2, $3)
        ON CONFLICT (user_id, exercise_id)
        DO UPDATE SET chosen_exercise_id = EXCLUDED.chosen_exercise_id, created_at = NOW()`,
-      [req.user.id, exerciseId, chosen_exercise_id]
+      [req.user.id, exerciseId, chosenId]
     );
 
-    res.json({ success: true, slot_id: exerciseId, chosen_exercise_id });
+    res.json({ success: true, slot_id: exerciseId, chosen_exercise_id: chosenId });
   } catch (err) {
     next(err);
   }

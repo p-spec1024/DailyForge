@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { C } from './workout/tokens.jsx';
+import { api } from '../utils/api.js';
 
 export default function SavePreferencePrompt({ exerciseName, originalExerciseId, chosenExerciseId, onSave, onDismiss }) {
   const [saving, setSaving] = useState(false);
@@ -20,20 +21,8 @@ export default function SavePreferencePrompt({ exerciseName, originalExerciseId,
   async function handleSave() {
     setSaving(true);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/workout/slot/${originalExerciseId}/choose`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ chosen_exercise_id: chosenExerciseId }),
-      });
-      if (res.ok) {
-        onSave();
-      } else {
-        onDismiss();
-      }
+      await api.put(`/workout/slot/${originalExerciseId}/choose`, { chosen_exercise_id: chosenExerciseId });
+      onSave();
     } catch {
       onDismiss();
     } finally {

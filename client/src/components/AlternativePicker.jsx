@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { C } from './workout/tokens.jsx';
+import { api } from '../utils/api.js';
 
 const DIFFICULTY_COLORS = {
   beginner: '#1D9E75',
@@ -14,11 +15,7 @@ export default function AlternativePicker({ exerciseId, workoutId, onSelect, onC
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    fetch(`/api/workout/${workoutId}/slots/${exerciseId}/alternatives`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.json())
+    api.get(`/workout/${workoutId}/slots/${exerciseId}/alternatives`)
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
 
@@ -26,16 +23,12 @@ export default function AlternativePicker({ exerciseId, workoutId, onSelect, onC
     requestAnimationFrame(() => setVisible(true));
   }, [exerciseId, workoutId]);
 
-  function handleSelect(alt) {
-    onSelect(alt);
-  }
-
   function handleClose() {
     setVisible(false);
     setTimeout(onClose, 200);
   }
 
-  const content = (
+  return createPortal(
     <div
       onClick={handleClose}
       style={{
@@ -123,7 +116,7 @@ export default function AlternativePicker({ exerciseId, workoutId, onSelect, onC
               {data.alternatives.map(alt => (
                 <button
                   key={alt.id}
-                  onClick={() => handleSelect(alt)}
+                  onClick={() => onSelect(alt)}
                   style={{
                     width: '100%', textAlign: 'left', cursor: 'pointer',
                     padding: '12px', borderRadius: 10, marginBottom: 6,
@@ -166,8 +159,7 @@ export default function AlternativePicker({ exerciseId, workoutId, onSelect, onC
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
-
-  return createPortal(content, document.body);
 }

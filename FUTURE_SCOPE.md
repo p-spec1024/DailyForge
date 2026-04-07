@@ -14,6 +14,7 @@ Features that are **not in the current build plan** but worth revisiting later. 
 | 4 | Push notifications (streak-at-risk, workout reminders) | Engagement | Blueprint v3 | Apr 5, 2026 | Requires service worker push API + notification permission flow. |
 | 5 | OAuth login (Google, Apple) | Auth | Blueprint v3 | Apr 5, 2026 | Currently email/password only. OAuth adds convenience but not critical for launch. |
 | 6 | Desktop responsive layout | Platform | Blueprint v3 | Apr 5, 2026 | App is mobile-first. Desktop works but isn't optimized. Low priority — target users are on phone. |
+| 7 | Automated browser testing (Playwright) | DevOps | iPhone testing session | Apr 7, 2026 | Add comprehensive test coverage in Phase 5 (Polish) when UI is stable. Don't add during active feature development — too much rewriting. Playwright preferred for React + real browser testing. |
 
 ---
 
