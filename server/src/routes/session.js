@@ -190,8 +190,8 @@ router.put('/:id/complete', async (req, res, next) => {
 
     const session = result.rows[0];
 
-    // Calculate summary stats + exercise breakdown in parallel
-    const [summary, exercises] = await Promise.all([
+    // Calculate summary stats, exercise breakdown, and PR detection in parallel
+    const [summary, exercises, currentBests, previousBests] = await Promise.all([
       pool.query(
         `SELECT
           COUNT(*) as total_sets,
@@ -211,7 +211,69 @@ router.put('/:id/complete', async (req, res, next) => {
          ORDER BY MIN(se.id)`,
         [sessionId]
       ),
+      // Current session bests per exercise (max weight and max reps)
+      pool.query(
+        `SELECT se.exercise_id, e.name,
+           MAX(se.weight) as best_weight,
+           MAX(se.reps_completed) as best_reps
+         FROM session_exercises se
+         JOIN exercises e ON e.id = se.exercise_id
+         WHERE se.session_id = $1 AND se.completed = true AND se.set_number IS NOT NULL
+           AND se.weight IS NOT NULL AND se.weight > 0
+         GROUP BY se.exercise_id, e.name`,
+        [sessionId]
+      ),
+      // Previous session bests per exercise (excluding current session)
+      pool.query(
+        `SELECT se.exercise_id,
+           MAX(se.weight) as prev_best_weight,
+           MAX(se.reps_completed) as prev_best_reps
+         FROM session_exercises se
+         JOIN sessions s ON s.id = se.session_id
+         WHERE s.user_id = $1 AND se.session_id != $2
+           AND s.completed = true
+           AND se.completed = true AND se.set_number IS NOT NULL
+           AND se.weight IS NOT NULL AND se.weight > 0
+         GROUP BY se.exercise_id`,
+        [req.user.id, sessionId]
+      ),
     ]);
+
+    // Build PR list
+    const prevMap = {};
+    for (const row of previousBests.rows) {
+      prevMap[row.exercise_id] = row;
+    }
+
+    const prs = [];
+    for (const cur of currentBests.rows) {
+      const prev = prevMap[cur.exercise_id];
+      const prevWeight = prev ? parseFloat(prev.prev_best_weight) : 0;
+      const prevReps = prev ? parseInt(prev.prev_best_reps) : 0;
+      const curWeight = parseFloat(cur.best_weight);
+      const curReps = parseInt(cur.best_reps);
+
+      if (curWeight > prevWeight && prevWeight > 0) {
+        prs.push({
+          exercise_id: cur.exercise_id,
+          exercise_name: cur.name,
+          pr_type: 'weight',
+          new_value: curWeight,
+          previous_best: prevWeight,
+          unit: 'kg',
+        });
+      }
+      if (curReps > prevReps && prevReps > 0) {
+        prs.push({
+          exercise_id: cur.exercise_id,
+          exercise_name: cur.name,
+          pr_type: 'reps',
+          new_value: curReps,
+          previous_best: prevReps,
+          unit: 'reps',
+        });
+      }
+    }
 
     const stats = summary.rows[0];
     const durationSecs = session.duration || 0;
@@ -226,6 +288,7 @@ router.put('/:id/complete', async (req, res, next) => {
         completed_at: session.completed_at,
       },
       summary: {
+        duration_seconds: durationSecs,
         total_sets: parseInt(stats.total_sets),
         total_volume: parseFloat(stats.total_volume),
         exercises_completed: parseInt(stats.exercises_completed),
@@ -237,6 +300,7 @@ router.put('/:id/complete', async (req, res, next) => {
           sets: parseInt(e.sets),
         })),
       },
+      prs,
     });
   } catch (err) {
     next(err);
