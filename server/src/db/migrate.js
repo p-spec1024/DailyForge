@@ -168,6 +168,10 @@ ALTER TABLE exercises ADD COLUMN IF NOT EXISTS url TEXT;
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS source VARCHAR(100);
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS difficulty VARCHAR(50);
 ALTER TABLE exercises ADD COLUMN IF NOT EXISTS media_url TEXT;
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS thumbnail_url TEXT;
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS review_status VARCHAR(20) DEFAULT 'pending';
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS review_notes TEXT;
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS media_type VARCHAR(10) DEFAULT 'image';
 
 -- Sessions table: add missing columns for full session tracking
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS date DATE DEFAULT CURRENT_DATE;

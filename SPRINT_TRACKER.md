@@ -12,9 +12,22 @@
 | 2 | Strength Exercise Seeding | data/strength-exercises | ✅ Shipped | Apr 7 | Apr 7 | 736 strength exercises seeded from free-exercise-db |
 | 3 | Yoga Pose Library Seeding | data/yoga-poses | ✅ Shipped | Apr 7 | Apr 7 | 265 yoga poses seeded from 4 sources (dailyforge, yoga-api, yogism, huggingface). Dedup by Sanskrit name, FK-safe cleanup, unique index added. |
 | 4 | Breathwork Technique Seeding | data/breathwork-techniques | ✅ Shipped | Apr 7 | Apr 8 | 49 verified techniques (48 deduplicated + A52 from 2025 research). Safety tiers (green/yellow/red) + caution notes for advanced techniques. |
-| 5 | Exercise Illustrations (Gemini) | content/exercise-illustrations | 🔲 Ready | | | Generate via Gemini MCP, upload to ImageKit |
+| 5 | Exercise Illustrations | content/exercise-illustrations | 🔄 In Progress | Apr 8 | | Style locked: Hybrid Pixar bald character + deep orange-amber muscle glow (blue for breathwork). Model: Nano Banana 2 on Vertex AI Studio. 4-frame animated WebP via 2x2 grid prompts. /m-review Media QA Agent spec written. Testing done — squat, warrior II, anulom vilom all validated. |
 
 **Progress: 4/5 tickets shipped**
+
+**S3-T5 Details:**
+- Style LOCKED: Hybrid Pixar bald character + deep orange-amber muscle glow
+- Character: bald, Wii Sports-style face, gender-neutral, athletic build
+- Outfits: navy tank (strength), teal tank (yoga), navy long-sleeve (breathwork)
+- Glow: deep fiery orange-amber for strength/yoga, blue for breathwork
+- Model: Nano Banana 2 (Gemini 3.1 Flash Image) on Vertex AI Studio (~$0.067/image)
+- Format: 4-frame animated WebP (2x2 grid prompt → crop → stitch)
+- 6 frames for complex two-phase exercises
+- No videos — deferred to FUTURE_SCOPE #8
+- /m-review Media QA Agent spec written (separate from code /review)
+- Testing: squat (B+), Warrior II (A-), Anulom Vilom (A-)
+- Next: generate hero images for priority exercises, then build /m-review + batch pipeline
 
 
 ## Sprint 2 — Week of Apr 6, 2026
