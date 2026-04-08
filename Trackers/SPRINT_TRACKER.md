@@ -12,9 +12,27 @@
 | 2 | Strength Exercise Seeding | data/strength-exercises | ✅ Shipped | Apr 7 | Apr 7 | 736 strength exercises seeded from free-exercise-db |
 | 3 | Yoga Pose Library Seeding | data/yoga-poses | ✅ Shipped | Apr 7 | Apr 7 | 265 yoga poses seeded from 4 sources (dailyforge, yoga-api, yogism, huggingface). Dedup by Sanskrit name, FK-safe cleanup, unique index added. |
 | 4 | Breathwork Technique Seeding | data/breathwork-techniques | ✅ Shipped | Apr 7 | Apr 8 | 49 verified techniques (48 deduplicated + A52 from 2025 research). Safety tiers (green/yellow/red) + caution notes for advanced techniques. |
-| 5 | Exercise Illustrations | content/exercise-illustrations | 🔄 In Progress | Apr 8 | | Style locked: Hybrid Pixar bald character + deep orange-amber muscle glow (blue for breathwork). Model: Nano Banana 2 on Vertex AI Studio. 4-frame animated WebP via 2x2 grid prompts. /m-review Media QA Agent spec written. Testing done — squat, warrior II, anulom vilom all validated. |
+| 5 | Exercise Illustrations | content/exercise-illustrations | ✅ Shipped | Apr 8 | Apr 8 | Style locked: Hybrid Pixar bald character + deep orange-amber muscle glow (blue for breathwork). Model: Nano Banana 2 on Vertex AI Studio. 4-frame animated WebP via 2x2 grid prompts. Video: Veo 3.1, 8 sec, 1080p. Moved to parallel image/video tracks. |
 
-**Progress: 4/5 tickets shipped**
+**Progress: 5/5 tickets shipped**
+
+## Media Generation Progress (Updated: Apr 9, 2026)
+
+| Type | Target | Generated | Uploaded | Live |
+|------|--------|-----------|----------|------|
+| Images (4-frame WebP) | 1,050 | 0 | 0 | 0 |
+| Videos (8-sec MP4) | 35 | 1 | 0 | 0 |
+
+**Latest:**
+- Apr 9: Barbell Squat video generated (test, style locked)
+
+This section will be updated by both image and video generation tracks to keep sprint track informed of media progress.
+
+## Tools Added (Apr 9, 2026)
+
+| Tool | Purpose | Location |
+|------|---------|----------|
+| /m-review | Media QA Agent — reviews exercise images/videos for form accuracy, character consistency, AI artifacts | .claude/commands/m-review.md |
 
 **S3-T5 Details:**
 - Style LOCKED: Hybrid Pixar bald character + deep orange-amber muscle glow
