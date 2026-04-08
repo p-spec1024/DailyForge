@@ -28,10 +28,11 @@
 
 This section will be updated by both image and video generation tracks to keep sprint track informed of media progress.
 
-## Tools Added (Apr 9, 2026)
+## Tools Added
 
 | Tool | Purpose | Location |
 |------|---------|----------|
+| /review | Code quality review — checks for bugs, security issues, best practices, performance | .claude/commands/review.md |
 | /m-review | Media QA Agent — reviews exercise images/videos for form accuracy, character consistency, AI artifacts | .claude/commands/m-review.md |
 
 **S3-T5 Details:**
