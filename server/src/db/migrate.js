@@ -146,6 +146,16 @@ DO $$ BEGIN
     CHECK (tradition IN ('pranayama', 'western', 'therapeutic', 'goal_specific', 'advanced'));
 END $$;
 
+CREATE TABLE IF NOT EXISTS breathwork_sessions (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+  technique_id INTEGER REFERENCES breathwork_techniques(id) NOT NULL,
+  duration_seconds INTEGER NOT NULL,
+  rounds_completed INTEGER NOT NULL,
+  completed BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS user_settings (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id) UNIQUE,
@@ -225,6 +235,8 @@ CREATE INDEX IF NOT EXISTS idx_slot_alternatives_exercise ON slot_alternatives(e
 CREATE INDEX IF NOT EXISTS idx_user_exercise_prefs_user ON user_exercise_prefs(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_exercise_prefs_exercise ON user_exercise_prefs(user_id, exercise_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lib_exercises_name_source ON exercises (name, source) WHERE workout_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_breathwork_sessions_user ON breathwork_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_breathwork_sessions_technique ON breathwork_sessions(technique_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_breathwork_name ON breathwork_techniques (name);
 CREATE INDEX IF NOT EXISTS idx_breathwork_tradition ON breathwork_techniques (tradition);
 CREATE INDEX IF NOT EXISTS idx_breathwork_difficulty ON breathwork_techniques (difficulty);

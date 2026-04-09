@@ -5,6 +5,8 @@ import NavBar from './components/NavBar.jsx';
 import Login from './pages/Login.jsx';
 import Register from './pages/Register.jsx';
 import Workout from './pages/Workout.jsx';
+import Breathwork from './pages/Breathwork.jsx';
+import BreathworkTimer from './pages/BreathworkTimer.jsx';
 
 function PlaceholderPage({ title, onLogout }) {
   return (
@@ -60,7 +62,8 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Workout onLogout={logout} />} />
           <Route path="/yoga" element={<PlaceholderPage title="Yoga" />} />
-          <Route path="/breathe" element={<PlaceholderPage title="Breathe" />} />
+          <Route path="/breathe" element={<Breathwork />} />
+          <Route path="/breathe/:techniqueId" element={<BreathworkTimer />} />
           <Route path="/profile" element={<ProfilePage onLogout={logout} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
