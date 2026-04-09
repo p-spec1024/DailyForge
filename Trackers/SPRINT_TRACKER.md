@@ -1,5 +1,23 @@
 # DailyForge — Sprint Tracker
 
+## Sprint 4 — Week of Apr 9, 2026
+
+**Goal:** Complete Phase 2 — Yoga + Breathwork. Transform DailyForge into the unified 3-pillar app.
+
+| # | Ticket | Branch | Status | Started | Shipped | Notes |
+|---|--------|--------|--------|---------|---------|-------|
+| 1 | Breathwork Timer UI | feature/breathwork-timer | ⏳ Ready | | | Expanding circle animation, phase colors, haptic feedback |
+| 2 | Yoga Session Builder | feature/yoga-session-builder | ⏳ Ready | | | Down Dog-style: type, level, duration, boost selection |
+| 3 | 5-Phase Session Integration | feature/5-phase-session | 🔒 Blocked | | | Depends on T1 + T2. Unifies workout into 5-phase structure |
+
+**Progress: 0/3 tickets shipped**
+
+**Build Order:**
+- T1 and T2 can run in parallel (independent)
+- T3 blocked until T1 + T2 merged
+
+---
+
 ## Sprint 3 — Week of Apr 7, 2026
 
 **Goal:** Data seeding + media infrastructure
