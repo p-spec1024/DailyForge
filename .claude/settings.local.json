@@ -78,7 +78,9 @@
       "Bash(curl -s -X DELETE https://api.imagekit.io/v1/files/69d581065c7cd75eb865a6d5 -u __TRACKED_VAR__:)",
       "Bash(find /d/projects/dailyforge/server/src/db/seeds -name \"*.js\" -exec wc -l {} \\\\;)",
       "Bash(wmic process:*)",
-      "Bash(tasklist)"
+      "Bash(tasklist)",
+      "Bash(curl -s http://localhost:3001/api/breathwork/techniques)",
+      "Bash(curl:*)"
     ]
   }
 }

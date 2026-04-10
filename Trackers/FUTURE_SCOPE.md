@@ -22,6 +22,8 @@ Features that are **not in the current build plan** but worth revisiting later. 
 | 12 | Form line/arrow animations | UI Enhancement | Sprint 3 planning | Apr 8, 2026 | Animated lines/arrows showing correct alignment on video. |
 | 13 | 3D rigged character model for exercise illustrations | Media | S3-T5 research | Apr 8, 2026 | Replace per-exercise AI image generation with a single rigged 3D model of the DailyForge character. Pipeline: generate model (Tripo AI / Meshy) → auto-rig (Cascadeur / AccuRIG / Mixamo) → pose into any exercise → render frames from Blender. Solves cross-exercise character consistency permanently. One model = infinite exercises. |
 | 14 | Exercise demo videos for complex movements | Media | S3-T5 research | Apr 8, 2026 | Short 4-sec looping videos (Veo 3) for ~30-50 complex multi-phase exercises where 4-6 frame animations aren't enough (Turkish Get-Up, Clean & Jerk, Sun Salutation flows). Deferred because 4-6 frame animated WebP covers 95%+ of exercises adequately. |
+| 15 | iOS screen wake during breathwork | UX | S4-T1 testing | Apr 10, 2026 | navigator.wakeLock and NoSleep.js don't work on iOS Safari. Works on Android. Options: Capacitor native wrapper or prompt user to disable Auto-Lock. |
+| 16 | Native haptic feedback for breathwork | UX | S4-T1 testing | Apr 10, 2026 | navigator.vibrate() not supported on iOS Safari. Works on Android. Needs native wrapper for iOS haptics. |
 
 ---
 

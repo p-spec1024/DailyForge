@@ -7,6 +7,7 @@ import Register from './pages/Register.jsx';
 import Workout from './pages/Workout.jsx';
 import Breathwork from './pages/Breathwork.jsx';
 import BreathworkTimer from './pages/BreathworkTimer.jsx';
+import Yoga from './pages/Yoga.jsx';
 
 function PlaceholderPage({ title, onLogout }) {
   return (
@@ -61,7 +62,7 @@ export default function App() {
       <div style={{ paddingBottom: 80 }}>
         <Routes>
           <Route path="/" element={<Workout onLogout={logout} />} />
-          <Route path="/yoga" element={<PlaceholderPage title="Yoga" />} />
+          <Route path="/yoga" element={<Yoga />} />
           <Route path="/breathe" element={<Breathwork />} />
           <Route path="/breathe/:techniqueId" element={<BreathworkTimer />} />
           <Route path="/profile" element={<ProfilePage onLogout={logout} />} />

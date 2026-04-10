@@ -6,11 +6,11 @@
 
 | # | Ticket | Branch | Status | Started | Shipped | Notes |
 |---|--------|--------|--------|---------|---------|-------|
-| 1 | Breathwork Timer UI | feature/breathwork-timer | ⏳ Ready | | | Expanding circle animation, phase colors, haptic feedback |
-| 2 | Yoga Session Builder | feature/yoga-session-builder | ⏳ Ready | | | Down Dog-style: type, level, duration, boost selection |
+| 1 | Breathwork Timer UI | feature/breathwork-timer | ✅ Shipped | Apr 9 | Apr 10 | 49 techniques, expanding circle animation, phase colors, session logging. iOS wake lock deferred. |
+| 2 | Yoga Session Builder | feature/yoga-session-builder | ✅ Shipped | Apr 10 | Apr 10 | Level filtering (beginner/intermediate/advanced), focus area prioritization, 265 poses, smart description fallback, scrollable info popup |
 | 3 | 5-Phase Session Integration | feature/5-phase-session | 🔒 Blocked | | | Depends on T1 + T2. Unifies workout into 5-phase structure |
 
-**Progress: 0/3 tickets shipped**
+**Progress: 2/3 tickets shipped**
 
 **Build Order:**
 - T1 and T2 can run in parallel (independent)
