@@ -24,6 +24,11 @@ Features that are **not in the current build plan** but worth revisiting later. 
 | 14 | Exercise demo videos for complex movements | Media | S3-T5 research | Apr 8, 2026 | Short 4-sec looping videos (Veo 3) for ~30-50 complex multi-phase exercises where 4-6 frame animations aren't enough (Turkish Get-Up, Clean & Jerk, Sun Salutation flows). Deferred because 4-6 frame animated WebP covers 95%+ of exercises adequately. |
 | 15 | iOS screen wake during breathwork | UX | S4-T1 testing | Apr 10, 2026 | navigator.wakeLock and NoSleep.js don't work on iOS Safari. Works on Android. Options: Capacitor native wrapper or prompt user to disable Auto-Lock. |
 | 16 | Native haptic feedback for breathwork | UX | S4-T1 testing | Apr 10, 2026 | navigator.vibrate() not supported on iOS Safari. Works on Android. Needs native wrapper for iOS haptics. |
+| 17 | Exercise swap for yoga poses | Yoga | S4-T3 iPhone testing | Apr 11, 2026 | Allow users to replace individual yoga poses during warm-up/cool-down/standalone sessions. Filter alternatives by same category + same focus area + same practice type. |
+| 18 | Breathwork technique swap in session | Breathwork | S4-T3 iPhone testing | Apr 11, 2026 | Allow users to replace breathwork technique during active session (not just on overview). Filter by same purpose (energizing → energizing, calming → calming). Pre-session overview already has "change technique" — extend to mid-session. |
+| 19 | Workout tab home screen redesign | UI | S4-T3 iPhone testing | Apr 11, 2026 | Redesign workout tab as a proper daily dashboard — greeting, streak stat, today's session card, 5-phase visual, quick-start buttons. Current view is functional but needs polish for a 3-pillar app. |
+| 20 | Ashtanga practice type | Yoga | Down Dog comparison | Apr 11, 2026 | Down Dog has Ashtanga as a practice type. Add Ashtanga sequences to the yoga library. |
+| 21 | Chair Yoga practice type | Yoga | Down Dog comparison | Apr 11, 2026 | Down Dog has Chair Yoga for accessibility. Add chair-based pose variants. |
 
 ---
 
