@@ -5,8 +5,34 @@ import { authenticate } from '../middleware/auth.js';
 const router = Router();
 router.use(authenticate);
 
-const ALLOWED_SESSION_TYPES = ['strength', 'yoga', 'breathwork', 'stretching'];
+const ALLOWED_SESSION_TYPES = ['strength', 'yoga', 'breathwork', 'stretching', '5phase'];
 const ALLOWED_SET_TYPES = ['normal', 'warmup', 'dropset', 'failure'];
+
+// Breathwork technique mapping per workout type
+const TECHNIQUE_MAP = {
+  push:      { opening: 'Kapalabhati', closing: 'Anulom Vilom' },
+  pull:      { opening: 'Kapalabhati', closing: 'Anulom Vilom' },
+  upper:     { opening: 'Kapalabhati', closing: 'Anulom Vilom' },
+  legs:      { opening: 'Bhastrika', closing: '4-7-8 Breathing' },
+  lower:     { opening: 'Bhastrika', closing: '4-7-8 Breathing' },
+  full_body: { opening: 'Breath of Fire', closing: 'Bhramari' },
+  hiit:      { opening: 'Wim Hof Breathing', closing: 'Box Breathing' },
+  yoga:      { opening: 'Ujjayi', closing: 'Yoga Nidra Breath' },
+  rest:      { opening: 'Diaphragmatic Breathing', closing: 'Left Nostril Breathing' },
+};
+
+// Focus area mapping per workout type
+const FOCUS_MAP = {
+  push:      ['chest', 'shoulders'],
+  pull:      ['back', 'spine'],
+  upper:     ['shoulders', 'chest', 'spine'],
+  legs:      ['hips', 'legs'],
+  lower:     ['hips', 'legs'],
+  full_body: ['full body'],
+  hiit:      ['full body'],
+  yoga:      ['full body'],
+  rest:      ['full body'],
+};
 
 function parseIntParam(value) {
   const n = parseInt(value, 10);
@@ -486,6 +512,170 @@ router.get('/previous-performance', async (req, res, next) => {
     }
 
     res.json({ previousPerformance });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/session/overview/:workoutId — pre-session overview for 5-phase flow
+router.get('/overview/:workoutId', async (req, res, next) => {
+  try {
+    const workoutId = parseIntParam(req.params.workoutId);
+    if (!workoutId) {
+      return res.status(400).json({ error: 'Invalid workout ID' });
+    }
+
+    // Get workout info
+    const wResult = await pool.query(
+      `SELECT w.id, w.name, ws.day_of_week, ws.label
+       FROM workouts w
+       JOIN workout_slots ws ON ws.workout_id = w.id AND ws.phase = 'main'
+       WHERE w.id = $1
+       LIMIT 1`,
+      [workoutId]
+    );
+
+    const workout = wResult.rows[0];
+    if (!workout) {
+      return res.status(404).json({ error: 'Workout not found' });
+    }
+
+    // Count exercises and estimate duration for main work
+    // Formula: exercises × avgSets × 2 min (~30s work + ~90s rest per set)
+    // Must match client-side calculation in Workout.jsx
+    const exResult = await pool.query(
+      `SELECT COUNT(*) as count,
+              COALESCE(AVG(COALESCE(default_sets, 3)), 3) as avg_sets
+       FROM exercises WHERE workout_id = $1 AND sort_order >= 0`,
+      [workoutId]
+    );
+    const exerciseCount = parseInt(exResult.rows[0].count);
+    const avgSets = parseFloat(exResult.rows[0].avg_sets) || 3;
+    const mainEstSecs = Math.round(exerciseCount * avgSets * 2) * 60;
+
+    // Determine workout type from name for breathwork/focus mapping
+    const nameLower = workout.name.toLowerCase();
+    let workoutType = 'full_body';
+    if (nameLower.includes('push')) workoutType = 'push';
+    else if (nameLower.includes('pull')) workoutType = 'pull';
+    else if (nameLower.includes('leg') || nameLower.includes('lower')) workoutType = 'legs';
+    else if (nameLower.includes('upper')) workoutType = 'upper';
+    else if (nameLower.includes('hiit') || nameLower.includes('cardio')) workoutType = 'hiit';
+    else if (nameLower.includes('yoga')) workoutType = 'yoga';
+    else if (nameLower.includes('rest') || nameLower.includes('recovery')) workoutType = 'rest';
+
+    const techniqueNames = TECHNIQUE_MAP[workoutType] || TECHNIQUE_MAP.full_body;
+
+    // Look up technique IDs from breathwork_techniques
+    const [openingTech, closingTech] = await Promise.all([
+      pool.query(`SELECT id, name FROM breathwork_techniques WHERE LOWER(name) = LOWER($1) LIMIT 1`, [techniqueNames.opening]),
+      pool.query(`SELECT id, name FROM breathwork_techniques WHERE LOWER(name) = LOWER($1) LIMIT 1`, [techniqueNames.closing]),
+    ]);
+
+    // Fallback: grab any energizing/calming technique
+    let openingId = openingTech.rows[0]?.id || null;
+    let openingName = openingTech.rows[0]?.name || techniqueNames.opening;
+    let closingId = closingTech.rows[0]?.id || null;
+    let closingName = closingTech.rows[0]?.name || techniqueNames.closing;
+
+    if (!openingId) {
+      const fb = await pool.query(`SELECT id, name FROM breathwork_techniques WHERE category = 'energizing' LIMIT 1`);
+      if (fb.rows[0]) { openingId = fb.rows[0].id; openingName = fb.rows[0].name; }
+    }
+    if (!closingId) {
+      const fb = await pool.query(`SELECT id, name FROM breathwork_techniques WHERE category = 'calming' LIMIT 1`);
+      if (fb.rows[0]) { closingId = fb.rows[0].id; closingName = fb.rows[0].name; }
+    }
+
+    const focusAreas = FOCUS_MAP[workoutType] || ['full body'];
+
+    const warmupDuration = 300;
+    const cooldownDuration = 300;
+    const breathworkDuration = 300;
+
+    res.json({
+      workout: {
+        id: workout.id,
+        name: workout.name,
+        day_of_week: workout.day_of_week,
+        label: workout.label,
+        type: workoutType,
+      },
+      phases: {
+        opening_breathwork: {
+          suggested_technique_id: openingId,
+          suggested_technique_name: openingName,
+          duration: breathworkDuration,
+        },
+        warmup: {
+          default_duration: warmupDuration,
+          default_level: 'beginner',
+          focus_areas: focusAreas,
+        },
+        main_work: {
+          exercise_count: exerciseCount,
+          estimated_duration: mainEstSecs,
+        },
+        cooldown: {
+          default_duration: cooldownDuration,
+          default_level: 'beginner',
+          focus_areas: focusAreas,
+        },
+        closing_breathwork: {
+          suggested_technique_id: closingId,
+          suggested_technique_name: closingName,
+          duration: breathworkDuration,
+        },
+      },
+      total_estimated_duration: breathworkDuration * 2 + warmupDuration + cooldownDuration + mainEstSecs,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/session/complete-5phase — log a completed 5-phase session
+router.post('/complete-5phase', async (req, res, next) => {
+  try {
+    const { session_id, workout_id, total_duration, phases } = req.body;
+
+    if (!phases || typeof phases !== 'object' || Array.isArray(phases)) {
+      return res.status(400).json({ error: 'phases object is required' });
+    }
+
+    const phasesStr = JSON.stringify(phases);
+    if (phasesStr.length > 50000) {
+      return res.status(400).json({ error: 'phases data too large' });
+    }
+
+    const dur = Math.max(0, parseInt(total_duration, 10) || 0);
+
+    if (session_id) {
+      // Update existing session
+      const result = await pool.query(
+        `UPDATE sessions
+         SET completed = true, completed_at = NOW(),
+             duration = $1, type = '5phase', phases_json = $2
+         WHERE id = $3 AND user_id = $4
+         RETURNING *`,
+        [dur, phasesStr, session_id, req.user.id]
+      );
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      return res.json({ session: result.rows[0], logged: true });
+    }
+
+    // Create new session record
+    const wId = workout_id ? parseInt(workout_id, 10) : null;
+    const result = await pool.query(
+      `INSERT INTO sessions (user_id, workout_id, type, date, started_at, completed_at, completed, duration, phases_json)
+       VALUES ($1, $2, '5phase', CURRENT_DATE, NOW() - INTERVAL '1 second' * $3, NOW(), true, $3, $4)
+       RETURNING *`,
+      [req.user.id, wId, dur, phasesStr]
+    );
+
+    res.status(201).json({ session: result.rows[0], logged: true });
   } catch (err) {
     next(err);
   }
