@@ -8,13 +8,22 @@
 |---|--------|--------|--------|---------|---------|-------|
 | 1 | Breathwork Timer UI | feature/breathwork-timer | ✅ Shipped | Apr 9 | Apr 10 | 49 techniques, expanding circle animation, phase colors, session logging. iOS wake lock deferred. |
 | 2 | Yoga Session Builder | feature/yoga-session-builder | ✅ Shipped | Apr 10 | Apr 10 | Level filtering (beginner/intermediate/advanced), focus area prioritization, 265 poses, smart description fallback, scrollable info popup |
-| 3 | 5-Phase Session Integration | feature/5-phase-session | 🔒 Blocked | | | Depends on T1 + T2. Unifies workout into 5-phase structure |
+| 3 | 5-Phase Session Integration | feature/5-phase-session | ✅ Shipped | Apr 11 | Apr 11 | 5-phase session flow with state machine orchestrator, pre-session overview, phase auto-flow (no confirmation screens), unified summary, silent sit auto-end. DB migrations: category column (269 yoga poses categorized into warmup/standing/peak/floor/cooldown/savasana/flow), practice_types TEXT[] (vinyasa/hatha/yin/restorative/sun_salutation), hold_times_json JSONB, tracking_type (duration for Plank etc.), phases_json on sessions. usePausableTimer shared hook. Progressive filter broadening (min 3 poses for warm-up/cool-down). Workout tab cleanup (main work only). Consistent duration calculation. Breathing sounds with mute toggle. Skip exercise button. iOS AudioContext fix. Previous button removed from yoga phases. |
 
-**Progress: 2/3 tickets shipped**
+**Progress: 3/3 tickets shipped**
 
-**Build Order:**
-- T1 and T2 can run in parallel (independent)
-- T3 blocked until T1 + T2 merged
+**Sprint 4 COMPLETE — Phase 2 (Yoga + Breathwork) done.**
+DailyForge is now the unified 3-pillar app: Strength + Yoga + Breathwork in one 5-phase session.
+
+## Database Schema Updates (Sprint 4)
+
+| Column | Table | Type | Purpose |
+|--------|-------|------|---------|
+| category | exercises | VARCHAR(20) | Yoga pose role in session flow: warmup, standing, peak, floor, cooldown, savasana, flow |
+| practice_types | exercises | TEXT[] | Which yoga styles a pose belongs to: vinyasa, hatha, yin, restorative, sun_salutation |
+| hold_times_json | exercises | JSONB | Per-practice-type hold duration in seconds |
+| tracking_type | exercises | VARCHAR(20) | Exercise input type: weight_reps (default), duration (timed holds like Plank) |
+| phases_json | sessions | JSONB | Stores 5-phase session results (breathwork/yoga/strength per phase) |
 
 ---
 
