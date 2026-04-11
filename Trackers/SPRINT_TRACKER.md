@@ -8,8 +8,10 @@
 |---|--------|--------|--------|---------|---------|-------|
 | 1 | Progression Graphs | feature/progression-graphs | ✅ Shipped | Apr 11 | Apr 12 | Recharts installed, exercise_progress_cache + breathwork_logs tables, charts for all 3 pillars (strength/yoga/breathwork), URL-based section expand state, gold PR dots via custom dot renderer, collapsed-by-default sections. Brzycki 1RM from best set, first-session-max baseline for improvement %, working-set filter (excludes warmup/dropset/failure), reps-aware PR detection consistent across chart and history, lazy cache backfill with partial-cache detection, AbortController-style stale-fetch guard via requestId epoch. |
 | 2 | Workout Calendar | feature/workout-calendar | ✅ Shipped | Apr 12 | Apr 12 | Inline calendar in Profile, colored dots by session type (gold/teal/blue), bottom sheet with swipe-to-close, streak counter + highlight on consecutive days, month navigation |
+| 3 | Body Measurements | feature/body-measurements | ✅ Shipped | Apr 12 | Apr 12 | Weight + 5 circumferences + body fat % + BMI + 7-day rolling avg + progress photos (IndexedDB). Unit toggle (metric/imperial). Recharts trend charts. Empty state polish. ApiError sanitization. |
+| 4 | Smart Suggestions (Rule-Based) | feature/smart-suggestions | ✅ Shipped | Apr 12 | Apr 12 | Rule-based suggestions for all 3 pillars, inline hint text, tap-to-apply for strength. Service layer split (server/src/services/{users,suggestions}.js) keeps rules pure and testable for future ML swap. Batch endpoints `/api/suggestions/yoga?exerciseIds=` and `/api/suggestions/breathwork?techniqueIds=` — PosePreviewModal and Breathwork page fetch once per screen instead of once per card. Cap guards prevent suggesting below user's last value (120s yoga / 12 cycles breathwork). Imperial progression math done in native unit (+5 lb barbell / +2.5 lb dumbbell) to avoid kg→lb round-trip fractions. Float-safe weight equality via epsilon. |
 
-**Progress: 2/? tickets shipped**
+**Progress: 4/? tickets shipped**
 
 ---
 

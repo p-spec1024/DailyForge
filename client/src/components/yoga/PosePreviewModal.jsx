@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import PoseCard from './PoseCard.jsx';
 import PoseInfoPopup from './PoseInfoPopup.jsx';
+import { api } from '../../utils/api.js';
 
 const TYPE_LABELS = {
   vinyasa: 'Vinyasa',
@@ -141,6 +142,7 @@ const s = {
 
 export default function PosePreviewModal({ session, config, isGenerating, onRegenerate, onBegin, onClose }) {
   const [infoPose, setInfoPose] = useState(null);
+  const [suggestions, setSuggestions] = useState({});
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -150,6 +152,19 @@ export default function PosePreviewModal({ session, config, isGenerating, onRege
 
   useEffect(() => {
     setInfoPose(null);
+  }, [session]);
+
+  useEffect(() => {
+    const ids = (session?.poses || [])
+      .map(p => p.id)
+      .filter(id => Number.isFinite(Number(id)));
+    if (ids.length === 0) { setSuggestions({}); return; }
+    let cancelled = false;
+    const unique = Array.from(new Set(ids));
+    api.get(`/suggestions/yoga?exerciseIds=${unique.join(',')}`)
+      .then(data => { if (!cancelled) setSuggestions(data?.suggestions || {}); })
+      .catch(() => { if (!cancelled) setSuggestions({}); });
+    return () => { cancelled = true; };
   }, [session]);
 
   const grouped = useMemo(() => {
@@ -214,6 +229,7 @@ export default function PosePreviewModal({ session, config, isGenerating, onRege
                 pose={pose}
                 isPeak={phase === 'peak'}
                 onInfo={setInfoPose}
+                suggestion={suggestions[pose.id]}
               />
             ))}
           </div>

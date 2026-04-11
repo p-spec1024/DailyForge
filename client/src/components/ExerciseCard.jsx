@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { C, MONO, GOLD, typeColor, formatExerciseDetail, youtubeSearchUrl, extractVideoId, YTIcon } from './workout/tokens.jsx';
 import { usePausableTimer } from '../hooks/usePausableTimer.js';
+import SuggestionHint from './workout/SuggestionHint.jsx';
+import { api } from '../utils/api.js';
 
 /* ── Exercise Detail Expanded View (view mode only) ── */
 function ExerciseDetail({ exercise, onSwap, onReset }) {
@@ -485,6 +487,7 @@ export function ExerciseSessionCard({ exercise, sets, previousData, prData, onLo
     return result;
   });
   const inputRefs = useRef({});
+  const [suggestion, setSuggestion] = useState(null);
 
   useEffect(() => {
     setLocalSets(prev => {
@@ -496,6 +499,42 @@ export function ExerciseSessionCard({ exercise, sets, previousData, prData, onLo
     });
     if (sets.length > setCount) setSetCount(sets.length);
   }, [sets]);
+
+  // Fetch progressive-overload suggestion (strength only; skip duration-tracked)
+  useEffect(() => {
+    if (!exercise?.id || exercise.tracking_type === 'duration') {
+      setSuggestion(null);
+      return;
+    }
+    let cancelled = false;
+    api.get(`/suggestions/strength/${exercise.id}`)
+      .then(data => { if (!cancelled) setSuggestion(data); })
+      .catch(() => { if (!cancelled) setSuggestion(null); });
+    return () => { cancelled = true; };
+  }, [exercise?.id, exercise?.tracking_type]);
+
+  function applySuggestion(weight, reps) {
+    setLocalSets(prev => {
+      const next = { ...prev };
+      // Prefer the first incomplete non-warmup set.
+      // Fall back to the first incomplete set of any type so an all-warmup
+      // configuration still responds to the tap.
+      let target = null;
+      let fallback = null;
+      for (let i = 1; i <= setCount; i++) {
+        const s = next[i];
+        if (s?.completed) continue;
+        if (fallback == null) fallback = i;
+        if ((s?.set_type || 'normal') !== 'warmup') { target = i; break; }
+      }
+      const idx = target ?? fallback;
+      if (idx != null) {
+        const s = next[idx];
+        next[idx] = { ...(s || {}), weight, reps, set_type: s?.set_type || 'normal' };
+      }
+      return next;
+    });
+  }
 
   const color = typeColor(exercise.exercise_type || exercise.type);
   const muscles = exercise.target_muscles
@@ -635,6 +674,14 @@ export function ExerciseSessionCard({ exercise, sets, previousData, prData, onLo
                 }}>{h}</div>
               ))}
             </div>
+            {suggestion && suggestion.suggestedWeight != null && (
+              <SuggestionHint
+                suggestedWeight={suggestion.suggestedWeight}
+                suggestedReps={suggestion.suggestedReps}
+                unit={suggestion.unit}
+                onApply={applySuggestion}
+              />
+            )}
             {Array.from({ length: setCount }, (_, i) => i + 1).map(setNum => (
               <SetRow
                 key={setNum}

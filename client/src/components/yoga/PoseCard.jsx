@@ -121,10 +121,14 @@ const base = {
   },
 };
 
-export default function PoseCard({ pose, isPeak, onInfo }) {
+export default function PoseCard({ pose, isPeak, onInfo, suggestion }) {
   const muscles = pose.target_muscles
     ? pose.target_muscles.split(',').map(m => m.trim()).join(' · ')
     : '';
+
+  const showHint =
+    suggestion &&
+    (suggestion.reason === 'duration_increase' || suggestion.reason === 'maintain');
 
   return (
     <div style={isPeak ? base.cardPeak : base.card}>
@@ -134,6 +138,18 @@ export default function PoseCard({ pose, isPeak, onInfo }) {
       <div style={base.body}>
         <div style={base.name}>{pose.name}</div>
         {muscles && <div style={isPeak ? base.musclesPeak : base.muscles}>{muscles}</div>}
+        {showHint && (
+          <div style={{
+            fontSize: 11,
+            color: 'rgba(255,255,255,0.4)',
+            marginTop: 2,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}>
+            Try holding for {suggestion.suggestedHoldSeconds}s today
+          </div>
+        )}
       </div>
       <div style={isPeak ? base.durPeak : base.dur}>{pose.hold_seconds}s</div>
       <button style={isPeak ? base.infoPeak : base.info} onClick={() => onInfo(pose)}>ⓘ</button>

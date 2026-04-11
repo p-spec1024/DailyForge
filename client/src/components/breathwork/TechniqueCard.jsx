@@ -18,10 +18,14 @@ function capitalize(s) {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
 }
 
-export default function TechniqueCard({ technique, onClick }) {
+export default function TechniqueCard({ technique, onClick, suggestion }) {
   const {
     name, tradition, category, difficulty, safety_level, estimated_duration,
   } = technique;
+
+  const showHint =
+    suggestion &&
+    (suggestion.reason === 'cycle_increase' || suggestion.reason === 'maintain');
 
   return (
     <div
@@ -39,6 +43,11 @@ export default function TechniqueCard({ technique, onClick }) {
       <div style={{ fontSize: 16, fontWeight: 600, color: C.text, marginBottom: 8 }}>
         {name}
       </div>
+      {showHint && (
+        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>
+          Ready for {suggestion.suggestedCycles} cycles
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
         <span style={{

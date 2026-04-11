@@ -15,6 +15,7 @@ export default function Breathwork() {
   const [techniques, setTechniques] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all');
   const [loading, setLoading] = useState(true);
+  const [suggestions, setSuggestions] = useState({});
 
   useEffect(() => {
     setLoading(true);
@@ -24,6 +25,16 @@ export default function Breathwork() {
       .catch(() => setTechniques([]))
       .finally(() => setLoading(false));
   }, [activeFilter]);
+
+  useEffect(() => {
+    const ids = techniques.map(t => t.id).filter(Boolean);
+    if (ids.length === 0) { setSuggestions({}); return; }
+    let cancelled = false;
+    api.get(`/suggestions/breathwork?techniqueIds=${ids.join(',')}`)
+      .then(data => { if (!cancelled) setSuggestions(data?.suggestions || {}); })
+      .catch(() => { if (!cancelled) setSuggestions({}); });
+    return () => { cancelled = true; };
+  }, [techniques]);
 
   return (
     <div style={{ maxWidth: 420, margin: '0 auto', padding: '20px 16px' }}>
@@ -79,6 +90,7 @@ export default function Breathwork() {
             <TechniqueCard
               key={t.id}
               technique={t}
+              suggestion={suggestions[t.id]}
               onClick={() => navigate(`/breathe/${t.id}`)}
             />
           ))}

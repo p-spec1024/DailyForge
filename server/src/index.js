@@ -13,6 +13,7 @@ import progressRoutes from './routes/progress.js';
 import bodyMeasurementsRoutes from './routes/bodyMeasurements.js';
 import progressPhotosRoutes from './routes/progressPhotos.js';
 import usersRoutes from './routes/users.js';
+import suggestionsRoutes from './routes/suggestions.js';
 
 const app = express();
 
@@ -34,6 +35,7 @@ app.use('/api/progress', progressRoutes);
 app.use('/api/body-measurements', bodyMeasurementsRoutes);
 app.use('/api/progress-photos', progressPhotosRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/suggestions', suggestionsRoutes);
 
 app.use(errorHandler);
 
