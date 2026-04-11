@@ -9,6 +9,7 @@ import settingsRoutes from './routes/settings.js';
 import mediaRoutes from './routes/media.js';
 import breathworkRoutes from './routes/breathwork.js';
 import yogaRoutes from './routes/yoga.js';
+import progressRoutes from './routes/progress.js';
 
 const app = express();
 
@@ -26,6 +27,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/breathwork', breathworkRoutes);
 app.use('/api/yoga', yogaRoutes);
+app.use('/api/progress', progressRoutes);
 
 app.use(errorHandler);
 

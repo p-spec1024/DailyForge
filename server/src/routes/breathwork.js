@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { authenticate } from '../middleware/auth.js';
+import { recalculateBreathwork } from '../services/progressService.js';
 
 const router = Router();
 
@@ -70,6 +71,11 @@ router.post('/sessions', authenticate, async (req, res, next) => {
        VALUES ($1, $2, $3, $4, $5) RETURNING id`,
       [user_id, technique_id, duration_seconds, rounds_completed, !!completed],
     );
+
+    // Update progression cache for this technique (fire-and-forget)
+    if (completed) {
+      recalculateBreathwork(user_id, technique_id).catch(() => {});
+    }
 
     res.json({ id: rows[0].id, logged: true });
   } catch (err) {

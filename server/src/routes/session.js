@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { authenticate } from '../middleware/auth.js';
+import { recalculateForSession } from '../services/progressService.js';
 
 const router = Router();
 router.use(authenticate);
@@ -363,6 +364,9 @@ router.put('/:id/complete', async (req, res, next) => {
     const durationSecs = session.duration || 0;
     const mins = Math.floor(durationSecs / 60);
 
+    // Fire-and-forget progression cache recalc for all exercises in this session
+    recalculateForSession(sessionId).catch(() => {});
+
     res.json({
       session: {
         id: session.id,
@@ -663,6 +667,7 @@ router.post('/complete-5phase', async (req, res, next) => {
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Session not found' });
       }
+      recalculateForSession(result.rows[0].id).catch(() => {});
       return res.json({ session: result.rows[0], logged: true });
     }
 
@@ -675,6 +680,7 @@ router.post('/complete-5phase', async (req, res, next) => {
       [req.user.id, wId, dur, phasesStr]
     );
 
+    recalculateForSession(result.rows[0].id).catch(() => {});
     res.status(201).json({ session: result.rows[0], logged: true });
   } catch (err) {
     next(err);

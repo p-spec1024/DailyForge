@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { authenticate } from '../middleware/auth.js';
 import crypto from 'crypto';
+import { recalculateForSession } from '../services/progressService.js';
 
 const router = Router();
 
@@ -296,6 +297,8 @@ router.post('/session', authenticate, async (req, res, next) => {
     }
 
     await client.query('COMMIT');
+    // Fire-and-forget progression cache recalc for logged poses
+    recalculateForSession(sessionId).catch(() => {});
     res.status(201).json({ id: sessionId, logged: true });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

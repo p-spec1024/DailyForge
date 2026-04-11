@@ -1,5 +1,17 @@
 # DailyForge — Sprint Tracker
 
+## Sprint 5 — Week of Apr 11, 2026
+
+**Goal:** Phase 3 — Analytics + Choice. Visual proof of gains across all 3 pillars.
+
+| # | Ticket | Branch | Status | Started | Shipped | Notes |
+|---|--------|--------|--------|---------|---------|-------|
+| 1 | Progression Graphs | feature/progression-graphs | ✅ Shipped | Apr 11 | Apr 12 | Recharts installed, exercise_progress_cache + breathwork_logs tables, charts for all 3 pillars (strength/yoga/breathwork), URL-based section expand state, gold PR dots via custom dot renderer, collapsed-by-default sections. Brzycki 1RM from best set, first-session-max baseline for improvement %, working-set filter (excludes warmup/dropset/failure), reps-aware PR detection consistent across chart and history, lazy cache backfill with partial-cache detection, AbortController-style stale-fetch guard via requestId epoch. |
+
+**Progress: 1/? tickets shipped**
+
+---
+
 ## Sprint 4 — Week of Apr 9, 2026
 
 **Goal:** Complete Phase 2 — Yoga + Breathwork. Transform DailyForge into the unified 3-pillar app.

@@ -165,6 +165,60 @@ CREATE TABLE IF NOT EXISTS user_settings (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- S5-T1: Progression cache for fast history/chart loads.
+-- kind differentiates strength/yoga (exercises.id) from breathwork (breathwork_techniques.id)
+-- since those live in separate ID namespaces.
+CREATE TABLE IF NOT EXISTS exercise_progress_cache (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  exercise_id INTEGER NOT NULL,
+  kind VARCHAR(20) NOT NULL DEFAULT 'strength' CHECK (kind IN ('strength','yoga','breathwork')),
+
+  -- Strength metrics
+  best_weight DECIMAL(6,2),
+  best_weight_date DATE,
+  best_volume INTEGER,
+  best_volume_date DATE,
+  estimated_1rm DECIMAL(6,2),
+
+  -- Yoga metrics
+  best_hold_seconds INTEGER,
+  best_hold_date DATE,
+
+  -- Breathwork metrics
+  best_breath_hold_seconds INTEGER,
+  best_breath_hold_date DATE,
+  total_rounds INTEGER,
+
+  -- Common
+  total_sessions INTEGER DEFAULT 0,
+  first_session_date DATE,
+  last_session_date DATE,
+  improvement_percentage DECIMAL(6,2),
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+  UNIQUE(user_id, exercise_id, kind)
+);
+
+-- S5-T1: Optional per-technique breathwork log for hold-time/rounds tracking.
+CREATE TABLE IF NOT EXISTS breathwork_logs (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
+  technique_id INTEGER NOT NULL REFERENCES breathwork_techniques(id),
+
+  rounds_completed INTEGER NOT NULL,
+  avg_hold_seconds INTEGER,
+  max_hold_seconds INTEGER,
+  total_duration_seconds INTEGER,
+  ratio_used VARCHAR(20),
+
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
 `;
 
 const alterations = `
@@ -216,6 +270,11 @@ DO $$ BEGIN
   END IF;
 END $$;
 UPDATE workout_slots SET phase = 'main' WHERE phase IS NULL OR phase = 'main';
+
+-- S5-T1: session_exercises columns for yoga/breathwork tracking
+ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS hold_duration_seconds INTEGER;
+ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS rounds_completed INTEGER;
+ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS technique_ratio VARCHAR(20);
 `;
 
 const indexes = `
@@ -242,6 +301,11 @@ CREATE INDEX IF NOT EXISTS idx_breathwork_tradition ON breathwork_techniques (tr
 CREATE INDEX IF NOT EXISTS idx_breathwork_difficulty ON breathwork_techniques (difficulty);
 CREATE INDEX IF NOT EXISTS idx_breathwork_safety ON breathwork_techniques (safety_level);
 CREATE INDEX IF NOT EXISTS idx_breathwork_category ON breathwork_techniques (category);
+CREATE INDEX IF NOT EXISTS idx_progress_cache_user ON exercise_progress_cache(user_id);
+CREATE INDEX IF NOT EXISTS idx_progress_cache_exercise ON exercise_progress_cache(exercise_id, kind);
+CREATE INDEX IF NOT EXISTS idx_breathwork_logs_user ON breathwork_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_breathwork_logs_technique ON breathwork_logs(technique_id);
+CREATE INDEX IF NOT EXISTS idx_breathwork_logs_date ON breathwork_logs(created_at);
 `;
 
 async function migrate() {

@@ -8,39 +8,9 @@ import Workout from './pages/Workout.jsx';
 import Breathwork from './pages/Breathwork.jsx';
 import BreathworkTimer from './pages/BreathworkTimer.jsx';
 import Yoga from './pages/Yoga.jsx';
-
-function PlaceholderPage({ title, onLogout }) {
-  return (
-    <div style={{
-      maxWidth: 420, margin: '0 auto', padding: '20px 16px',
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', minHeight: 'calc(100vh - 80px)',
-    }}>
-      <h2 style={{ fontSize: 20, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>{title}</h2>
-    </div>
-  );
-}
-
-function ProfilePage({ onLogout }) {
-  return (
-    <div style={{
-      maxWidth: 420, margin: '0 auto', padding: '20px 16px',
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', minHeight: 'calc(100vh - 80px)',
-    }}>
-      <h2 style={{ fontSize: 20, fontWeight: 500, color: 'rgba(255,255,255,0.6)' }}>Profile</h2>
-      {onLogout && (
-        <button onClick={onLogout} style={{
-          marginTop: 24, padding: '10px 24px', borderRadius: 8,
-          background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)',
-          color: 'rgba(255,255,255,0.7)', fontSize: 14, cursor: 'pointer',
-        }}>
-          Log out
-        </button>
-      )}
-    </div>
-  );
-}
+import Profile from './pages/Profile.jsx';
+import ExerciseHistory from './pages/ExerciseHistory.jsx';
+import ExerciseProgress from './pages/ExerciseProgress.jsx';
 
 export default function App() {
   const { user, loading, login, register, logout } = useAuth();
@@ -65,7 +35,9 @@ export default function App() {
           <Route path="/yoga" element={<Yoga />} />
           <Route path="/breathe" element={<Breathwork />} />
           <Route path="/breathe/:techniqueId" element={<BreathworkTimer />} />
-          <Route path="/profile" element={<ProfilePage onLogout={logout} />} />
+          <Route path="/profile" element={<Profile onLogout={logout} />} />
+          <Route path="/exercise-history" element={<ExerciseHistory />} />
+          <Route path="/progress/:exerciseId" element={<ExerciseProgress />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
