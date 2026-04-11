@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { C, MONO, formatVolume } from './workout/tokens.jsx';
 
-export default function SessionHeader({ elapsed, totalVolume, onFinish, onDiscard, onSettings, formatTime, isFinishing }) {
-  const hasSettings = typeof onSettings === 'function';
+export default function SessionHeader({ elapsed, totalVolume, onFinish, onDiscard, onPause, formatTime, isFinishing }) {
   const [showMenu, setShowMenu] = useState(false);
 
   return (
@@ -30,17 +29,16 @@ export default function SessionHeader({ elapsed, totalVolume, onFinish, onDiscar
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {/* Timer settings gear — only shown when handler is provided */}
-          {hasSettings && (
-            <button onClick={onSettings} style={{
+          {/* Pause button */}
+          {onPause && (
+            <button onClick={onPause} style={{
               width: 32, height: 32, borderRadius: 8, border: 'none',
               background: 'rgba(255,255,255,0.06)', color: C.textMuted,
               cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16" rx="1" />
+                <rect x="14" y="4" width="4" height="16" rx="1" />
               </svg>
             </button>
           )}

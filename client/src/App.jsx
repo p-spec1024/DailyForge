@@ -8,6 +8,7 @@ import Workout from './pages/Workout.jsx';
 import Breathwork from './pages/Breathwork.jsx';
 import BreathworkTimer from './pages/BreathworkTimer.jsx';
 import Yoga from './pages/Yoga.jsx';
+import Session from './pages/Session.jsx';
 import Profile from './pages/Profile.jsx';
 import ExerciseHistory from './pages/ExerciseHistory.jsx';
 import ExerciseProgress from './pages/ExerciseProgress.jsx';
@@ -32,6 +33,7 @@ export default function App() {
       <div style={{ paddingBottom: 80 }}>
         <Routes>
           <Route path="/" element={<Workout onLogout={logout} />} />
+          <Route path="/session" element={<Session />} />
           <Route path="/yoga" element={<Yoga />} />
           <Route path="/breathe" element={<Breathwork />} />
           <Route path="/breathe/:techniqueId" element={<BreathworkTimer />} />

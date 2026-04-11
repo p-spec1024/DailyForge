@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useData } from '../contexts/DataProvider.jsx';
 import { useWorkoutSession } from '../hooks/useWorkoutSession.js';
 import { api } from '../utils/api.js';
@@ -165,6 +166,7 @@ function SettingsModal({ settings, onClose, onSave }) {
 
 /* ── Today's Workout View ── */
 function TodayView({ onLogout }) {
+  const navigate = useNavigate();
   const { workoutData: workout, workoutLoading: loading, fetchWorkout, invalidateWorkout } = useData();
   const [expandedId, setExpandedId] = useState(null);
   const [completedPhases, setCompletedPhases] = useState({});
@@ -462,8 +464,18 @@ function TodayView({ onLogout }) {
     );
   }
 
-  const totalDuration = workout.phases.reduce((s, p) => s + p.duration_min, 0);
-  const totalExercises = workout.phases.reduce((s, p) => s + p.exercises.length, 0);
+  // Only count main phase for the view mode summary
+  const mainPhase = workout.phases.find(p => p.phase === 'main');
+  const mainExercises = mainPhase ? mainPhase.exercises : [];
+  const mainExerciseCount = mainExercises.length;
+
+  // Realistic duration: ~2 min per exercise (sets × ~30s work + ~90s rest)
+  const avgSetsPerExercise = mainExercises.length > 0
+    ? mainExercises.reduce((s, ex) => s + (ex.default_sets || 3), 0) / mainExercises.length
+    : 3;
+  const mainWorkMin = Math.round(mainExerciseCount * avgSetsPerExercise * 2);
+  // Full session: breathwork (5+5) + warmup (5) + main + cooldown (5)
+  const fullSessionMin = 5 + 5 + mainWorkMin + 5 + 5;
 
   /* ─── ACTIVE SESSION MODE ─── */
   if (session.isActive) {
@@ -658,7 +670,7 @@ function TodayView({ onLogout }) {
             {workout.name}
           </h2>
           <div style={{ fontSize: 12, color: C.textSec }}>
-            {totalDuration} min &middot; {totalExercises} exercises
+            {mainExerciseCount} exercises &middot; ~{fullSessionMin} min full session
           </div>
         </div>
         {onLogout && (
@@ -677,45 +689,49 @@ function TodayView({ onLogout }) {
       {/* Phase Bar */}
       <PhaseBar phases={workout.phases} />
 
-      {/* Phase Sections */}
-      {workout.phases.map((phase, i) => (
+      {/* Only show main work exercises — other phases are handled by 5-phase flow */}
+      {mainPhase && (
         <PhaseSection
-          key={phase.phase || i}
-          phase={phase}
+          phase={mainPhase}
           expandedId={expandedId}
           onToggleExpand={toggleExpand}
           onSwap={handleOpenSwapPicker}
           onReset={handleResetToDefault}
         />
-      ))}
+      )}
 
-      {/* Start Workout (sticky at bottom) */}
+      {/* Start buttons (sticky at bottom) */}
       <div style={{
         position: 'sticky', bottom: 'calc(70px + env(safe-area-inset-bottom, 0px))', zIndex: 15, paddingTop: 12,
+        display: 'flex', gap: 8,
       }}>
+        <button
+          onClick={() => navigate('/session?type=strength')}
+          style={{
+            flex: 1, padding: '16px', borderRadius: 12,
+            background: 'rgba(29,158,117,0.15)', border: '1px solid rgba(29,158,117,0.25)',
+            color: C.green, fontSize: 15, fontWeight: 600, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            backdropFilter: 'blur(8px)',
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5,3 19,12 5,21" />
+          </svg>
+          Full Session
+        </button>
         <button
           onClick={handleStart}
           disabled={startDisabled}
           style={{
-            width: '100%', padding: '16px', borderRadius: 12,
-            background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
-            color: '#fff', fontSize: 16, fontWeight: 600, cursor: startDisabled ? 'default' : 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            padding: '16px 20px', borderRadius: 12,
+            background: 'rgba(255,255,255,0.06)', border: '0.5px solid rgba(255,255,255,0.1)',
+            color: C.textSec, fontSize: 13, fontWeight: 500, cursor: startDisabled ? 'default' : 'pointer',
             backdropFilter: 'blur(8px)',
             opacity: startDisabled ? 0.5 : 1,
-            transition: 'all 0.2s',
           }}
         >
-          {startDisabled ? (
-            <>Starting...</>
-          ) : (
-            <>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="5,3 19,12 5,21" />
-              </svg>
-              Start Workout
-            </>
-          )}
+          {startDisabled ? '...' : 'Quick'}
         </button>
       </div>
 

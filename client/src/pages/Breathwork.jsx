@@ -28,9 +28,16 @@ export default function Breathwork() {
   return (
     <div style={{ maxWidth: 420, margin: '0 auto', padding: '20px 16px' }}>
       {/* Header */}
-      <h1 style={{ fontSize: 24, fontWeight: 700, color: C.text, margin: '0 0 16px' }}>
-        Breathwork
-      </h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: C.text, margin: 0 }}>
+          Breathwork
+        </h1>
+        <button onClick={() => navigate('/session?type=breathwork')} style={{
+          padding: '6px 14px', borderRadius: 8,
+          background: 'rgba(167,139,250,0.1)', border: '0.5px solid rgba(167,139,250,0.25)',
+          color: '#a78bfa', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+        }}>Full Session</button>
+      </div>
 
       {/* Filter Chips */}
       <div style={{

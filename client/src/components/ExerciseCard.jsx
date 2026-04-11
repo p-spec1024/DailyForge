@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { C, MONO, GOLD, typeColor, formatExerciseDetail, youtubeSearchUrl, extractVideoId, YTIcon } from './workout/tokens.jsx';
+import { usePausableTimer } from '../hooks/usePausableTimer.js';
 
 /* ── Exercise Detail Expanded View (view mode only) ── */
 function ExerciseDetail({ exercise, onSwap, onReset }) {
@@ -342,8 +343,138 @@ function SetRow({ setNum, setData, previousSet, prs, onComplete, onWeightChange,
   );
 }
 
+/* ── Duration Set Row (timed exercises like Plank) ── */
+function DurationSetRow({ setNum, setData, previousSet, onComplete, onInputFocus }) {
+  const [duration, setDuration] = useState(setData?.reps ?? '');
+  const holdTimer = usePausableTimer();
+  const isCompleted = setData?.completed || false;
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const holdTimerRef = useRef(holdTimer);
+  holdTimerRef.current = holdTimer;
+
+  useEffect(() => {
+    if (setData?.reps != null && holdTimer.state === 'idle') setDuration(setData.reps);
+  }, [setData?.reps, holdTimer.state]);
+
+  // Auto-save if unmounting while timer is running (e.g. user skips exercise)
+  useEffect(() => {
+    return () => {
+      const t = holdTimerRef.current;
+      if (t.state === 'running' && t.elapsed > 0) {
+        onCompleteRef.current({ weight: 0, reps: t.elapsed, set_type: 'normal' });
+      }
+    };
+  }, []);
+
+  function handleStartTimer() {
+    if (onInputFocus) onInputFocus();
+    holdTimer.start();
+  }
+
+  function handleStopTimer() {
+    const secs = holdTimer.elapsed;
+    holdTimer.reset();
+    setDuration(secs);
+    onComplete({ weight: 0, reps: secs, set_type: 'normal' });
+  }
+
+  function handleManualComplete() {
+    const d = parseInt(duration) || 0;
+    if (d === 0) return;
+    onComplete({ weight: 0, reps: d, set_type: 'normal' });
+  }
+
+  function formatSecs(s) {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return m > 0 ? `${m}:${String(sec).padStart(2, '0')}` : `${s}s`;
+  }
+
+  return (
+    <div style={{
+      display: 'grid', gridTemplateColumns: '36px 72px 1fr 40px',
+      gap: 6, alignItems: 'center', padding: '6px 0',
+      background: isCompleted ? 'rgba(29,158,117,0.06)' : 'transparent',
+      borderRadius: 6, paddingLeft: 4, paddingRight: 4,
+    }}>
+      {/* Set number */}
+      <div style={{
+        width: 44, height: 44, borderRadius: 6,
+        background: isCompleted ? 'rgba(29,158,117,0.15)' : 'rgba(255,255,255,0.06)',
+        color: isCompleted ? C.green : C.textSec,
+        fontSize: 12, fontWeight: 600, fontFamily: MONO,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>{setNum}</div>
+
+      {/* Previous */}
+      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: MONO, textAlign: 'center' }}>
+        {previousSet ? formatSecs(previousSet.reps ?? 0) : '—'}
+      </div>
+
+      {/* Duration input or timer */}
+      {holdTimer.state === 'running' ? (
+        <button onClick={handleStopTimer} style={{
+          height: 44, borderRadius: 8, border: '1px solid rgba(216,90,48,0.3)',
+          background: 'rgba(216,90,48,0.1)',
+          color: '#D85A30', fontSize: 18, fontFamily: MONO, fontWeight: 600,
+          textAlign: 'center', cursor: 'pointer', width: '100%',
+        }}>
+          {formatSecs(holdTimer.elapsed)} ■
+        </button>
+      ) : (
+        <div style={{ display: 'flex', gap: 4 }}>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={duration}
+            onChange={e => setDuration(e.target.value)}
+            onFocus={e => { e.target.select(); if (onInputFocus) onInputFocus(); }}
+            placeholder="sec"
+            style={{
+              height: 44, borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)',
+              background: isCompleted ? 'rgba(29,158,117,0.08)' : 'rgba(255,255,255,0.04)',
+              color: C.text, fontSize: 15, fontFamily: MONO, textAlign: 'center',
+              outline: 'none', flex: 1, minWidth: 0,
+            }}
+          />
+          {!isCompleted && (
+            <button onClick={handleStartTimer} style={{
+              height: 44, width: 44, borderRadius: 8, border: 'none',
+              background: 'rgba(216,90,48,0.1)', color: '#D85A30',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5,3 19,12 5,21" />
+              </svg>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Checkmark */}
+      <button
+        onClick={handleManualComplete}
+        style={{
+          width: 40, height: 40, borderRadius: 8, border: 'none',
+          background: isCompleted ? 'rgba(29,158,117,0.2)' : 'rgba(255,255,255,0.06)',
+          color: isCompleted ? C.green : C.textMuted,
+          cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 /* ── Exercise Card (active session mode) ── */
-export function ExerciseSessionCard({ exercise, sets, previousData, prData, onLogSet, onInputFocus, onSwap, onReset }) {
+export function ExerciseSessionCard({ exercise, sets, previousData, prData, onLogSet, onInputFocus, onSwap, onReset, onSkip }) {
   const defaultSetCount = exercise.default_sets || 3;
   const [setCount, setSetCount] = useState(Math.max(defaultSetCount, sets.length));
   const [localSets, setLocalSets] = useState(() => {
@@ -414,22 +545,30 @@ export function ExerciseSessionCard({ exercise, sets, previousData, prData, onLo
                 }}>SWAPPED</span>
               )}
             </div>
-            {onSwap && (
-              <button onClick={() => onSwap(exercise)} style={{
-                padding: '4px 8px', borderRadius: 6, border: 'none',
-                background: 'rgba(255,255,255,0.06)', color: C.textMuted,
-                fontSize: 10, cursor: 'pointer',
-              }}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <polyline points="16 3 21 3 21 8" />
-                  <line x1="4" y1="20" x2="21" y2="3" />
-                  <polyline points="21 16 21 21 16 21" />
-                  <line x1="15" y1="15" x2="21" y2="21" />
-                  <line x1="4" y1="4" x2="9" y2="9" />
-                </svg>
-              </button>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {onSkip && (
+                <button onClick={() => onSkip()} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: C.textMuted, fontSize: 11, padding: '4px 6px',
+                }}>Skip ›</button>
+              )}
+              {onSwap && (
+                <button onClick={() => onSwap(exercise)} style={{
+                  padding: '4px 8px', borderRadius: 6, border: 'none',
+                  background: 'rgba(255,255,255,0.06)', color: C.textMuted,
+                  fontSize: 10, cursor: 'pointer',
+                }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <polyline points="16 3 21 3 21 8" />
+                    <line x1="4" y1="20" x2="21" y2="3" />
+                    <polyline points="21 16 21 21 16 21" />
+                    <line x1="15" y1="15" x2="21" y2="21" />
+                    <line x1="4" y1="4" x2="9" y2="9" />
+                  </svg>
+                </button>
+              )}
+            </div>
           </div>
           {muscles.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
@@ -458,39 +597,65 @@ export function ExerciseSessionCard({ exercise, sets, previousData, prData, onLo
           </button>
         )}
 
-        {/* Column headers */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: '36px 72px 1fr 1fr 40px',
-          gap: 6, padding: '4px 4px', marginBottom: 2,
-        }}>
-          {['SET', 'PREVIOUS', 'KG', 'REPS', ''].map((h, i) => (
-            <div key={i} style={{
-              fontSize: 9, fontWeight: 600, color: C.textMuted,
-              letterSpacing: '1px', textAlign: 'center',
-            }}>{h}</div>
-          ))}
-        </div>
-
-        {/* Set rows */}
-        {Array.from({ length: setCount }, (_, i) => i + 1).map(setNum => (
-          <SetRow
-            key={setNum}
-            setNum={setNum}
-            setData={localSets[setNum]}
-            previousSet={previousData?.sets?.find(s => s.setNumber === setNum) || null}
-            prs={prData?.[setNum] || null}
-            onComplete={(data) => handleComplete(setNum, data)}
-            onWeightChange={(v) => setLocalSets(prev => ({
-              ...prev, [setNum]: { ...prev[setNum], weight: v },
-            }))}
-            onRepsChange={(v) => setLocalSets(prev => ({
-              ...prev, [setNum]: { ...prev[setNum], reps: v },
-            }))}
-            onSetTypeChange={(t) => handleSetTypeChange(setNum, t)}
-            onInputFocus={onInputFocus}
-            inputRef={el => { inputRefs.current[setNum] = el; }}
-          />
-        ))}
+        {/* Column headers — adapt to tracking type */}
+        {exercise.tracking_type === 'duration' ? (
+          <>
+            <div style={{
+              display: 'grid', gridTemplateColumns: '36px 72px 1fr 40px',
+              gap: 6, padding: '4px 4px', marginBottom: 2,
+            }}>
+              {['SET', 'PREVIOUS', 'DURATION', ''].map((h, i) => (
+                <div key={i} style={{
+                  fontSize: 9, fontWeight: 600, color: C.textMuted,
+                  letterSpacing: '1px', textAlign: 'center',
+                }}>{h}</div>
+              ))}
+            </div>
+            {Array.from({ length: setCount }, (_, i) => i + 1).map(setNum => (
+              <DurationSetRow
+                key={setNum}
+                setNum={setNum}
+                setData={localSets[setNum]}
+                previousSet={previousData?.sets?.find(s => s.setNumber === setNum) || null}
+                onComplete={(data) => handleComplete(setNum, data)}
+                onInputFocus={onInputFocus}
+              />
+            ))}
+          </>
+        ) : (
+          <>
+            <div style={{
+              display: 'grid', gridTemplateColumns: '36px 72px 1fr 1fr 40px',
+              gap: 6, padding: '4px 4px', marginBottom: 2,
+            }}>
+              {['SET', 'PREVIOUS', 'KG', 'REPS', ''].map((h, i) => (
+                <div key={i} style={{
+                  fontSize: 9, fontWeight: 600, color: C.textMuted,
+                  letterSpacing: '1px', textAlign: 'center',
+                }}>{h}</div>
+              ))}
+            </div>
+            {Array.from({ length: setCount }, (_, i) => i + 1).map(setNum => (
+              <SetRow
+                key={setNum}
+                setNum={setNum}
+                setData={localSets[setNum]}
+                previousSet={previousData?.sets?.find(s => s.setNumber === setNum) || null}
+                prs={prData?.[setNum] || null}
+                onComplete={(data) => handleComplete(setNum, data)}
+                onWeightChange={(v) => setLocalSets(prev => ({
+                  ...prev, [setNum]: { ...prev[setNum], weight: v },
+                }))}
+                onRepsChange={(v) => setLocalSets(prev => ({
+                  ...prev, [setNum]: { ...prev[setNum], reps: v },
+                }))}
+                onSetTypeChange={(t) => handleSetTypeChange(setNum, t)}
+                onInputFocus={onInputFocus}
+                inputRef={el => { inputRefs.current[setNum] = el; }}
+              />
+            ))}
+          </>
+        )}
 
         {/* Add Set button */}
         <button

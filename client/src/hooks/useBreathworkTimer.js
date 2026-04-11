@@ -38,14 +38,34 @@ export function useBreathworkTimer(protocol) {
   const phasesRef = useRef(phases);
   phasesRef.current = phases;
 
-  // Haptic + audio feedback on phase transition.
-  // navigator.vibrate() is unsupported on iOS Safari.
-  // Fallback: AudioContext beep. iOS requires AudioContext to be created/resumed
-  // during a user gesture — call initAudio() from the start button's click handler.
+  // Audio context ref (shared with breathing sounds)
   const audioCtxRef = useRef(null);
+
+  // Sound enabled state — persisted in localStorage
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    try {
+      const saved = localStorage.getItem('dailyforge_breathwork_sound');
+      return saved !== null ? saved === 'true' : true; // default ON
+    } catch { return true; }
+  });
+
+  const toggleSound = useCallback(() => {
+    setSoundEnabled(prev => {
+      const next = !prev;
+      try { localStorage.setItem('dailyforge_breathwork_sound', String(next)); } catch {}
+      return next;
+    });
+  }, []);
+
+  const soundEnabledRef = useRef(soundEnabled);
+  soundEnabledRef.current = soundEnabled;
 
   const initAudio = useCallback(() => {
     try {
+      // Reuse AudioContext unlocked during a user gesture (e.g. BEGIN SESSION tap)
+      if (!audioCtxRef.current && window.__dailyforge_audio_ctx) {
+        audioCtxRef.current = window.__dailyforge_audio_ctx;
+      }
       if (!audioCtxRef.current) {
         audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
       }
@@ -75,6 +95,56 @@ export function useBreathworkTimer(protocol) {
     } catch {}
   }, []);
 
+  // Play breathing sounds — sine wave sweep for inhale (up) / exhale (down)
+  const playBreathSound = useCallback((phaseType) => {
+    if (!soundEnabledRef.current) return;
+    try {
+      const ctx = audioCtxRef.current;
+      if (!ctx || ctx.state !== 'running') return;
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+
+      const now = ctx.currentTime;
+      const dur = 1.2; // sound duration
+
+      if (phaseType === 'inhale') {
+        // Rising whoosh: 150 Hz → 400 Hz
+        osc.frequency.setValueAtTime(150, now);
+        osc.frequency.exponentialRampToValueAtTime(400, now + dur);
+        gain.gain.setValueAtTime(0.001, now);
+        gain.gain.exponentialRampToValueAtTime(0.06, now + dur * 0.3);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+      } else if (phaseType === 'exhale') {
+        // Falling whoosh: 400 Hz → 150 Hz
+        osc.frequency.setValueAtTime(400, now);
+        osc.frequency.exponentialRampToValueAtTime(150, now + dur);
+        gain.gain.setValueAtTime(0.06, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+      } else {
+        return; // no sound for hold/pause
+      }
+
+      osc.start(now);
+      osc.stop(now + dur);
+    } catch {}
+  }, []);
+
+  // Track phase transitions and play breath sounds outside of setState
+  // This avoids side effects inside the setState updater (React StrictMode safe)
+  const lastPhaseIndexRef = useRef(state.currentPhaseIndex);
+  useEffect(() => {
+    if (state.currentPhaseIndex !== lastPhaseIndexRef.current && state.isRunning) {
+      const p = phasesRef.current;
+      playBreathSound(p[state.currentPhaseIndex]?.type);
+      triggerHaptic();
+      lastPhaseIndexRef.current = state.currentPhaseIndex;
+    }
+  }, [state.currentPhaseIndex, state.isRunning, playBreathSound, triggerHaptic]);
+
   useEffect(() => {
     if (!state.isRunning || state.isComplete) {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -94,7 +164,7 @@ export function useBreathworkTimer(protocol) {
         next.secondsRemaining = Math.max(0, +(prev.secondsRemaining - decrement).toFixed(2));
 
         if (next.secondsRemaining <= 0) {
-          triggerHaptic();
+          // No side effects here — haptic/sound handled by the effect above
           let nextPhaseIndex = prev.currentPhaseIndex + 1;
           let nextRound = prev.currentRound;
 
@@ -117,17 +187,20 @@ export function useBreathworkTimer(protocol) {
     }, 1000);
 
     return () => clearInterval(intervalRef.current);
-  }, [state.isRunning, state.isComplete, totalRounds, triggerHaptic]);
+  }, [state.isRunning, state.isComplete, totalRounds]);
 
   const start = useCallback(() => {
     initAudio(); // Unlock AudioContext during user gesture (critical for iOS)
     const p = phasesRef.current;
+    // Play sound for the first phase
+    if (p[0]) playBreathSound(p[0].type);
+    lastPhaseIndexRef.current = 0;
     setState((prev) => ({
       ...prev,
       isRunning: true,
       secondsRemaining: prev.secondsRemaining || p[0]?.duration || 0,
     }));
-  }, [initAudio]);
+  }, [initAudio, playBreathSound]);
 
   const pause = useCallback(() => {
     setState((prev) => ({ ...prev, isRunning: false }));
@@ -155,6 +228,8 @@ export function useBreathworkTimer(protocol) {
     totalElapsed: state.totalElapsed,
     isRunning: state.isRunning,
     isComplete: state.isComplete,
+    soundEnabled,
+    toggleSound,
     initAudio,
     start,
     pause,

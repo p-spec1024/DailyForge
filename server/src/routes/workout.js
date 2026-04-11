@@ -53,7 +53,8 @@ router.get('/today', async (req, res, next) => {
     const exercisesResult = await pool.query(
       `SELECT e.id, e.workout_id, e.name, e.sanskrit_name, e.target_muscles, e.type,
               e.default_sets, e.default_reps, e.default_duration_secs,
-              e.description, e.url, e.source, e.difficulty, e.sort_order
+              e.description, e.url, e.source, e.difficulty, e.sort_order,
+              COALESCE(e.tracking_type, 'weight_reps') AS tracking_type
        FROM exercises e
        WHERE e.workout_id = ANY($1) AND e.sort_order >= 0
        ORDER BY e.sort_order`,
@@ -65,7 +66,8 @@ router.get('/today', async (req, res, next) => {
     const prefsResult = defaultExIds.length > 0 ? await pool.query(
       `SELECT uep.exercise_id AS original_id, e.id, e.name, e.sanskrit_name,
               e.target_muscles, e.type, e.default_sets, e.default_reps,
-              e.default_duration_secs, e.description, e.url, e.source, e.difficulty
+              e.default_duration_secs, e.description, e.url, e.source, e.difficulty,
+              COALESCE(e.tracking_type, 'weight_reps') AS tracking_type
        FROM user_exercise_prefs uep
        JOIN exercises e ON e.id = uep.chosen_exercise_id
        WHERE uep.user_id = $1 AND uep.exercise_id = ANY($2)`,
@@ -97,6 +99,7 @@ router.get('/today', async (req, res, next) => {
         url: src.url,
         source: src.source,
         difficulty: src.difficulty,
+        tracking_type: src.tracking_type || 'weight_reps',
         // Always include the slot default exercise id for reset comparison
         default_exercise_id: ex.id,
         default_exercise_name: ex.name,

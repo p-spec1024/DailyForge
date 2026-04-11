@@ -271,10 +271,30 @@ DO $$ BEGIN
 END $$;
 UPDATE workout_slots SET phase = 'main' WHERE phase IS NULL OR phase = 'main';
 
+-- 5-phase session support
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS category VARCHAR(20);
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS phases_json JSONB;
+
+-- Exercise tracking type: weight_reps (default), duration (timed holds), reps_only (bodyweight)
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS tracking_type VARCHAR(20) DEFAULT 'weight_reps';
+
+-- Practice type tagging for yoga poses (array: '{vinyasa,hatha,yin}')
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS practice_types TEXT[];
+
+-- Hold times per practice type as JSON
+ALTER TABLE exercises ADD COLUMN IF NOT EXISTS hold_times_json JSONB;
+
 -- S5-T1: session_exercises columns for yoga/breathwork tracking
 ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS hold_duration_seconds INTEGER;
 ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS rounds_completed INTEGER;
 ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS technique_ratio VARCHAR(20);
+
+-- Set known isometric/hold exercises to duration tracking (exact names only)
+UPDATE exercises SET tracking_type = 'duration' WHERE tracking_type = 'weight_reps' AND LOWER(name) IN (
+  'plank', 'side plank', 'side plank (left)', 'side plank (right)',
+  'wall sit', 'dead hang', 'l-sit',
+  'hollow body hold', 'superman hold', 'glute bridge hold'
+);
 `;
 
 const indexes = `
