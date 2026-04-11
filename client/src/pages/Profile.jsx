@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { C } from '../components/workout/tokens.jsx';
+import WorkoutCalendar from '../components/Calendar/WorkoutCalendar.jsx';
 
 export default function Profile({ onLogout }) {
   const navigate = useNavigate();
@@ -16,6 +17,8 @@ export default function Profile({ onLogout }) {
         fontSize: 20,
         fontWeight: 500,
       }}>Profile</h1>
+
+      <WorkoutCalendar />
 
       <div
         onClick={() => navigate('/exercise-history')}

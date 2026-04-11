@@ -687,4 +687,182 @@ router.post('/complete-5phase', async (req, res, next) => {
   }
 });
 
+// GET /api/session/calendar?month=YYYY-MM — sessions grouped by day + streak
+router.get('/calendar', async (req, res, next) => {
+  try {
+    const { month } = req.query;
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ error: 'month query (YYYY-MM) is required' });
+    }
+    const [yearStr, monthStr] = month.split('-');
+    const year = parseInt(yearStr, 10);
+    const mon = parseInt(monthStr, 10);
+    if (mon < 1 || mon > 12) {
+      return res.status(400).json({ error: 'Invalid month' });
+    }
+
+    // Month range [first, firstOfNext)
+    const firstOfMonth = `${yearStr}-${monthStr}-01`;
+    const nextMon = mon === 12 ? 1 : mon + 1;
+    const nextYear = mon === 12 ? year + 1 : year;
+    const firstOfNext = `${nextYear}-${String(nextMon).padStart(2, '0')}-01`;
+
+    // Fetch month sessions (completed only) joined with workout name
+    const sessionsRes = await pool.query(
+      `SELECT s.id, s.date, s.type, s.duration, s.phases_json, s.workout_id, w.name AS workout_name
+         FROM sessions s
+         LEFT JOIN workouts w ON w.id = s.workout_id
+        WHERE s.user_id = $1
+          AND s.completed = true
+          AND s.date >= $2::date
+          AND s.date <  $3::date
+        ORDER BY s.date ASC, s.id ASC`,
+      [req.user.id, firstOfMonth, firstOfNext]
+    );
+
+    // For session_exercises exercise count (non-5phase types)
+    const sessionIds = sessionsRes.rows.map(r => r.id);
+    const exerciseCounts = {};
+    if (sessionIds.length > 0) {
+      const placeholders = sessionIds.map((_, i) => `$${i + 1}`).join(',');
+      const countsRes = await pool.query(
+        `SELECT session_id, COUNT(DISTINCT exercise_id)::int AS cnt
+           FROM session_exercises
+          WHERE session_id IN (${placeholders})
+            AND completed = true
+            AND set_number IS NOT NULL
+          GROUP BY session_id`,
+        sessionIds
+      );
+      for (const row of countsRes.rows) {
+        exerciseCounts[row.session_id] = row.cnt;
+      }
+    }
+
+    const sessions = sessionsRes.rows.map(row => {
+      const phases = row.phases_json || null;
+
+      // Pick the "dominant" activity for a 5-phase session: whichever phase
+      // actually ran. Strength main work wins if it has any exercises, else
+      // yoga if warmup/cooldown ran, else breathwork.
+      let mainWorkType;
+      if (row.type !== '5phase') {
+        mainWorkType = row.type;
+      } else if (phases?.main_work?.exerciseNames?.length > 0) {
+        mainWorkType = 'strength';
+      } else if (phases?.warmup?.completed || phases?.cooldown?.completed) {
+        mainWorkType = 'yoga';
+      } else if (phases?.opening_breathwork?.completed || phases?.closing_breathwork?.completed) {
+        mainWorkType = 'breathwork';
+      } else {
+        mainWorkType = 'strength';
+      }
+
+      let exerciseCount = 0;
+      let prCount = 0;
+      let summary = null;
+
+      if (mainWorkType === 'strength') {
+        if (phases?.main_work?.exerciseNames?.length > 0) {
+          exerciseCount = phases.main_work.exerciseNames.length;
+          prCount = parseInt(phases.main_work.prs, 10) || 0;
+        } else {
+          exerciseCount = exerciseCounts[row.id] || 0;
+        }
+        summary = row.workout_name || 'Strength';
+      } else if (mainWorkType === 'yoga') {
+        const poseCount = (phases?.warmup?.poses_done || 0) + (phases?.cooldown?.poses_done || 0);
+        exerciseCount = poseCount;
+        summary = row.workout_name || 'Yoga flow';
+      } else if (mainWorkType === 'breathwork') {
+        summary = phases?.opening_breathwork?.technique_name
+               || phases?.closing_breathwork?.technique_name
+               || 'Breathwork';
+      } else {
+        summary = row.workout_name || row.type;
+      }
+
+      return {
+        id: row.id,
+        date: typeof row.date === 'string' ? row.date : row.date.toISOString().slice(0, 10),
+        type: row.type,
+        main_work_type: mainWorkType,
+        duration: row.duration || 0,
+        summary,
+        exercise_count: exerciseCount,
+        pr_count: prCount,
+      };
+    });
+
+    // Streak: consecutive days with ≥1 completed session counting back from today.
+    // Grace rule: if today has no session, start counting from yesterday.
+    const streakRes = await pool.query(
+      `SELECT DISTINCT date::text AS d
+         FROM sessions
+        WHERE user_id = $1 AND completed = true
+        ORDER BY d DESC
+        LIMIT 400`,
+      [req.user.id]
+    );
+    const sessionDates = new Set(streakRes.rows.map(r => r.d));
+
+    const today = new Date();
+    const todayStr = today.toISOString().slice(0, 10);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+    let current = 0;
+    const currentDates = [];
+    let cursor;
+    if (sessionDates.has(todayStr)) {
+      cursor = new Date(today);
+    } else if (sessionDates.has(yesterdayStr)) {
+      cursor = new Date(yesterday);
+    } else {
+      cursor = null;
+    }
+    while (cursor) {
+      const ds = cursor.toISOString().slice(0, 10);
+      if (sessionDates.has(ds)) {
+        current += 1;
+        currentDates.push(ds);
+        cursor.setDate(cursor.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+
+    // Best streak: scan all historical dates once
+    let best = 0;
+    const sortedAsc = [...sessionDates].sort();
+    let run = 0;
+    let prev = null;
+    for (const ds of sortedAsc) {
+      if (prev) {
+        const prevD = new Date(prev);
+        prevD.setDate(prevD.getDate() + 1);
+        const expected = prevD.toISOString().slice(0, 10);
+        if (expected === ds) {
+          run += 1;
+        } else {
+          run = 1;
+        }
+      } else {
+        run = 1;
+      }
+      if (run > best) best = run;
+      prev = ds;
+    }
+    if (current > best) best = current;
+
+    res.json({
+      sessions,
+      streak: { current, best, dates: currentDates },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
