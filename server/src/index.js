@@ -10,6 +10,9 @@ import mediaRoutes from './routes/media.js';
 import breathworkRoutes from './routes/breathwork.js';
 import yogaRoutes from './routes/yoga.js';
 import progressRoutes from './routes/progress.js';
+import bodyMeasurementsRoutes from './routes/bodyMeasurements.js';
+import progressPhotosRoutes from './routes/progressPhotos.js';
+import usersRoutes from './routes/users.js';
 
 const app = express();
 
@@ -28,6 +31,9 @@ app.use('/api/media', mediaRoutes);
 app.use('/api/breathwork', breathworkRoutes);
 app.use('/api/yoga', yogaRoutes);
 app.use('/api/progress', progressRoutes);
+app.use('/api/body-measurements', bodyMeasurementsRoutes);
+app.use('/api/progress-photos', progressPhotosRoutes);
+app.use('/api/users', usersRoutes);
 
 app.use(errorHandler);
 
