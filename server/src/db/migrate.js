@@ -203,6 +203,34 @@ CREATE TABLE IF NOT EXISTS exercise_progress_cache (
   UNIQUE(user_id, exercise_id, kind)
 );
 
+-- S5-T3: Body measurements (weight, body fat, circumferences) and progress photo metadata.
+CREATE TABLE IF NOT EXISTS body_measurements (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  measured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  weight_kg DECIMAL(5,2),
+  body_fat_percent DECIMAL(4,1),
+
+  waist_cm DECIMAL(5,1),
+  hips_cm DECIMAL(5,1),
+  chest_cm DECIMAL(5,1),
+  bicep_left_cm DECIMAL(5,1),
+  bicep_right_cm DECIMAL(5,1),
+
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS progress_photos (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  taken_at DATE NOT NULL,
+  view VARCHAR(10) DEFAULT 'front',
+  local_storage_key VARCHAR(100) NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- S5-T1: Optional per-technique breathwork log for hold-time/rounds tracking.
 CREATE TABLE IF NOT EXISTS breathwork_logs (
   id SERIAL PRIMARY KEY,
@@ -289,6 +317,10 @@ ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS hold_duration_seconds INT
 ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS rounds_completed INTEGER;
 ALTER TABLE session_exercises ADD COLUMN IF NOT EXISTS technique_ratio VARCHAR(20);
 
+-- S5-T3: User profile fields for body measurements (height required for BMI)
+ALTER TABLE users ADD COLUMN IF NOT EXISTS height_cm DECIMAL(5,1);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS unit_system VARCHAR(10) DEFAULT 'metric';
+
 -- Set known isometric/hold exercises to duration tracking (exact names only)
 UPDATE exercises SET tracking_type = 'duration' WHERE tracking_type = 'weight_reps' AND LOWER(name) IN (
   'plank', 'side plank', 'side plank (left)', 'side plank (right)',
@@ -326,6 +358,8 @@ CREATE INDEX IF NOT EXISTS idx_progress_cache_exercise ON exercise_progress_cach
 CREATE INDEX IF NOT EXISTS idx_breathwork_logs_user ON breathwork_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_breathwork_logs_technique ON breathwork_logs(technique_id);
 CREATE INDEX IF NOT EXISTS idx_breathwork_logs_date ON breathwork_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_body_measurements_user_date ON body_measurements(user_id, measured_at DESC);
+CREATE INDEX IF NOT EXISTS idx_progress_photos_user_date ON progress_photos(user_id, taken_at DESC);
 `;
 
 async function migrate() {
