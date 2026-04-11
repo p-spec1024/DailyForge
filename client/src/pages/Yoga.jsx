@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useYogaSession } from '../hooks/useYogaSession.js';
 import PracticeTypeSelector from '../components/yoga/PracticeTypeSelector.jsx';
@@ -7,6 +8,7 @@ import FocusChips from '../components/yoga/FocusChips.jsx';
 import RecentSessions from '../components/yoga/RecentSessions.jsx';
 import StartButton from '../components/yoga/StartButton.jsx';
 import PosePreviewModal from '../components/yoga/PosePreviewModal.jsx';
+import YogaSessionPlayer from '../components/yoga/YogaSessionPlayer.jsx';
 
 const s = {
   page: {
@@ -29,6 +31,7 @@ const s = {
 
 export default function Yoga() {
   const navigate = useNavigate();
+  const [playingSession, setPlayingSession] = useState(null);
   const {
     config,
     recentSessions,
@@ -85,14 +88,25 @@ export default function Yoga() {
         }}
       >Full Yoga Session (5-phase)</button>
 
-      {generatedSession && (
+      {generatedSession && !playingSession && (
         <PosePreviewModal
           session={generatedSession}
           config={config}
           isGenerating={isGenerating}
           onRegenerate={handleStart}
-          onBegin={() => { console.log('Starting session...'); clearSession(); }}
+          onBegin={() => {
+            setPlayingSession(generatedSession);
+            clearSession();
+          }}
           onClose={clearSession}
+        />
+      )}
+
+      {playingSession && (
+        <YogaSessionPlayer
+          session={playingSession}
+          config={config}
+          onExit={() => setPlayingSession(null)}
         />
       )}
     </div>
