@@ -29,6 +29,12 @@ Features that are **not in the current build plan** but worth revisiting later. 
 | 19 | Workout tab home screen redesign | UI | S4-T3 iPhone testing | Apr 11, 2026 | Redesign workout tab as a proper daily dashboard — greeting, streak stat, today's session card, 5-phase visual, quick-start buttons. Current view is functional but needs polish for a 3-pillar app. |
 | 20 | Ashtanga practice type | Yoga | Down Dog comparison | Apr 11, 2026 | Down Dog has Ashtanga as a practice type. Add Ashtanga sequences to the yoga library. |
 | 21 | Chair Yoga practice type | Yoga | Down Dog comparison | Apr 11, 2026 | Down Dog has Chair Yoga for accessibility. Add chair-based pose variants. |
+| 22 | Progress photos (Max tier) | Body | S5-T3 research | Apr 12, 2026 | Front/side/back progress photos with side-by-side date comparison. Local storage only (privacy). Time-lapse generation for Max tier. Similar to MacroFactor gallery and Progress App. |
+| 23 | Full 14-measurement body tracking (Pro tier) | Body | S5-T3 research | Apr 12, 2026 | Expand from 5 core circumferences to full 14: neck, shoulders, chest, waist, abdomen, hips, L/R bicep, L/R forearm, L/R thigh, L/R calf. Matches Hevy's measurement set. MVP ships with 5 core only. |
+| 24 | Custom body measurements (Max tier) | Body | S5-T3 research | Apr 12, 2026 | Allow users to add up to 5 custom measurement types beyond the standard 14. Similar to Progress App (10 custom). |
+| 25 | Apple Health / Google Fit sync | Integration | S5-T3 research | Apr 12, 2026 | Sync weight, body fat %, workouts to Apple Health / Google Fit. Currently blocked by PWA limitations — requires native wrapper (Capacitor/React Native) for background sync. Manual import button possible as interim. |
+| 26 | True adaptive AI coaching (MacroFactor-style) | AI | S5-T3 research | Apr 12, 2026 | Weekly calorie/macro adjustments based on actual weight trend + logged nutrition. Requires: nutrition tracking integration (#1), 10K+ user sessions for algorithm training, sophisticated ML pipeline. NOT the same as S5-T4 rule-based progressive overload. Deferred until data scale achieved. |
+| 27 | Goal setting + milestone badges | Body | S5-T3 research | Apr 12, 2026 | Target weight + rate of change → estimated completion date. Progress % ring. "On track / Behind / Ahead" indicator. Badges at 25%, 50%, 75%, 100% of goal. Deferred from S5-T3 MVP to keep scope lean. |
 
 ---
 
