@@ -54,7 +54,7 @@ Features that are **not in the current build plan** but worth revisiting later. 
 | 44 | User equipment profile | Store user's available equipment for exercise filtering | Algorithm Research | Apr 12, 2026 | Onboarding asks "what equipment do you have?" |
 | 45 | Primary/secondary muscle split | Split muscle_groups into primary_muscles and secondary_muscles arrays | Algorithm Research | Apr 12, 2026 | Current muscle_groups is flat array. Need to distinguish primary target vs supporting muscles for recovery tracking (#37) and balanced programming. |
 | 46 | Exercise library "Do this" button | UX | S5-T6 testing | Apr 12, 2026 | Browse any exercise → "Do this exercise" starts single-exercise session. |
-| 47 | Custom workout builder | UX | S5-T6 testing | Apr 12, 2026 | HIGH priority. Create/save custom routines. Core Hevy feature missing. |
+| 47 | ~~Custom workout builder~~ | UX | S5-T6 testing | Apr 12, 2026 | **DONE in S6-T3.** Save as Routine from any workout + start from routine on Strength page. |
 | 48 | ~~Empty workout start~~ | UX | S5-T6 testing | Apr 12, 2026 | **DONE in S6-T1.** Start blank → add exercises as you go. |
 | 49 | Yoga pose explorer | UX | S5-T6 testing | Apr 12, 2026 | Browse poses → single-pose timed hold. |
 | 50 | ~~Strength exercise browser~~ | UX | S5-T6 testing | Apr 12, 2026 | **DONE in S6-T1.** Dedicated exercise browse screen with filters. |
@@ -65,6 +65,9 @@ Features that are **not in the current build plan** but worth revisiting later. 
 | 55 | Remove exercise from workout | UX | S6-T2 testing | Apr 13, 2026 | Allow users to remove added exercises mid-workout (X button on exercise card) |
 | 56 | Workout start optimization | Performance | S6-T2 testing | Apr 13, 2026 | "Starting workout..." screen takes too long — lazy load previous performance or batch API calls |
 | 57 | Extract useAddExercise hook | Refactor | S6-T2 /review | Apr 13, 2026 | handleAddExercise is triplicated across EmptyWorkoutView, SessionMainWork, and TodayView — extract to shared hook |
+| 58 | Extract SaveRoutineModal pattern | Refactor | S6-T3 /review | Apr 13, 2026 | SessionSummary + SaveRoutineModal block duplicated 3x across TodayView (2 render paths) and EmptyWorkoutView — extract to wrapper component |
+| 59 | Routine edit/reorder exercises | UX | S6-T3 planning | Apr 13, 2026 | Edit existing routines: rename, reorder exercises, add/remove exercises. PUT /api/routines/:id endpoint already exists. |
+| 60 | Routine duplicate/fork | UX | S6-T3 planning | Apr 13, 2026 | Duplicate an existing routine as starting point for a new one |
 
 ---
 
