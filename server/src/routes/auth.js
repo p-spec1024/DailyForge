@@ -22,6 +22,13 @@ router.post('/register', authLimiter, async (req, res, next) => {
       return res.status(400).json({ error: 'email, password, and name are required' });
     }
 
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
+      return res.status(400).json({ error: 'Password must contain uppercase, lowercase, and a number' });
+    }
+
     const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existing.rows.length > 0) {
       return res.status(409).json({ error: 'Email already registered' });
