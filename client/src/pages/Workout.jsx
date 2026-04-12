@@ -186,6 +186,7 @@ function TodayView({ onLogout }) {
   const [swappedExercises, setSwappedExercises] = useState({}); // { originalExId: { chosen, originalExId } } — session-level swaps
   const [savePromptData, setSavePromptData] = useState(null); // { exerciseName, originalExerciseId, chosenExerciseId }
   const [promptedExercises, setPromptedExercises] = useState(new Set());
+  const [strengthOnly, setStrengthOnly] = useState(false);
   const restTimerActivatedAtRef = useRef(null);
 
   const session = useWorkoutSession();
@@ -252,6 +253,18 @@ function TodayView({ onLogout }) {
   async function handleStart() {
     if (!workout || !workout.phases || startDisabled) return;
     setStartDisabled(true);
+    try {
+      const workoutIds = workout.phases.map(p => p.workout_id).filter(Boolean);
+      await session.startSession(workoutIds[0], workoutIds);
+    } finally {
+      setStartDisabled(false);
+    }
+  }
+
+  async function handleStartStrengthOnly() {
+    if (!workout || !workout.phases || startDisabled) return;
+    setStartDisabled(true);
+    setStrengthOnly(true);
     try {
       const workoutIds = workout.phases.map(p => p.workout_id).filter(Boolean);
       await session.startSession(workoutIds[0], workoutIds);
@@ -406,6 +419,7 @@ function TodayView({ onLogout }) {
       setSummaryData(data);
       invalidateWorkout();
     }
+    setStrengthOnly(false);
   }
 
   async function handleDiscard() {
@@ -414,6 +428,7 @@ function TodayView({ onLogout }) {
     setRestTimerEndTime(null);
     sessionStorage.removeItem('dailyforge_rest_timer_end');
     setPreviousPerformance({});
+    setStrengthOnly(false);
     await session.discardSession();
   }
 
@@ -504,7 +519,7 @@ function TodayView({ onLogout }) {
         </div>
 
         {/* Phases */}
-        {workout.phases.map((phase, i) => {
+        {(strengthOnly ? workout.phases.filter(isStrengthPhase) : workout.phases).map((phase, i) => {
           if (isStrengthPhase(phase)) {
             const exercises = getPhaseExercises(phase);
             return (
@@ -664,7 +679,7 @@ function TodayView({ onLogout }) {
         workoutName={workout.name}
         durationMin={fullSessionMin}
         onStartFullSession={() => navigate('/session?type=strength')}
-        onStartStrength={handleStart}
+        onStartStrength={handleStartStrengthOnly}
         onLogout={onLogout}
       />
 
