@@ -167,7 +167,7 @@ export default function SessionYoga({ phase, duration, level, focus, onComplete 
     } else {
       navigateTo(currentIndex + 1);
     }
-  }, [currentIndex, poses, onComplete, poseTimer]);
+  }, [currentIndex, poses, onComplete]);
 
   const handleNext = useCallback(() => {
     // Show save prompt for completed (not skipped) swapped poses

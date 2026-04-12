@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { C } from './workout/tokens.jsx';
 import { api } from '../utils/api.js';
@@ -6,6 +6,7 @@ import { api } from '../utils/api.js';
 export default function SavePreferencePrompt({ exerciseName, originalExerciseId, chosenExerciseId, onSave, onDismiss, saveAction }) {
   const [saving, setSaving] = useState(false);
   const [visible, setVisible] = useState(false);
+  const dismissedRef = useRef(false);
 
   useEffect(() => {
     requestAnimationFrame(() => setVisible(true));
@@ -19,6 +20,8 @@ export default function SavePreferencePrompt({ exerciseName, originalExerciseId,
   }, []);
 
   async function handleSave() {
+    if (dismissedRef.current) return;
+    dismissedRef.current = true;
     setSaving(true);
     try {
       if (saveAction) {
@@ -35,6 +38,8 @@ export default function SavePreferencePrompt({ exerciseName, originalExerciseId,
   }
 
   function handleDismiss() {
+    if (dismissedRef.current) return;
+    dismissedRef.current = true;
     setVisible(false);
     setTimeout(onDismiss, 200);
   }

@@ -21,14 +21,14 @@ const s = {
     alignItems: 'center',
     gap: 3,
     textDecoration: 'none',
-    padding: '6px 12px',
+    padding: '6px 8px',
     transition: 'color 0.15s',
   },
   label: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: 500,
     textTransform: 'uppercase',
-    letterSpacing: '0.5px',
+    letterSpacing: '0.3px',
   },
 };
 
@@ -41,17 +41,6 @@ function HomeIcon({ color }) {
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
       <polyline points="9 22 9 12 15 12 15 22" />
-    </svg>
-  );
-}
-
-function DumbbellIcon({ color }) {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M6.5 6.5h11M6.5 17.5h11" />
-      <rect x="2" y="5" width="4" height="14" rx="1" />
-      <rect x="18" y="5" width="4" height="14" rx="1" />
-      <line x1="12" y1="5" x2="12" y2="19" />
     </svg>
   );
 }
@@ -98,10 +87,22 @@ function Tab({ to, end, icon: Icon, label }) {
   );
 }
 
+function StrengthIcon({ color }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6.5 6.5h11M6.5 17.5h11" />
+      <rect x="2" y="5" width="4" height="14" rx="1" />
+      <rect x="18" y="5" width="4" height="14" rx="1" />
+      <line x1="12" y1="5" x2="12" y2="19" />
+    </svg>
+  );
+}
+
 export default function NavBar() {
   return (
     <nav style={s.nav}>
-      <Tab to="/" end icon={DumbbellIcon} label="Workout" />
+      <Tab to="/" end icon={HomeIcon} label="Home" />
+      <Tab to="/strength" icon={StrengthIcon} label="Strength" />
       <Tab to="/yoga" icon={YogaIcon} label="Yoga" />
       <Tab to="/breathe" icon={BreatheIcon} label="Breathe" />
       <Tab to="/profile" icon={ProfileIcon} label="Profile" />

@@ -7,6 +7,7 @@ import Register from './pages/Register.jsx';
 import Workout from './pages/Workout.jsx';
 import Breathwork from './pages/Breathwork.jsx';
 import BreathworkTimer from './pages/BreathworkTimer.jsx';
+import Strength from './pages/Strength.jsx';
 import Yoga from './pages/Yoga.jsx';
 import Session from './pages/Session.jsx';
 import Profile from './pages/Profile.jsx';
@@ -33,6 +34,7 @@ export default function App() {
       <div style={{ paddingBottom: 80 }}>
         <Routes>
           <Route path="/" element={<Workout onLogout={logout} />} />
+          <Route path="/strength" element={<Strength />} />
           <Route path="/session" element={<Session />} />
           <Route path="/yoga" element={<Yoga />} />
           <Route path="/breathe" element={<Breathwork />} />

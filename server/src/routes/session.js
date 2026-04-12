@@ -41,14 +41,13 @@ function parseIntParam(value) {
 }
 
 // POST /api/session/start — start a new workout session
+// Accepts workout_id: null for empty workouts (user adds exercises manually)
+// Optional initial_exercises: [exerciseId, ...] to pre-add exercises to an empty workout
 router.post('/start', async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const { workout_id, workout_ids, type = 'strength' } = req.body;
-    const primaryId = workout_id || (workout_ids && workout_ids[0]);
-    if (!primaryId) {
-      return res.status(400).json({ error: 'workout_id is required' });
-    }
+    const { workout_id, workout_ids, type = 'strength', initial_exercises } = req.body;
+    const primaryId = workout_id || (workout_ids && workout_ids[0]) || null;
     const validatedType = ALLOWED_SESSION_TYPES.includes(type) ? type : 'strength';
 
     await client.query('BEGIN');
@@ -70,16 +69,44 @@ router.post('/start', async (req, res, next) => {
       [req.user.id, primaryId, validatedType]
     );
 
-    // Copy exercises from ALL phase workouts into session_exercises
-    const ids = workout_ids || [workout_id];
-    for (let phaseIdx = 0; phaseIdx < ids.length; phaseIdx++) {
-      await client.query(
-        `INSERT INTO session_exercises (session_id, exercise_id, sort_order)
-         SELECT $1, e.id, e.sort_order + ($3 * 1000)
-         FROM exercises e WHERE e.workout_id = $2
-         ORDER BY e.sort_order`,
-        [result.rows[0].id, ids[phaseIdx], phaseIdx]
-      );
+    const sessionId = result.rows[0].id;
+
+    if (primaryId) {
+      // Copy exercises from ALL phase workouts into session_exercises
+      const ids = workout_ids || [workout_id];
+      for (let phaseIdx = 0; phaseIdx < ids.length; phaseIdx++) {
+        await client.query(
+          `INSERT INTO session_exercises (session_id, exercise_id, sort_order)
+           SELECT $1, e.id, e.sort_order + ($3 * 1000)
+           FROM exercises e WHERE e.workout_id = $2
+           ORDER BY e.sort_order`,
+          [sessionId, ids[phaseIdx], phaseIdx]
+        );
+      }
+    } else if (Array.isArray(initial_exercises) && initial_exercises.length > 0) {
+      // Empty workout with pre-selected exercises
+      const validIds = initial_exercises
+        .map(id => parseInt(id, 10))
+        .filter(id => Number.isFinite(id) && id > 0)
+        .slice(0, 50); // cap at 50 exercises
+      if (validIds.length > 0) {
+        // Validate exercise IDs exist before inserting (prevent FK violation)
+        const placeholders = validIds.map((_, i) => `$${i + 1}`).join(',');
+        const existCheck = await client.query(
+          `SELECT id FROM exercises WHERE id IN (${placeholders})`,
+          validIds
+        );
+        const existingIds = new Set(existCheck.rows.map(r => r.id));
+        let sortOrder = 0;
+        for (const id of validIds) {
+          if (!existingIds.has(id)) continue;
+          await client.query(
+            `INSERT INTO session_exercises (session_id, exercise_id, sort_order)
+             VALUES ($1, $2, $3)`,
+            [sessionId, id, sortOrder++]
+          );
+        }
+      }
     }
 
     await client.query('COMMIT');

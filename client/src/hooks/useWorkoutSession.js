@@ -142,16 +142,22 @@ export function useWorkoutSession() {
   }, [resumeData]);
 
   // Start a new session
-  const startSession = useCallback(async (wId, workoutIds) => {
+  // wId and workoutIds can be null for empty workouts
+  // opts.initial_exercises: optional array of exercise IDs to pre-add
+  const startSession = useCallback(async (wId, workoutIds, opts = {}) => {
     if (loadingRef.current) return null;
     loadingRef.current = true;
     setIsLoading(true);
     try {
-      const data = await api.post('/session/start', {
-        workout_id: wId,
-        workout_ids: workoutIds,
-        type: 'strength',
-      });
+      const body = { type: 'strength' };
+      if (wId) {
+        body.workout_id = wId;
+        body.workout_ids = workoutIds;
+      }
+      if (opts.initial_exercises) {
+        body.initial_exercises = opts.initial_exercises;
+      }
+      const data = await api.post('/session/start', body);
       const session = data.session;
       setSessionId(session.id);
       setWorkoutId(session.workout_id);

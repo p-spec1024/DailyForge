@@ -62,6 +62,11 @@ export function extractVideoId(url) {
   return match ? match[1] : null;
 }
 
+export function parseMuscles(targetMuscles) {
+  if (!targetMuscles) return [];
+  return targetMuscles.split(',').map(m => m.trim()).filter(Boolean);
+}
+
 export function isStrengthPhase(phase) {
   return phase.phase === 'main';
 }
