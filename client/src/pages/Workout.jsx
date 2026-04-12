@@ -243,12 +243,12 @@ function TodayView({ onLogout }) {
     }
   }, [workout]);
 
-  // Fetch previous performance when session becomes active
+  // Fetch previous performance when session becomes active or strength quick start
   useEffect(() => {
-    if (session.isActive && workout?.phases) {
+    if ((session.isActive || strengthOnly) && workout?.phases) {
       fetchPreviousPerformance();
     }
-  }, [session.isActive, fetchPreviousPerformance]);
+  }, [session.isActive, strengthOnly, fetchPreviousPerformance]);
 
   async function handleStart() {
     if (!workout || !workout.phases || startDisabled) return;
@@ -261,16 +261,9 @@ function TodayView({ onLogout }) {
     }
   }
 
-  async function handleStartStrengthOnly() {
+  function handleStartStrengthOnly() {
     if (!workout || !workout.phases || startDisabled) return;
-    setStartDisabled(true);
     setStrengthOnly(true);
-    try {
-      const workoutIds = workout.phases.map(p => p.workout_id).filter(Boolean);
-      await session.startSession(workoutIds[0], workoutIds);
-    } finally {
-      setStartDisabled(false);
-    }
   }
 
   // Helper: get exercises for a phase, with session-level swaps applied
@@ -312,6 +305,11 @@ function TodayView({ onLogout }) {
   }, [workout, getPhaseExercises]);
 
   async function handleLogSet(exerciseId, setData) {
+    // Lazy-start session on first set log (strength quick start defers session.startSession)
+    if (strengthOnly && !session.isActive) {
+      const workoutIds = workout.phases.map(p => p.workout_id).filter(Boolean);
+      await session.startSession(workoutIds[0], workoutIds);
+    }
     const result = await session.logSet(exerciseId, setData);
     if (result) {
       // Haptic feedback on PR
@@ -413,11 +411,13 @@ function TodayView({ onLogout }) {
     setIsRestTimerActive(false);
     setRestTimerEndTime(null);
     sessionStorage.removeItem('dailyforge_rest_timer_end');
-    const data = await session.completeSession();
-    if (data) {
-      setPreviousPerformance({});
-      setSummaryData(data);
-      invalidateWorkout();
+    if (session.isActive) {
+      const data = await session.completeSession();
+      if (data) {
+        setPreviousPerformance({});
+        setSummaryData(data);
+        invalidateWorkout();
+      }
     }
     setStrengthOnly(false);
   }
@@ -429,7 +429,7 @@ function TodayView({ onLogout }) {
     sessionStorage.removeItem('dailyforge_rest_timer_end');
     setPreviousPerformance({});
     setStrengthOnly(false);
-    await session.discardSession();
+    if (session.isActive) await session.discardSession();
   }
 
   async function handleDiscardResume() {
@@ -491,7 +491,7 @@ function TodayView({ onLogout }) {
   const fullSessionMin = 5 + 5 + mainWorkMin + 5 + 5;
 
   /* ─── ACTIVE SESSION MODE ─── */
-  if (session.isActive) {
+  if (session.isActive || strengthOnly) {
     return (
       <div style={{ paddingBottom: 40 }}>
         <SessionHeader
@@ -511,7 +511,7 @@ function TodayView({ onLogout }) {
             color: C.textMuted, textTransform: 'uppercase', marginBottom: 4,
           }}>{dayName}</div>
           <h2 style={{ fontSize: 18, fontWeight: 500, color: C.text, marginBottom: 4 }}>
-            {workout.name}
+            {strengthOnly ? 'Strength Workout' : workout.name}
           </h2>
           <div style={{ fontSize: 12, color: C.textSec }}>
             {session.totalSets} sets &middot; {formatVolume(session.totalVolume)} kg &middot; {session.exercisesDone} exercises
