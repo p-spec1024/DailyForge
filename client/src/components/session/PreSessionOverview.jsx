@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../../utils/api.js';
 import { C } from '../workout/tokens.jsx';
+import BottomSheet from '../BottomSheet.jsx';
 
 const PHASE_COLORS = {
   opening_breathwork: '#a78bfa',
@@ -261,52 +262,34 @@ export default function PreSessionOverview({ workoutId, workoutName, sessionType
 
       {/* Technique Picker Modal */}
       {showTechniquePicker && (
-        <div onClick={() => setShowTechniquePicker(null)} style={{
-          position: 'fixed', inset: 0, zIndex: 100,
-          background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
-          display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-        }}>
-          <div onClick={e => e.stopPropagation()} style={{
-            width: '100%', maxWidth: 420,
-            background: 'rgba(20,28,50,0.98)', border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: '14px 14px 0 0', padding: 20, maxHeight: '60vh', overflow: 'auto',
-            paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
-          }}>
-            <div style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16,
-            }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: C.text }}>
-                {showTechniquePicker === 'opening' ? 'Opening' : 'Closing'} Technique
-              </div>
-              <button onClick={() => setShowTechniquePicker(null)} style={{
-                background: 'none', border: 'none', color: C.textMuted,
-                fontSize: 18, cursor: 'pointer', padding: 4,
-              }}>&times;</button>
-            </div>
-            {techniques.length === 0 ? (
-              <div style={{ color: C.textMuted, padding: 20, textAlign: 'center' }}>Loading...</div>
-            ) : techniques.map(t => {
-              const phaseKey = showTechniquePicker === 'opening' ? 'opening_breathwork' : 'closing_breathwork';
-              const isSelected = config[phaseKey].technique_id === t.id;
-              return (
-                <button key={t.id} onClick={() => {
-                  flow.updatePhaseConfig(phaseKey, { technique_id: t.id, technique_name: t.name });
-                  setShowTechniquePicker(null);
-                }} style={{
-                  display: 'block', width: '100%', textAlign: 'left',
-                  padding: '12px', borderRadius: 8, marginBottom: 6, cursor: 'pointer',
-                  background: isSelected ? 'rgba(167,139,250,0.1)' : 'rgba(255,255,255,0.04)',
-                  border: isSelected ? '1px solid rgba(167,139,250,0.3)' : '0.5px solid rgba(255,255,255,0.06)',
-                }}>
-                  <div style={{ fontSize: 14, color: C.text, fontWeight: 500 }}>{t.name}</div>
-                  <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
-                    {t.difficulty} &middot; {Math.round(t.estimated_duration / 60)}min
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <BottomSheet
+          onClose={() => setShowTechniquePicker(null)}
+          title={`${showTechniquePicker === 'opening' ? 'Opening' : 'Closing'} Technique`}
+          zIndex={100}
+        >
+          {techniques.length === 0 ? (
+            <div style={{ color: C.textMuted, padding: 20, textAlign: 'center' }}>Loading...</div>
+          ) : techniques.map(t => {
+            const phaseKey = showTechniquePicker === 'opening' ? 'opening_breathwork' : 'closing_breathwork';
+            const isSelected = config[phaseKey].technique_id === t.id;
+            return (
+              <button key={t.id} onClick={() => {
+                flow.updatePhaseConfig(phaseKey, { technique_id: t.id, technique_name: t.name });
+                setShowTechniquePicker(null);
+              }} style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '12px', borderRadius: 8, marginBottom: 6, cursor: 'pointer',
+                background: isSelected ? 'rgba(167,139,250,0.1)' : 'rgba(255,255,255,0.04)',
+                border: isSelected ? '1px solid rgba(167,139,250,0.3)' : '0.5px solid rgba(255,255,255,0.06)',
+              }}>
+                <div style={{ fontSize: 14, color: C.text, fontWeight: 500 }}>{t.name}</div>
+                <div style={{ fontSize: 11, color: C.textMuted, marginTop: 2 }}>
+                  {t.difficulty} &middot; {Math.round(t.estimated_duration / 60)}min
+                </div>
+              </button>
+            );
+          })}
+        </BottomSheet>
       )}
     </div>
   );
