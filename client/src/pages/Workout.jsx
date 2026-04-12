@@ -261,7 +261,7 @@ function TodayView({ onLogout }) {
     setStartDisabled(true);
     try {
       const workoutIds = workout.phases.map(p => p.workout_id).filter(Boolean);
-      await session.startSession(workoutIds[0], workoutIds);
+      await session.startSession(workoutIds[0], workoutIds, { type: '5phase' });
     } finally {
       setStartDisabled(false);
     }
@@ -462,6 +462,25 @@ function TodayView({ onLogout }) {
     setPreviousPerformance({});
     setStrengthOnly(false);
     if (session.isActive) await session.discardSession();
+  }
+
+  function handleResume() {
+    if (!session.resumeData) return;
+    const resumed = session.resumeData.session;
+
+    // Empty workout (no workout_id) — navigate to empty workout view.
+    // EmptyWorkoutView's startSession() will pick up the existing session from the server.
+    if (resumed.workout_id == null) {
+      navigate('/?mode=empty');
+      return;
+    }
+
+    // Strength-only session — restore strengthOnly state
+    if (resumed.type !== '5phase') {
+      setStrengthOnly(true);
+    }
+
+    session.resumeSession();
   }
 
   async function handleDiscardResume() {
@@ -770,7 +789,7 @@ function TodayView({ onLogout }) {
       {session.resumeData && (
         <ResumeBanner
           session={session.resumeData.session}
-          onResume={session.resumeSession}
+          onResume={handleResume}
           onDiscard={handleDiscardResume}
         />
       )}

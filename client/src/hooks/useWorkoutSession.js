@@ -162,7 +162,7 @@ export function useWorkoutSession() {
     loadingRef.current = true;
     setIsLoading(true);
     try {
-      const body = { type: 'strength' };
+      const body = { type: opts.type || 'strength' };
       if (wId) {
         body.workout_id = wId;
         body.workout_ids = workoutIds;
