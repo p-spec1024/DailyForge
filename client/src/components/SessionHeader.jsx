@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { C, MONO, formatVolume } from './workout/tokens.jsx';
 
-export default function SessionHeader({ elapsed, totalVolume, onFinish, onDiscard, onPause, formatTime, isFinishing }) {
+export default function SessionHeader({ elapsed, totalVolume, onFinish, onDiscard, onPause, onSaveRoutine, formatTime, isFinishing }) {
   const [showMenu, setShowMenu] = useState(false);
 
   return (
@@ -60,6 +60,16 @@ export default function SessionHeader({ elapsed, totalVolume, onFinish, onDiscar
                 borderRadius: 8, overflow: 'hidden', minWidth: 150,
                 boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
               }}>
+                {onSaveRoutine && (
+                  <button onClick={() => { setShowMenu(false); onSaveRoutine(); }} style={{
+                    display: 'block', width: '100%', padding: '10px 14px', border: 'none',
+                    background: 'transparent', color: C.textSec, fontSize: 13,
+                    textAlign: 'left', cursor: 'pointer',
+                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                  }}>
+                    Save as Routine
+                  </button>
+                )}
                 <button onClick={() => { setShowMenu(false); onDiscard(); }} style={{
                   display: 'block', width: '100%', padding: '10px 14px', border: 'none',
                   background: 'transparent', color: '#ef4444', fontSize: 13,

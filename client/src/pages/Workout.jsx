@@ -12,6 +12,7 @@ import RestTimer from '../components/RestTimer.jsx';
 import AlternativePicker from '../components/AlternativePicker.jsx';
 import SavePreferencePrompt from '../components/SavePreferencePrompt.jsx';
 import AddExerciseModal from '../components/workout/AddExerciseModal.jsx';
+import SaveRoutineModal from '../components/SaveRoutineModal.jsx';
 import WorkoutDashboard from '../components/Dashboard/WorkoutDashboard.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 
@@ -190,6 +191,8 @@ function TodayView({ onLogout }) {
   const [strengthOnly, setStrengthOnly] = useState(false);
   const [showAddExercise, setShowAddExercise] = useState(false);
   const [addedExercises, setAddedExercises] = useState([]);
+  const [showSaveRoutine, setShowSaveRoutine] = useState(false);
+  const [routineSaved, setRoutineSaved] = useState(false);
   const restTimerActivatedAtRef = useRef(null);
 
   const session = useWorkoutSession();
@@ -264,9 +267,19 @@ function TodayView({ onLogout }) {
     }
   }
 
-  function handleStartStrengthOnly() {
+  async function handleStartStrengthOnly() {
     if (!workout || !workout.phases || startDisabled) return;
+    setStartDisabled(true);
     setStrengthOnly(true);
+    try {
+      const workoutIds = workout.phases.map(p => p.workout_id).filter(Boolean);
+      const sess = await session.startSession(workoutIds[0], workoutIds);
+      if (!sess) setStrengthOnly(false);
+    } catch {
+      setStrengthOnly(false);
+    } finally {
+      setStartDisabled(false);
+    }
   }
 
   // Helper: get exercises for a phase, with session-level swaps applied
@@ -308,11 +321,6 @@ function TodayView({ onLogout }) {
   }, [workout, getPhaseExercises]);
 
   async function handleLogSet(exerciseId, setData) {
-    // Lazy-start session on first set log (strength quick start defers session.startSession)
-    if (strengthOnly && !session.isActive) {
-      const workoutIds = workout.phases.map(p => p.workout_id).filter(Boolean);
-      await session.startSession(workoutIds[0], workoutIds);
-    }
     const result = await session.logSet(exerciseId, setData);
     if (result) {
       // Haptic feedback on PR
@@ -702,6 +710,18 @@ function TodayView({ onLogout }) {
           <SessionSummary
             data={summaryData}
             onDone={() => setSummaryData(null)}
+            onSaveRoutine={!routineSaved && summaryData.summary?.exercises?.length > 0
+              ? () => setShowSaveRoutine(true) : undefined}
+          />
+        )}
+        {summaryData && (
+          <SaveRoutineModal
+            isOpen={showSaveRoutine}
+            onClose={() => setShowSaveRoutine(false)}
+            exercises={(summaryData.summary?.exercises || []).map(ex => ({
+              id: ex.exercise_id, name: ex.name, sets_count: ex.sets,
+            }))}
+            onSaved={() => { setRoutineSaved(true); setShowSaveRoutine(false); }}
           />
         )}
 
@@ -766,14 +786,29 @@ function TodayView({ onLogout }) {
 
       {/* Summary card (shows after completing via summary) */}
       {summaryData && (
-        <SessionSummary data={summaryData} onDone={() => setSummaryData(null)} />
+        <SessionSummary
+          data={summaryData}
+          onDone={() => setSummaryData(null)}
+          onSaveRoutine={!routineSaved && summaryData.summary?.exercises?.length > 0
+            ? () => setShowSaveRoutine(true) : undefined}
+        />
+      )}
+      {summaryData && (
+        <SaveRoutineModal
+          isOpen={showSaveRoutine}
+          onClose={() => setShowSaveRoutine(false)}
+          exercises={(summaryData.summary?.exercises || []).map(ex => ({
+            id: ex.exercise_id, name: ex.name, sets_count: ex.sets,
+          }))}
+          onSaved={() => { setRoutineSaved(true); setShowSaveRoutine(false); }}
+        />
       )}
     </div>
   );
 }
 
 /* ── Empty Workout View ── */
-function EmptyWorkoutView({ initialExerciseId, initialExerciseName }) {
+function EmptyWorkoutView({ initialExerciseId, initialExerciseName, routineId: initialRoutineId }) {
   const navigate = useNavigate();
   const session = useWorkoutSession();
   const [exercises, setExercises] = useState([]); // local exercise list for UI
@@ -787,12 +822,35 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName }) {
   const [userSettings, setUserSettings] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showAddExercise, setShowAddExercise] = useState(false);
+  const [showSaveRoutine, setShowSaveRoutine] = useState(false);
+  const [routineSaved, setRoutineSaved] = useState(false);
+  const [toast, setToast] = useState(null);
   const restTimerActivatedAtRef = useRef(null);
   const startedRef = useRef(false);
+  const timerStartedRef = useRef(false);
 
   const restDuration = userSettings?.rest_timer_duration ?? 90;
   const restEnabled = userSettings?.rest_timer_enabled ?? true;
   const restAutoStart = userSettings?.rest_timer_auto_start ?? true;
+
+  // Defer timer for truly empty workouts (no pre-loaded exercises)
+  useEffect(() => {
+    if (!initialExerciseId && !initialRoutineId) {
+      session.setTimerDeferred(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Start timer when first exercise is added (only for truly empty workouts)
+  useEffect(() => {
+    if (exercises.length > 0 && !timerStartedRef.current) {
+      timerStartedRef.current = true;
+      if (!initialExerciseId && !initialRoutineId) {
+        session.undeferTimer();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exercises.length]);
 
   // Fetch user settings
   useEffect(() => {
@@ -804,23 +862,42 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName }) {
     if (startedRef.current) return;
     startedRef.current = true;
 
+    // If starting from a routine, fetch it first to get exercise IDs
+    if (initialRoutineId) {
+      api.get(`/routines/${initialRoutineId}`).then(async (routine) => {
+        const exerciseIds = routine.exercises.map(e => e.exercise_id);
+        const sess = await session.startSession(null, null, { initial_exercises: exerciseIds, routine_id: initialRoutineId });
+        if (!sess) return;
+        if (sess.workout_id != null) { navigate('/'); return; }
+        setExercises(routine.exercises.map(e => ({
+          id: e.exercise_id,
+          name: e.name,
+          target_muscles: e.target_muscles,
+          type: e.type,
+          default_sets: e.target_sets || e.default_sets || 3,
+          default_reps: e.default_reps,
+          default_duration_secs: e.default_duration_secs,
+          tracking_type: e.tracking_type,
+        })));
+      }).catch(() => {
+        setToast("Couldn't load routine");
+        setTimeout(() => navigate('/strength'), 1500);
+      });
+      return;
+    }
+
     const initialExercises = initialExerciseId ? [initialExerciseId] : [];
     session.startSession(null, null, { initial_exercises: initialExercises }).then(async (sess) => {
       if (!sess) return;
-      // Server returned an existing session (not our empty one) — redirect home
-      // where the resume banner will handle it
       if (sess.workout_id != null) {
         navigate('/');
         return;
       }
-      // If we pre-added an exercise, load its details for the UI
-      // (previous performance will be fetched by the exercises/isActive effect)
       if (initialExerciseId) {
         try {
           const ex = await api.get(`/exercises/${initialExerciseId}`);
           setExercises([ex]);
         } catch {
-          // Exercise might not exist — that's fine, user can still finish
           if (initialExerciseName) {
             setExercises([{ id: parseInt(initialExerciseId), name: initialExerciseName, default_sets: 3, default_reps: 10 }]);
           }
@@ -910,7 +987,20 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName }) {
   if (summaryData) {
     return (
       <div style={{ paddingBottom: 40 }}>
-        <SessionSummary data={summaryData} onDone={handleSummaryDone} />
+        <SessionSummary
+          data={summaryData}
+          onDone={handleSummaryDone}
+          onSaveRoutine={!routineSaved && summaryData.summary?.exercises?.length > 0
+            ? () => setShowSaveRoutine(true) : undefined}
+        />
+        <SaveRoutineModal
+          isOpen={showSaveRoutine}
+          onClose={() => setShowSaveRoutine(false)}
+          exercises={(summaryData.summary?.exercises || []).map(ex => ({
+            id: ex.exercise_id, name: ex.name, sets_count: ex.sets,
+          }))}
+          onSaved={() => { setRoutineSaved(true); setShowSaveRoutine(false); }}
+        />
       </div>
     );
   }
@@ -918,7 +1008,7 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName }) {
   if (!session.isActive && startedRef.current) {
     return (
       <div style={{ padding: '40px 0', textAlign: 'center', color: C.textMuted }}>
-        Starting workout...
+        {toast || 'Starting workout...'}
       </div>
     );
   }
@@ -930,6 +1020,7 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName }) {
         totalVolume={session.totalVolume}
         onFinish={() => setConfirmFinish(true)}
         onDiscard={() => setConfirmDiscard(true)}
+        onSaveRoutine={exercises.length > 0 ? () => setShowSaveRoutine(true) : undefined}
         onSettings={() => setShowSettings(true)}
         formatTime={session.formatTime}
         isFinishing={session.isLoading}
@@ -1085,6 +1176,17 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName }) {
           existingExerciseIds={exercises.map(ex => ex.id)}
         />
       )}
+
+      {/* Save as Routine Modal */}
+      <SaveRoutineModal
+        isOpen={showSaveRoutine}
+        onClose={() => setShowSaveRoutine(false)}
+        exercises={exercises.map(ex => ({
+          id: ex.id, name: ex.name,
+          sets_count: session.exerciseSets[ex.id]?.sets?.filter(s => s.completed).length || ex.default_sets || 3,
+        }))}
+        onSaved={() => { setRoutineSaved(true); setShowSaveRoutine(false); }}
+      />
     </div>
   );
 }
@@ -1095,6 +1197,7 @@ export default function Workout({ onLogout }) {
   const mode = searchParams.get('mode');
   const exerciseId = searchParams.get('exerciseId');
   const exerciseName = searchParams.get('exerciseName');
+  const routineId = searchParams.get('routineId');
 
   if (mode === 'empty') {
     return (
@@ -1102,6 +1205,7 @@ export default function Workout({ onLogout }) {
         <EmptyWorkoutView
           initialExerciseId={exerciseId ? parseInt(exerciseId, 10) : null}
           initialExerciseName={exerciseName || null}
+          routineId={routineId ? parseInt(routineId, 10) : null}
         />
       </div>
     );

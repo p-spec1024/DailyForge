@@ -231,6 +231,26 @@ CREATE TABLE IF NOT EXISTS progress_photos (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- S6-T3: User-created routines (reusable workout templates)
+CREATE TABLE IF NOT EXISTS user_routines (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name VARCHAR(100) NOT NULL,
+  description TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS user_routine_exercises (
+  id SERIAL PRIMARY KEY,
+  routine_id INTEGER NOT NULL REFERENCES user_routines(id) ON DELETE CASCADE,
+  exercise_id INTEGER NOT NULL REFERENCES exercises(id),
+  position INTEGER NOT NULL,
+  target_sets INTEGER DEFAULT 3,
+  notes TEXT,
+  UNIQUE(routine_id, position)
+);
+
 -- S5-T1: Optional per-technique breathwork log for hold-time/rounds tracking.
 CREATE TABLE IF NOT EXISTS breathwork_logs (
   id SERIAL PRIMARY KEY,
@@ -364,6 +384,9 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- S6-T3: Link sessions to user routines for "last used" tracking
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS routine_id INTEGER REFERENCES user_routines(id) ON DELETE SET NULL;
+
 -- Fix recovery/mobility exercises that have duration but wrong tracking_type
 UPDATE exercises SET tracking_type = 'duration'
 WHERE tracking_type = 'weight_reps'
@@ -403,6 +426,9 @@ CREATE INDEX IF NOT EXISTS idx_breathwork_logs_date ON breathwork_logs(created_a
 CREATE INDEX IF NOT EXISTS idx_body_measurements_user_date ON body_measurements(user_id, measured_at DESC);
 CREATE INDEX IF NOT EXISTS idx_progress_photos_user_date ON progress_photos(user_id, taken_at DESC);
 CREATE INDEX IF NOT EXISTS idx_breathwork_prefs_user ON user_breathwork_prefs(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_routines_user ON user_routines(user_id);
+CREATE INDEX IF NOT EXISTS idx_routine_exercises_routine ON user_routine_exercises(routine_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_routine ON sessions(routine_id);
 `;
 
 async function migrate() {

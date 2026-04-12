@@ -26,6 +26,8 @@ export function useWorkoutSession() {
   const [isLoading, setIsLoading] = useState(false);
   const [resumeData, setResumeData] = useState(null); // set when an unfinished session is found
   const [sessionPrs, setSessionPrs] = useState({}); // { [exerciseId]: { [setNumber]: [{ type, previous, new }] } }
+  const [timerDeferred, setTimerDeferred] = useState(false);
+  const [timerStartOverride, setTimerStartOverride] = useState(null); // ISO string — overrides startedAt for display
   const timerRef = useRef(null);
   const loadingRef = useRef(false); // ref-based guard to prevent stale-closure double-taps
   const pendingSets = useRef(new Set()); // per-set concurrency guard
@@ -34,22 +36,31 @@ export function useWorkoutSession() {
   // Keep sessionIdRef in sync with state
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
 
-  // Timer: calculate from startedAt, not from ticks
+  // Undefer timer: record the real start time for display and begin ticking
+  const undeferTimer = useCallback(() => {
+    setTimerStartOverride(new Date().toISOString());
+    setTimerDeferred(false);
+  }, []);
+
+  // Timer: calculate from startedAt (or override), not from ticks
   useEffect(() => {
-    if (!isActive || !startedAt) {
+    if (!isActive || !startedAt || timerDeferred) {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (timerDeferred) setElapsedSeconds(0);
       return;
     }
 
+    const effectiveStart = timerStartOverride || startedAt;
+
     function tick() {
-      const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+      const elapsed = Math.floor((Date.now() - new Date(effectiveStart).getTime()) / 1000);
       setElapsedSeconds(Math.max(0, elapsed));
     }
 
     tick(); // immediate
     timerRef.current = setInterval(tick, 1000);
     return () => clearInterval(timerRef.current);
-  }, [isActive, startedAt]);
+  }, [isActive, startedAt, timerDeferred, timerStartOverride]);
 
   // Persist to localStorage on state changes
   useEffect(() => {
@@ -126,6 +137,8 @@ export function useWorkoutSession() {
     setIsActive(true);
     setExerciseSets(sets);
     recalcTotals(sets);
+    setTimerDeferred(false);
+    setTimerStartOverride(null);
     setResumeData(null);
   }, [resumeData, recalcTotals]);
 
@@ -157,6 +170,9 @@ export function useWorkoutSession() {
       if (opts.initial_exercises) {
         body.initial_exercises = opts.initial_exercises;
       }
+      if (opts.routine_id) {
+        body.routine_id = opts.routine_id;
+      }
       const data = await api.post('/session/start', body);
       const session = data.session;
       setSessionId(session.id);
@@ -168,6 +184,8 @@ export function useWorkoutSession() {
       setTotalVolume(0);
       setExercisesDone(0);
       setSessionPrs({});
+      setTimerStartOverride(null);
+      // Note: timerDeferred is controlled by the caller (EmptyWorkoutView)
       return session;
     } catch (err) {
       console.error('Failed to start session:', err);
@@ -267,6 +285,8 @@ export function useWorkoutSession() {
       setTotalVolume(0);
       setExercisesDone(0);
       setSessionPrs({});
+      setTimerDeferred(false);
+      setTimerStartOverride(null);
       clearStorage();
       return data;
     } catch (err) {
@@ -297,6 +317,8 @@ export function useWorkoutSession() {
     setTotalVolume(0);
     setExercisesDone(0);
     setSessionPrs({});
+    setTimerDeferred(false);
+    setTimerStartOverride(null);
     clearStorage();
   }, []);
 
@@ -334,5 +356,7 @@ export function useWorkoutSession() {
     resumeSession,
     dismissResume,
     formatTime,
+    setTimerDeferred,
+    undeferTimer,
   };
 }

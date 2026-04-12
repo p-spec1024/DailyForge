@@ -46,9 +46,10 @@ function parseIntParam(value) {
 router.post('/start', async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const { workout_id, workout_ids, type = 'strength', initial_exercises } = req.body;
+    const { workout_id, workout_ids, type = 'strength', initial_exercises, routine_id } = req.body;
     const primaryId = workout_id || (workout_ids && workout_ids[0]) || null;
     const validatedType = ALLOWED_SESSION_TYPES.includes(type) ? type : 'strength';
+    const validRoutineId = Number.isFinite(parseInt(routine_id, 10)) ? parseInt(routine_id, 10) : null;
 
     await client.query('BEGIN');
 
@@ -63,10 +64,10 @@ router.post('/start', async (req, res, next) => {
     }
 
     const result = await client.query(
-      `INSERT INTO sessions (user_id, workout_id, type, date, started_at)
-       VALUES ($1, $2, $3, CURRENT_DATE, NOW())
+      `INSERT INTO sessions (user_id, workout_id, type, date, started_at, routine_id)
+       VALUES ($1, $2, $3, CURRENT_DATE, NOW(), $4)
        RETURNING *`,
-      [req.user.id, primaryId, validatedType]
+      [req.user.id, primaryId, validatedType, validRoutineId]
     );
 
     const sessionId = result.rows[0].id;

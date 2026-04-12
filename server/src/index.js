@@ -16,6 +16,7 @@ import usersRoutes from './routes/users.js';
 import suggestionsRoutes from './routes/suggestions.js';
 import dashboardRoutes from './routes/dashboard.js';
 import exercisesRoutes from './routes/exercises.js';
+import routinesRoutes from './routes/routines.js';
 
 const app = express();
 
@@ -40,6 +41,7 @@ app.use('/api/users', usersRoutes);
 app.use('/api/suggestions', suggestionsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/exercises', exercisesRoutes);
+app.use('/api/routines', routinesRoutes);
 
 app.use(errorHandler);
 
