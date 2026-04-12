@@ -11,9 +11,11 @@
 | 3 | Body Measurements | feature/body-measurements | ✅ Shipped | Apr 12 | Apr 12 | Weight + 5 circumferences + body fat % + BMI + 7-day rolling avg + progress photos (IndexedDB). Unit toggle (metric/imperial). Recharts trend charts. Empty state polish. ApiError sanitization. |
 | 4 | Smart Suggestions (Rule-Based) | feature/smart-suggestions | ✅ Shipped | Apr 12 | Apr 12 | Rule-based suggestions for all 3 pillars. Inline hint text with tap-to-apply for strength. Batched yoga/breathwork fetches. Fixed yoga navigation bug. A- grade. |
 | 5 | Workout Tab Redesign | feature/s5-t5-workout-tab-redesign | ✅ Shipped | Apr 12 | Apr 12 | Daily dashboard with greeting + streak, today's session card, quick start pill buttons (vertical full-width), week progress dots, recent wins. /api/dashboard endpoint with 7 parallel queries. Review grade: A-. |
-| 6 | Mid-Session Swap | feature/mid-session-swap | ⏳ Queued | | | Yoga pose swap + breathwork technique swap during active session. From FUTURE_SCOPE #15, #16 |
+| 6 | Mid-Session Swap | feature/mid-session-swap | ✅ Shipped | Apr 12 | Apr 12 | Yoga/breathwork mid-session swap with difficulty filtering, save preference prompts, MidSessionPicker component, user_breathwork_prefs table. UX cleanup: removed Full Session from Yoga/Breathe tabs, Strength quick start with lazy timer. |
 
-**Progress: 5/6 tickets shipped**
+**Progress: 6/6 tickets shipped**
+
+**Sprint 5 COMPLETE**
 
 ---
 
