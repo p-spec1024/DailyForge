@@ -115,13 +115,19 @@ router.post('/start', async (req, res, next) => {
           validIds
         );
         const existingIds = new Set(existCheck.rows.map(r => r.id));
-        let sortOrder = 0;
-        for (const id of validIds) {
-          if (!existingIds.has(id)) continue;
+        const verified = validIds.filter(id => existingIds.has(id));
+        if (verified.length > 0) {
+          const values = [];
+          const params = [];
+          for (let i = 0; i < verified.length; i++) {
+            const off = i * 3;
+            values.push(`($${off+1}, $${off+2}, $${off+3})`);
+            params.push(sessionId, verified[i], i);
+          }
           await client.query(
             `INSERT INTO session_exercises (session_id, exercise_id, sort_order)
-             VALUES ($1, $2, $3)`,
-            [sessionId, id, sortOrder++]
+             VALUES ${values.join(', ')}`,
+            params
           );
         }
       }

@@ -46,16 +46,19 @@ router.post('/', async (req, res, next) => {
       );
       const routine = routineResult.rows[0];
 
-      const exerciseRows = [];
+      const values = [];
+      const params = [];
       for (let i = 0; i < exercises.length; i++) {
         const ex = exercises[i];
-        const result = await client.query(
-          `INSERT INTO user_routine_exercises (routine_id, exercise_id, position, target_sets, notes)
-           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-          [routine.id, ex.exercise_id, i, ex.target_sets || 3, ex.notes || null]
-        );
-        exerciseRows.push(result.rows[0]);
+        const off = i * 5;
+        values.push(`($${off+1}, $${off+2}, $${off+3}, $${off+4}, $${off+5})`);
+        params.push(routine.id, ex.exercise_id, i, ex.target_sets || 3, ex.notes || null);
       }
+      const { rows: exerciseRows } = await client.query(
+        `INSERT INTO user_routine_exercises (routine_id, exercise_id, position, target_sets, notes)
+         VALUES ${values.join(', ')} RETURNING *`,
+        params
+      );
 
       await client.query('COMMIT');
       res.status(201).json({ ...routine, exercises: exerciseRows });
@@ -186,14 +189,21 @@ router.put('/:id', async (req, res, next) => {
       let exerciseRows = [];
       if (exercises && Array.isArray(exercises)) {
         await client.query('DELETE FROM user_routine_exercises WHERE routine_id = $1', [id]);
-        for (let i = 0; i < exercises.length; i++) {
-          const ex = exercises[i];
-          const result = await client.query(
+        if (exercises.length > 0) {
+          const values = [];
+          const params = [];
+          for (let i = 0; i < exercises.length; i++) {
+            const ex = exercises[i];
+            const off = i * 5;
+            values.push(`($${off+1}, $${off+2}, $${off+3}, $${off+4}, $${off+5})`);
+            params.push(id, ex.exercise_id, i, ex.target_sets || 3, ex.notes || null);
+          }
+          const { rows } = await client.query(
             `INSERT INTO user_routine_exercises (routine_id, exercise_id, position, target_sets, notes)
-             VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-            [id, ex.exercise_id, i, ex.target_sets || 3, ex.notes || null]
+             VALUES ${values.join(', ')} RETURNING *`,
+            params
           );
-          exerciseRows.push(result.rows[0]);
+          exerciseRows = rows;
         }
       }
 
