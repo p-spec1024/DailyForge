@@ -65,7 +65,7 @@ Features that are **not in the current build plan** but worth revisiting later. 
 | 55 | Remove exercise from workout | UX | S6-T2 testing | Apr 13, 2026 | Allow users to remove added exercises mid-workout (X button on exercise card) |
 | 56 | Workout start optimization | Performance | S6-T2 testing | Apr 13, 2026 | "Starting workout..." screen takes too long — lazy load previous performance or batch API calls |
 | 57 | Extract useAddExercise hook | Refactor | S6-T2 /review | Apr 13, 2026 | handleAddExercise is triplicated across EmptyWorkoutView, SessionMainWork, and TodayView — extract to shared hook |
-| 58 | Extract SaveRoutineModal pattern | Refactor | S6-T3 /review | Apr 13, 2026 | SessionSummary + SaveRoutineModal block duplicated 3x across TodayView (2 render paths) and EmptyWorkoutView — extract to wrapper component |
+| 58 | ~~Extract SaveRoutineModal pattern~~ | Refactor | S6-T3 /review | Apr 13, 2026 | **DONE.** Extracted `useSaveRoutine` hook — replaces 4 useState + 12 inline closures across TodayView and EmptyWorkoutView. |
 | 59 | Routine edit/reorder exercises | UX | S6-T3 planning | Apr 13, 2026 | Edit existing routines: rename, reorder exercises, add/remove exercises. PUT /api/routines/:id endpoint already exists. |
 | 60 | Routine duplicate/fork | UX | S6-T3 planning | Apr 13, 2026 | Duplicate an existing routine as starting point for a new one |
 
