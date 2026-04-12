@@ -86,7 +86,7 @@ export default function TodaySessionCard({ workoutName, durationMin, lastSession
       </div>
 
       <button
-        onClick={onStart}
+        onClick={() => onStart?.()}
         style={{
           width: '100%',
           padding: '14px',
