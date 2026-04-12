@@ -52,6 +52,7 @@ Features that are **not in the current build plan** but worth revisiting later. 
 | 42 | Breathwork contraindications | Array of conditions per technique (pregnancy, heart conditions, anxiety) | Algorithm Research | Apr 12, 2026 | Safety filtering for technique selection. |
 | 43 | Time-of-day breathwork filtering | Tag techniques as morning/evening/pre-workout/post-workout suitable | Algorithm Research | Apr 12, 2026 | Algorithm selects energizing AM, calming PM. |
 | 44 | User equipment profile | Store user's available equipment for exercise filtering | Algorithm Research | Apr 12, 2026 | Onboarding asks "what equipment do you have?" |
+| 45 | Primary/secondary muscle split | Split muscle_groups into primary_muscles and secondary_muscles arrays | Algorithm Research | Apr 12, 2026 | Current muscle_groups is flat array. Need to distinguish primary target vs supporting muscles for recovery tracking (#37) and balanced programming. |
 
 ---
 
