@@ -55,10 +55,13 @@ Features that are **not in the current build plan** but worth revisiting later. 
 | 45 | Primary/secondary muscle split | Split muscle_groups into primary_muscles and secondary_muscles arrays | Algorithm Research | Apr 12, 2026 | Current muscle_groups is flat array. Need to distinguish primary target vs supporting muscles for recovery tracking (#37) and balanced programming. |
 | 46 | Exercise library "Do this" button | UX | S5-T6 testing | Apr 12, 2026 | Browse any exercise → "Do this exercise" starts single-exercise session. |
 | 47 | Custom workout builder | UX | S5-T6 testing | Apr 12, 2026 | HIGH priority. Create/save custom routines. Core Hevy feature missing. |
-| 48 | Empty workout start | UX | S5-T6 testing | Apr 12, 2026 | HIGH priority. Start blank → add exercises as you go. |
+| 48 | ~~Empty workout start~~ | UX | S5-T6 testing | Apr 12, 2026 | **DONE in S6-T1.** Start blank → add exercises as you go. |
 | 49 | Yoga pose explorer | UX | S5-T6 testing | Apr 12, 2026 | Browse poses → single-pose timed hold. |
-| 50 | Strength exercise browser | UX | S5-T6 testing | Apr 12, 2026 | Dedicated exercise browse screen with filters. |
-| 51 | Strength page redesign | UX | S5-T6 testing | Apr 12, 2026 | HIGH priority. Dedicated Strength tab with routine selection + empty workout. Match Yoga tab UX pattern. |
+| 50 | ~~Strength exercise browser~~ | UX | S5-T6 testing | Apr 12, 2026 | **DONE in S6-T1.** Dedicated exercise browse screen with filters. |
+| 51 | ~~Strength page redesign~~ | UX | S5-T6 testing | Apr 12, 2026 | **DONE in S6-T1.** Dedicated Strength tab with routine selection + empty workout. Match Yoga tab UX pattern. |
+| 52 | useYogaSwap hook extraction | Refactor | S5-T6 /review | Apr 12, 2026 | Extract yoga swap logic into reusable hook. Logged as architecture recommendation. |
+| 53 | Breathwork cancel-resume handling | UX | S5-T6 /review | Apr 12, 2026 | Handle cancel/resume edge cases in breathwork sessions. |
+| 54 | Alternatives caching | Performance | S5-T6 /review | Apr 12, 2026 | Cache exercise alternatives to reduce API calls. |
 
 ---
 

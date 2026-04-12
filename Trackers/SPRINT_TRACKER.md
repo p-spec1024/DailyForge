@@ -6,13 +6,12 @@
 
 | # | Ticket | Branch | Status | Started | Shipped | Notes |
 |---|--------|--------|--------|---------|---------|-------|
-| 1 | Strength Page Redesign + Empty Workout | feature/strength-page | ✅ Shipped | Apr 12 | Apr 12 | 5-tab nav (Home/Strength/Yoga/Breathe/Profile), Strength page with exercise browser (search + muscle filters + pagination), exercise detail modal with "Do This Exercise", empty workout flow (start blank, log sets, finish). API: GET /exercises/strength, modified POST /session/start for workout_id: null. Merged S6-T2 scope (empty workout) into this ticket. Review fixes: SavePreferencePrompt double-dismiss race, FK validation, LIKE escaping, SessionYoga stale dep. |
-| 2 | ~~Empty Workout Start~~ | — | ✅ Merged into T1 | — | Apr 12 | Scope merged into S6-T1 |
-| 3 | Add Exercise to Workout | feature/add-exercise | ⏳ Queued | | | Search/browse exercises mid-workout |
-| 4 | Save Workout as Routine | feature/save-routine | ⏳ Queued | | | Save current workout as reusable template |
-| 5 | Resume Logic Fix | feature/resume-fix | ⏳ Queued | | | Don't load 5-phase data for strength-only sessions |
+| 1 | Strength Page Redesign + Empty Workout | feature/strength-page | ✅ Shipped | Apr 12 | Apr 12 | 5-tab nav (Home/Strength/Yoga/Breathe/Profile), Strength page with exercise browser, muscle filter chips (12 groups), search with debounce, ExerciseDetailModal with "Do This Exercise", empty workout mode via ?mode=empty, initial_exercises[] support, EmptyWorkoutView component. S5-T6 retroactive review: fixed SavePreferencePrompt double-dismiss race condition + stale poseTimer dep. |
+| 2 | Add Exercise to Workout | feature/add-exercise | ⏳ Queued | | | Search/browse exercises mid-workout |
+| 3 | Save Workout as Routine | feature/save-routine | ⏳ Queued | | | Save current workout as reusable template |
+| 4 | Resume Logic Fix | feature/resume-fix | ⏳ Queued | | | Don't load 5-phase data for strength-only sessions |
 
-**Progress: 1/5 tickets shipped (T1+T2 merged)**
+**Progress: 1/4 tickets shipped**
 
 ---
 
