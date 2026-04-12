@@ -1,5 +1,21 @@
 # DailyForge — Sprint Tracker
 
+## Sprint 6 — Week of Apr 13, 2026
+
+**Goal:** Custom Workouts & Strength Page. Let users build their own workouts.
+
+| # | Ticket | Branch | Status | Started | Shipped | Notes |
+|---|--------|--------|--------|---------|---------|-------|
+| 1 | Strength Page Redesign | feature/strength-page | ⏳ Queued | | | Dedicated Strength tab with routine selection + empty workout option. Match Yoga tab UX. |
+| 2 | Empty Workout Start | feature/empty-workout | ⏳ Queued | | | Start blank → add exercises as you go |
+| 3 | Add Exercise to Workout | feature/add-exercise | ⏳ Queued | | | Search/browse exercises mid-workout |
+| 4 | Save Workout as Routine | feature/save-routine | ⏳ Queued | | | Save current workout as reusable template |
+| 5 | Resume Logic Fix | feature/resume-fix | ⏳ Queued | | | Don't load 5-phase data for strength-only sessions |
+
+**Progress: 0/5 tickets shipped**
+
+---
+
 ## Sprint 5 — Week of Apr 11, 2026
 
 **Goal:** Phase 3 — Analytics + Choice. Visual proof of gains across all 3 pillars.
