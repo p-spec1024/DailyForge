@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useData } from '../contexts/DataProvider.jsx';
 import { useWorkoutSession } from '../hooks/useWorkoutSession.js';
+import { useSaveRoutine } from '../hooks/useSaveRoutine.js';
 import { api } from '../utils/api.js';
 import { C, formatVolume, isStrengthPhase, MONO } from '../components/workout/tokens.jsx';
 import SessionHeader from '../components/SessionHeader.jsx';
@@ -191,11 +192,10 @@ function TodayView({ onLogout }) {
   const [strengthOnly, setStrengthOnly] = useState(false);
   const [showAddExercise, setShowAddExercise] = useState(false);
   const [addedExercises, setAddedExercises] = useState([]);
-  const [showSaveRoutine, setShowSaveRoutine] = useState(false);
-  const [routineSaved, setRoutineSaved] = useState(false);
   const restTimerActivatedAtRef = useRef(null);
 
   const session = useWorkoutSession();
+  const saveRoutine = useSaveRoutine();
 
   const restDuration = userSettings?.rest_timer_duration ?? 90;
   const restEnabled = userSettings?.rest_timer_enabled ?? true;
@@ -729,18 +729,17 @@ function TodayView({ onLogout }) {
           <SessionSummary
             data={summaryData}
             onDone={() => setSummaryData(null)}
-            onSaveRoutine={!routineSaved && summaryData.summary?.exercises?.length > 0
-              ? () => setShowSaveRoutine(true) : undefined}
+            onSaveRoutine={saveRoutine.canSave(summaryData.summary?.exercises) ? saveRoutine.open : undefined}
           />
         )}
         {summaryData && (
           <SaveRoutineModal
-            isOpen={showSaveRoutine}
-            onClose={() => setShowSaveRoutine(false)}
+            isOpen={saveRoutine.isOpen}
+            onClose={saveRoutine.close}
             exercises={(summaryData.summary?.exercises || []).map(ex => ({
               id: ex.exercise_id, name: ex.name, sets_count: ex.sets,
             }))}
-            onSaved={() => { setRoutineSaved(true); setShowSaveRoutine(false); }}
+            onSaved={saveRoutine.onSaved}
           />
         )}
 
@@ -808,18 +807,17 @@ function TodayView({ onLogout }) {
         <SessionSummary
           data={summaryData}
           onDone={() => setSummaryData(null)}
-          onSaveRoutine={!routineSaved && summaryData.summary?.exercises?.length > 0
-            ? () => setShowSaveRoutine(true) : undefined}
+          onSaveRoutine={saveRoutine.canSave(summaryData.summary?.exercises) ? saveRoutine.open : undefined}
         />
       )}
       {summaryData && (
         <SaveRoutineModal
-          isOpen={showSaveRoutine}
-          onClose={() => setShowSaveRoutine(false)}
+          isOpen={saveRoutine.isOpen}
+          onClose={saveRoutine.close}
           exercises={(summaryData.summary?.exercises || []).map(ex => ({
             id: ex.exercise_id, name: ex.name, sets_count: ex.sets,
           }))}
-          onSaved={() => { setRoutineSaved(true); setShowSaveRoutine(false); }}
+          onSaved={saveRoutine.onSaved}
         />
       )}
     </div>
@@ -841,12 +839,11 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName, routineId: i
   const [userSettings, setUserSettings] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showAddExercise, setShowAddExercise] = useState(false);
-  const [showSaveRoutine, setShowSaveRoutine] = useState(false);
-  const [routineSaved, setRoutineSaved] = useState(false);
   const [toast, setToast] = useState(null);
   const restTimerActivatedAtRef = useRef(null);
   const startedRef = useRef(false);
   const timerStartedRef = useRef(false);
+  const saveRoutine = useSaveRoutine();
 
   const restDuration = userSettings?.rest_timer_duration ?? 90;
   const restEnabled = userSettings?.rest_timer_enabled ?? true;
@@ -1009,16 +1006,15 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName, routineId: i
         <SessionSummary
           data={summaryData}
           onDone={handleSummaryDone}
-          onSaveRoutine={!routineSaved && summaryData.summary?.exercises?.length > 0
-            ? () => setShowSaveRoutine(true) : undefined}
+          onSaveRoutine={saveRoutine.canSave(summaryData.summary?.exercises) ? saveRoutine.open : undefined}
         />
         <SaveRoutineModal
-          isOpen={showSaveRoutine}
-          onClose={() => setShowSaveRoutine(false)}
+          isOpen={saveRoutine.isOpen}
+          onClose={saveRoutine.close}
           exercises={(summaryData.summary?.exercises || []).map(ex => ({
             id: ex.exercise_id, name: ex.name, sets_count: ex.sets,
           }))}
-          onSaved={() => { setRoutineSaved(true); setShowSaveRoutine(false); }}
+          onSaved={saveRoutine.onSaved}
         />
       </div>
     );
@@ -1039,7 +1035,7 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName, routineId: i
         totalVolume={session.totalVolume}
         onFinish={() => setConfirmFinish(true)}
         onDiscard={() => setConfirmDiscard(true)}
-        onSaveRoutine={exercises.length > 0 ? () => setShowSaveRoutine(true) : undefined}
+        onSaveRoutine={saveRoutine.canSave(exercises) ? saveRoutine.open : undefined}
         onSettings={() => setShowSettings(true)}
         formatTime={session.formatTime}
         isFinishing={session.isLoading}
@@ -1198,13 +1194,13 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName, routineId: i
 
       {/* Save as Routine Modal */}
       <SaveRoutineModal
-        isOpen={showSaveRoutine}
-        onClose={() => setShowSaveRoutine(false)}
+        isOpen={saveRoutine.isOpen}
+        onClose={saveRoutine.close}
         exercises={exercises.map(ex => ({
           id: ex.id, name: ex.name,
           sets_count: session.exerciseSets[ex.id]?.sets?.filter(s => s.completed).length || ex.default_sets || 3,
         }))}
-        onSaved={() => { setRoutineSaved(true); setShowSaveRoutine(false); }}
+        onSaved={saveRoutine.onSaved}
       />
     </div>
   );
