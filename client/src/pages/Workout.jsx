@@ -5,12 +5,14 @@ import { useWorkoutSession } from '../hooks/useWorkoutSession.js';
 import { api } from '../utils/api.js';
 import { C, formatVolume, isStrengthPhase, MONO } from '../components/workout/tokens.jsx';
 import SessionHeader from '../components/SessionHeader.jsx';
-import { PhaseCheckbox, PhaseSection, PhaseBar } from '../components/PhaseCard.jsx';
+import { PhaseCheckbox } from '../components/PhaseCard.jsx';
 import { ExerciseSessionCard } from '../components/ExerciseCard.jsx';
 import SessionSummary, { ConfirmDialog } from '../components/SessionSummary.jsx';
 import RestTimer from '../components/RestTimer.jsx';
 import AlternativePicker from '../components/AlternativePicker.jsx';
 import SavePreferencePrompt from '../components/SavePreferencePrompt.jsx';
+import WorkoutDashboard from '../components/Dashboard/WorkoutDashboard.jsx';
+import { useAuth } from '../hooks/useAuth.js';
 
 const DAY_NAMES = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 
@@ -167,8 +169,8 @@ function SettingsModal({ settings, onClose, onSave }) {
 /* ── Today's Workout View ── */
 function TodayView({ onLogout }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { workoutData: workout, workoutLoading: loading, fetchWorkout, invalidateWorkout } = useData();
-  const [expandedId, setExpandedId] = useState(null);
   const [completedPhases, setCompletedPhases] = useState({});
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -420,10 +422,6 @@ function TodayView({ onLogout }) {
     await session.dismissResume();
   }
 
-  function toggleExpand(id) {
-    setExpandedId(prev => (prev === id ? null : id));
-  }
-
   const now = new Date();
   const dayName = DAY_NAMES[now.getDay()];
 
@@ -647,7 +645,9 @@ function TodayView({ onLogout }) {
     );
   }
 
-  /* ─── VIEW MODE (no active session) ─── */
+  /* ─── VIEW MODE (no active session) — dashboard ─── */
+  const firstNameFallback = (user?.name || '').trim().split(/\s+/)[0] || '';
+
   return (
     <div>
       {/* Resume banner */}
@@ -659,106 +659,18 @@ function TodayView({ onLogout }) {
         />
       )}
 
-      {/* Header */}
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <div style={{
-            fontSize: 10, fontWeight: 600, letterSpacing: '1.5px',
-            color: C.textMuted, textTransform: 'uppercase', marginBottom: 4,
-          }}>{dayName}</div>
-          <h2 style={{ fontSize: 18, fontWeight: 500, color: C.text, marginBottom: 4 }}>
-            {workout.name}
-          </h2>
-          <div style={{ fontSize: 12, color: C.textSec }}>
-            {mainExerciseCount} exercises &middot; ~{fullSessionMin} min full session
-          </div>
-        </div>
-        {onLogout && (
-          <button onClick={onLogout} style={{
-            background: 'none', border: 'none', padding: 4, cursor: 'pointer', color: C.textMuted,
-          }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-          </button>
-        )}
-      </div>
-
-      {/* Phase Bar */}
-      <PhaseBar phases={workout.phases} />
-
-      {/* Only show main work exercises — other phases are handled by 5-phase flow */}
-      {mainPhase && (
-        <PhaseSection
-          phase={mainPhase}
-          expandedId={expandedId}
-          onToggleExpand={toggleExpand}
-          onSwap={handleOpenSwapPicker}
-          onReset={handleResetToDefault}
-        />
-      )}
-
-      {/* Start buttons (sticky at bottom) */}
-      <div style={{
-        position: 'sticky', bottom: 'calc(70px + env(safe-area-inset-bottom, 0px))', zIndex: 15, paddingTop: 12,
-        display: 'flex', gap: 8,
-      }}>
-        <button
-          onClick={() => navigate('/session?type=strength')}
-          style={{
-            flex: 1, padding: '16px', borderRadius: 12,
-            background: 'rgba(29,158,117,0.15)', border: '1px solid rgba(29,158,117,0.25)',
-            color: C.green, fontSize: 15, fontWeight: 600, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            backdropFilter: 'blur(8px)',
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-            <polygon points="5,3 19,12 5,21" />
-          </svg>
-          Full Session
-        </button>
-        <button
-          onClick={handleStart}
-          disabled={startDisabled}
-          style={{
-            padding: '16px 20px', borderRadius: 12,
-            background: 'rgba(255,255,255,0.06)', border: '0.5px solid rgba(255,255,255,0.1)',
-            color: C.textSec, fontSize: 13, fontWeight: 500, cursor: startDisabled ? 'default' : 'pointer',
-            backdropFilter: 'blur(8px)',
-            opacity: startDisabled ? 0.5 : 1,
-          }}
-        >
-          {startDisabled ? '...' : 'Quick'}
-        </button>
-      </div>
+      <WorkoutDashboard
+        firstNameFallback={firstNameFallback}
+        workoutName={workout.name}
+        durationMin={fullSessionMin}
+        onStartFullSession={() => navigate('/session?type=strength')}
+        onStartStrength={handleStart}
+        onLogout={onLogout}
+      />
 
       {/* Summary card (shows after completing via summary) */}
       {summaryData && (
         <SessionSummary data={summaryData} onDone={() => setSummaryData(null)} />
-      )}
-
-      {/* Alternative Picker Bottom Sheet */}
-      {swapPickerExercise && workout && (
-        <AlternativePicker
-          exerciseId={swapPickerExercise.original_exercise_id || swapPickerExercise.id}
-          workoutId={workout.phases.find(p => p.phase === 'main')?.workout_id || workout.phases[0]?.workout_id}
-          onSelect={async (alt) => {
-            const originalId = swapPickerExercise.original_exercise_id || swapPickerExercise.id;
-            setSwapPickerExercise(null);
-            // In view mode, save preference immediately
-            try {
-              await api.put(`/workout/slot/${originalId}/choose`, { chosen_exercise_id: alt.id });
-              invalidateWorkout();
-              fetchWorkout();
-            } catch {
-              // Network or server error — no action needed
-            }
-          }}
-          onClose={() => setSwapPickerExercise(null)}
-        />
       )}
     </div>
   );
