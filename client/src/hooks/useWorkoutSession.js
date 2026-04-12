@@ -174,19 +174,45 @@ export function useWorkoutSession() {
         body.routine_id = opts.routine_id;
       }
       const data = await api.post('/session/start', body);
-      const session = data.session;
-      setSessionId(session.id);
-      setWorkoutId(session.workout_id);
-      setStartedAt(session.started_at);
+      const sess = data.session;
+      setSessionId(sess.id);
+      setWorkoutId(sess.workout_id);
+      setStartedAt(sess.started_at);
       setIsActive(true);
-      setExerciseSets({});
-      setTotalSets(0);
-      setTotalVolume(0);
-      setExercisesDone(0);
       setSessionPrs({});
       setTimerStartOverride(null);
+
+      if (data.resumed && data.logged_sets) {
+        // Existing session — restore exerciseSets from logged sets
+        const sets = {};
+        for (const s of data.logged_sets) {
+          if (s.set_number == null) continue;
+          const exId = s.exercise_id;
+          if (!sets[exId]) sets[exId] = { sets: [] };
+          sets[exId].sets.push({
+            set_number: s.set_number,
+            weight: s.weight != null ? parseFloat(s.weight) : null,
+            reps: s.reps != null ? parseInt(s.reps) : null,
+            rpe: s.rpe != null ? parseFloat(s.rpe) : null,
+            set_type: s.set_type || 'normal',
+            completed: s.completed || false,
+          });
+        }
+        for (const exId of Object.keys(sets)) {
+          sets[exId].sets.sort((a, b) => a.set_number - b.set_number);
+        }
+        setExerciseSets(sets);
+        recalcTotals(sets);
+      } else {
+        // Fresh session
+        setExerciseSets({});
+        setTotalSets(0);
+        setTotalVolume(0);
+        setExercisesDone(0);
+      }
       // Note: timerDeferred is controlled by the caller (EmptyWorkoutView)
-      return session;
+      // Return session + resume metadata so callers can restore exercise UI
+      return { ...sess, _resumed: data.resumed, _loggedSets: data.logged_sets };
     } catch (err) {
       console.error('Failed to start session:', err);
       return null;
@@ -194,7 +220,7 @@ export function useWorkoutSession() {
       loadingRef.current = false;
       setIsLoading(false);
     }
-  }, []);
+  }, [recalcTotals]);
 
   // Log a single set
   const logSet = useCallback(async (exerciseId, setData) => {

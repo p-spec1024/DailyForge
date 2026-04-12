@@ -59,8 +59,25 @@ router.post('/start', async (req, res, next) => {
       [req.user.id]
     );
     if (existing.rows.length > 0) {
+      const existingSession = existing.rows[0];
+      // Return logged sets with exercise metadata so the client can restore state
+      const setsResult = await client.query(
+        `SELECT se.exercise_id, se.set_number, se.weight, se.reps_completed as reps,
+                se.rpe, se.set_type, se.completed, se.notes, se.sort_order,
+                e.name, e.default_sets, e.default_reps, e.target_muscles,
+                e.type AS exercise_type, e.default_duration_secs, e.tracking_type
+         FROM session_exercises se
+         JOIN exercises e ON e.id = se.exercise_id
+         WHERE se.session_id = $1
+         ORDER BY se.sort_order, se.set_number`,
+        [existingSession.id]
+      );
       await client.query('COMMIT');
-      return res.status(200).json({ session: existing.rows[0] });
+      return res.status(200).json({
+        session: existingSession,
+        resumed: true,
+        logged_sets: setsResult.rows,
+      });
     }
 
     const result = await client.query(

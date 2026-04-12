@@ -873,6 +873,23 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName, routineId: i
     api.get('/settings').then(setUserSettings).catch(() => {});
   }, []);
 
+  // Restore rest timer from sessionStorage on resume
+  const restoredTimerRef = useRef(false);
+  useEffect(() => {
+    if (session.isActive && !restoredTimerRef.current) {
+      restoredTimerRef.current = true;
+      const saved = parseInt(sessionStorage.getItem('dailyforge_rest_timer_end'), 10);
+      if (saved && saved > Date.now()) {
+        setRestTimerEndTime(saved);
+        setRestTimerKey(k => k + 1);
+        restTimerActivatedAtRef.current = Date.now() - 1000;
+        setIsRestTimerActive(true);
+      } else {
+        sessionStorage.removeItem('dailyforge_rest_timer_end');
+      }
+    }
+  }, [session.isActive]);
+
   // Start empty session on mount — run once only
   useEffect(() => {
     if (startedRef.current) return;
@@ -909,6 +926,35 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName, routineId: i
         navigate('/');
         return;
       }
+
+      // Resumed existing session — restore exercises from logged_sets metadata
+      if (sess._resumed && sess._loggedSets) {
+        const seen = new Set();
+        const restored = [];
+        for (const s of sess._loggedSets) {
+          if (seen.has(s.exercise_id)) continue;
+          seen.add(s.exercise_id);
+          restored.push({
+            id: s.exercise_id,
+            name: s.name,
+            target_muscles: s.target_muscles,
+            type: s.exercise_type,
+            default_sets: s.default_sets || 3,
+            default_reps: s.default_reps,
+            default_duration_secs: s.default_duration_secs,
+            tracking_type: s.tracking_type,
+          });
+        }
+        if (restored.length > 0) {
+          // Prevent undeferTimer() from overriding startedAt with NOW —
+          // timer should tick from the original session start time
+          timerStartedRef.current = true;
+          session.setTimerDeferred(false);
+          setExercises(restored);
+          return;
+        }
+      }
+
       if (initialExerciseId) {
         try {
           const ex = await api.get(`/exercises/${initialExerciseId}`);
