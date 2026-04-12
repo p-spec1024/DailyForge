@@ -48,6 +48,10 @@ Features that are **not in the current build plan** but worth revisiting later. 
 | 38 | Beginner programs | "First 7 Days" guided programs for all three pillars | Algorithm Research | Apr 12, 2026 | HIGH priority. Structured intro for new users. |
 | 39 | Volume trend comparisons | Compare weekly/monthly volume trends in charts | S5-T5 planning | Apr 12, 2026 | Add week-over-week comparison to progression graphs. |
 | 40 | Counter-pose engine | Auto-insert counter-poses after peak/intense poses | Algorithm Research | Apr 12, 2026 | After backbends → forward folds. After twist right → twist left. |
+| 41 | Movement pattern tagging | Tag strength exercises with pattern (push/pull/squat/hinge/carry/core) for balanced programming | Algorithm Research | Apr 12, 2026 | Ensures workouts don't stack 3 push exercises in a row. |
+| 42 | Breathwork contraindications | Array of conditions per technique (pregnancy, heart conditions, anxiety) | Algorithm Research | Apr 12, 2026 | Safety filtering for technique selection. |
+| 43 | Time-of-day breathwork filtering | Tag techniques as morning/evening/pre-workout/post-workout suitable | Algorithm Research | Apr 12, 2026 | Algorithm selects energizing AM, calming PM. |
+| 44 | User equipment profile | Store user's available equipment for exercise filtering | Algorithm Research | Apr 12, 2026 | Onboarding asks "what equipment do you have?" |
 
 ---
 
