@@ -9,6 +9,7 @@ import { ExerciseSessionCard } from '../ExerciseCard.jsx';
 import RestTimer from '../RestTimer.jsx';
 import AlternativePicker from '../AlternativePicker.jsx';
 import SavePreferencePrompt from '../SavePreferencePrompt.jsx';
+import AddExerciseModal from '../workout/AddExerciseModal.jsx';
 import { ConfirmDialog } from '../SessionSummary.jsx';
 
 function PauseOverlay({ onResume }) {
@@ -57,6 +58,8 @@ export default function SessionMainWork({ onComplete, flow }) {
   const [promptedExercises, setPromptedExercises] = useState(new Set());
   const [isPaused, setIsPaused] = useState(false);
   const [skippedExercises, setSkippedExercises] = useState(new Set());
+  const [showAddExercise, setShowAddExercise] = useState(false);
+  const [addedExercises, setAddedExercises] = useState([]);
   const restTimerActivatedAtRef = useRef(null);
   const phaseStartRef = useRef(Date.now());
   const restTimerPausedRemaining = useRef(null);
@@ -214,6 +217,28 @@ export default function SessionMainWork({ onComplete, flow }) {
     } catch {}
   }
 
+  async function handleAddExercise(exercise) {
+    // Check against routine exercises to prevent duplicate cards sharing state
+    const routineExerciseIds = new Set(
+      (workout?.phases || [])
+        .filter(isStrengthPhase)
+        .flatMap(p => getPhaseExercises(p).map(ex => ex.id))
+    );
+    if (routineExerciseIds.has(exercise.id)) return;
+
+    setAddedExercises(prev => {
+      if (prev.some(e => e.id === exercise.id)) return prev;
+      return [...prev, exercise];
+    });
+    // Fetch previous performance for the new exercise
+    try {
+      const data = await api.get(`/session/previous-performance?exerciseIds=${exercise.id}`);
+      if (data.previousPerformance) {
+        setPreviousPerformance(prev => ({ ...prev, ...data.previousPerformance }));
+      }
+    } catch { /* ignore */ }
+  }
+
   // Save preference prompt
   useEffect(() => {
     if (!session.isActive || savePromptData) return;
@@ -263,9 +288,10 @@ export default function SessionMainWork({ onComplete, flow }) {
 
   function getAllExerciseNames() {
     if (!workout?.phases) return [];
-    return workout.phases
+    const names = workout.phases
       .filter(isStrengthPhase)
       .flatMap(p => getPhaseExercises(p).map(ex => ex.name));
+    return [...names, ...addedExercises.map(ex => ex.name)];
   }
 
   async function handleDiscard() {
@@ -363,6 +389,51 @@ export default function SessionMainWork({ onComplete, flow }) {
         }
       })}
 
+      {/* Added exercises (from + Add Exercise) */}
+      {addedExercises.length > 0 && (
+        <div>
+          <div style={{
+            fontSize: 10, fontWeight: 600, letterSpacing: '1.5px',
+            color: C.textMuted, textTransform: 'uppercase', padding: '8px 0 4px',
+          }}>Added</div>
+          {addedExercises.map(ex => {
+            const exSets = session.exerciseSets[ex.id]?.sets || [];
+            return (
+              <ExerciseSessionCard
+                key={ex.id}
+                exercise={ex}
+                sets={exSets}
+                previousData={previousPerformance[ex.id] || null}
+                prData={session.sessionPrs[ex.id] || null}
+                onLogSet={handleLogSet}
+                onInputFocus={handleDismissTimer}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {/* + Add Exercise button */}
+      <button
+        onClick={() => setShowAddExercise(true)}
+        style={{
+          width: '100%', padding: '14px 16px', marginBottom: 12, marginTop: 4,
+          borderRadius: 12,
+          background: C.card,
+          border: '1px solid rgba(255,255,255,0.08)',
+          color: C.textSec, fontSize: 14, fontWeight: 500,
+          cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+        Add Exercise
+      </button>
+
       {/* Finish button */}
       <div style={{
         position: 'sticky', bottom: 'calc(70px + env(safe-area-inset-bottom, 0px))', zIndex: 15, paddingTop: 12,
@@ -405,6 +476,16 @@ export default function SessionMainWork({ onComplete, flow }) {
           originalExerciseId={savePromptData.originalExerciseId}
           chosenExerciseId={savePromptData.chosenExerciseId}
           onSave={() => setSavePromptData(null)} onDismiss={() => setSavePromptData(null)} />
+      )}
+      {showAddExercise && (
+        <AddExerciseModal
+          onAdd={handleAddExercise}
+          onClose={() => setShowAddExercise(false)}
+          existingExerciseIds={[
+            ...(workout?.phases || []).filter(isStrengthPhase).flatMap(p => getPhaseExercises(p).map(ex => ex.id)),
+            ...addedExercises.map(ex => ex.id),
+          ]}
+        />
       )}
       {isPaused && <PauseOverlay onResume={handleResume} />}
     </div>

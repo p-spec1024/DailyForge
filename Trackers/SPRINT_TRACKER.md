@@ -7,11 +7,11 @@
 | # | Ticket | Branch | Status | Started | Shipped | Notes |
 |---|--------|--------|--------|---------|---------|-------|
 | 1 | Strength Page Redesign + Empty Workout | feature/strength-page | ✅ Shipped | Apr 12 | Apr 12 | 5-tab nav (Home/Strength/Yoga/Breathe/Profile), Strength page with exercise browser, muscle filter chips (12 groups), search with debounce, ExerciseDetailModal with "Do This Exercise", empty workout mode via ?mode=empty, initial_exercises[] support, EmptyWorkoutView component. S5-T6 retroactive review: fixed SavePreferencePrompt double-dismiss race condition + stale poseTimer dep. |
-| 2 | Add Exercise to Workout | feature/add-exercise | ⏳ Queued | | | Search/browse exercises mid-workout |
+| 2 | Add Exercise to Workout | feature/add-exercise | ✅ Shipped | Apr 12 | Apr 13 | AddExerciseModal with search + muscle filter chips. "+ Add Exercise" button in all 3 workout modes (empty, routine-based, full session). Server-side search ranking (exact > prefix > word-boundary > contains) with hyphen normalization. Bodyweight exercises show reps only (104 exercises flagged as reps_only). Duration exercises show timer (7 exercises). Toast duplicate warning. Deduped 20 duplicate exercises, merged richer muscle data. Added 6 missing bodyweight exercises (Burpees, Jumping Jacks, Dead Hang, High Knees, Inchworm, Plank Jacks). Fixed tracking_type for 8 exercises. |
 | 3 | Save Workout as Routine | feature/save-routine | ⏳ Queued | | | Save current workout as reusable template |
 | 4 | Resume Logic Fix | feature/resume-fix | ⏳ Queued | | | Don't load 5-phase data for strength-only sessions |
 
-**Progress: 1/4 tickets shipped**
+**Progress: 2/4 tickets shipped**
 
 ---
 

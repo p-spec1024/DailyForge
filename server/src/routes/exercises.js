@@ -38,11 +38,14 @@ router.get('/strength', async (req, res, next) => {
     }
 
     // Search filter (name substring, case-insensitive)
+    // Normalize hyphens to spaces so "pull up" matches "Pull-ups" and vice versa
+    let searchEscaped = null;
     if (search && typeof search === 'string' && search.trim().length > 0) {
       paramIdx++;
-      const escaped = search.toLowerCase().trim().replace(/[%_\\]/g, '\\$&');
-      conditions.push(`LOWER(e.name) LIKE $${paramIdx} ESCAPE '\\'`);
-      params.push(`%${escaped}%`);
+      searchEscaped = search.toLowerCase().trim().replace(/[%_\\]/g, '\\$&');
+      const searchNorm = searchEscaped.replace(/-/g, ' ');
+      conditions.push(`REPLACE(LOWER(e.name), '-', ' ') LIKE $${paramIdx} ESCAPE '\\'`);
+      params.push(`%${searchNorm}%`);
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -55,6 +58,24 @@ router.get('/strength', async (req, res, next) => {
     const total = countResult.rows[0].total;
 
     // Fetch page
+    // When searching, rank by relevance: exact > starts-with > word-boundary > contains
+    let orderBy = 'ORDER BY e.name ASC';
+    if (searchEscaped) {
+      paramIdx++;
+      const rankParam = paramIdx;
+      const searchNorm = searchEscaped.replace(/-/g, ' ');
+      params.push(searchNorm);
+      // Compare against normalized name (hyphens → spaces) for consistent matching
+      orderBy = `ORDER BY
+        CASE
+          WHEN REPLACE(LOWER(e.name), '-', ' ') = $${rankParam} THEN 0
+          WHEN REPLACE(LOWER(e.name), '-', ' ') LIKE $${rankParam} || '%' ESCAPE '\\' THEN 1
+          WHEN REPLACE(LOWER(e.name), '-', ' ') LIKE '% ' || $${rankParam} || '%' ESCAPE '\\' THEN 2
+          WHEN REPLACE(LOWER(e.name), '-', ' ') LIKE '%(' || $${rankParam} || '%' ESCAPE '\\' THEN 2
+          ELSE 3
+        END, e.name ASC`;
+    }
+
     paramIdx++;
     const limitParam = paramIdx;
     paramIdx++;
@@ -65,7 +86,7 @@ router.get('/strength', async (req, res, next) => {
               e.difficulty, e.default_sets, e.default_reps, e.tracking_type
        FROM exercises e
        ${where}
-       ORDER BY e.name ASC
+       ${orderBy}
        LIMIT $${limitParam} OFFSET $${offsetParam}`,
       [...params, limit, offset]
     );

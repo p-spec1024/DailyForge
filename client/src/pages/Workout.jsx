@@ -11,6 +11,7 @@ import SessionSummary, { ConfirmDialog } from '../components/SessionSummary.jsx'
 import RestTimer from '../components/RestTimer.jsx';
 import AlternativePicker from '../components/AlternativePicker.jsx';
 import SavePreferencePrompt from '../components/SavePreferencePrompt.jsx';
+import AddExerciseModal from '../components/workout/AddExerciseModal.jsx';
 import WorkoutDashboard from '../components/Dashboard/WorkoutDashboard.jsx';
 import { useAuth } from '../hooks/useAuth.js';
 
@@ -187,6 +188,8 @@ function TodayView({ onLogout }) {
   const [savePromptData, setSavePromptData] = useState(null); // { exerciseName, originalExerciseId, chosenExerciseId }
   const [promptedExercises, setPromptedExercises] = useState(new Set());
   const [strengthOnly, setStrengthOnly] = useState(false);
+  const [showAddExercise, setShowAddExercise] = useState(false);
+  const [addedExercises, setAddedExercises] = useState([]);
   const restTimerActivatedAtRef = useRef(null);
 
   const session = useWorkoutSession();
@@ -377,6 +380,27 @@ function TodayView({ onLogout }) {
     }
   }
 
+  async function handleAddExercise(exercise) {
+    // Check against routine exercises to prevent duplicate cards
+    const routineExerciseIds = new Set(
+      (workout?.phases || [])
+        .filter(isStrengthPhase)
+        .flatMap(p => getPhaseExercises(p).map(ex => ex.id))
+    );
+    if (routineExerciseIds.has(exercise.id)) return;
+
+    setAddedExercises(prev => {
+      if (prev.some(e => e.id === exercise.id)) return prev;
+      return [...prev, exercise];
+    });
+    try {
+      const data = await api.get(`/session/previous-performance?exerciseIds=${exercise.id}`);
+      if (data.previousPerformance) {
+        setPreviousPerformance(prev => ({ ...prev, ...data.previousPerformance }));
+      }
+    } catch { /* ignore */ }
+  }
+
   // Show save-preference prompt when all sets of a session-swapped exercise complete
   useEffect(() => {
     if (!session.isActive || savePromptData) return;
@@ -563,6 +587,51 @@ function TodayView({ onLogout }) {
           }
         })}
 
+        {/* Added exercises (from + Add Exercise) */}
+        {addedExercises.length > 0 && (
+          <div>
+            <div style={{
+              fontSize: 10, fontWeight: 600, letterSpacing: '1.5px',
+              color: C.textMuted, textTransform: 'uppercase', padding: '8px 0 4px',
+            }}>Added</div>
+            {addedExercises.map(ex => {
+              const exSets = session.exerciseSets[ex.id]?.sets || [];
+              return (
+                <ExerciseSessionCard
+                  key={ex.id}
+                  exercise={ex}
+                  sets={exSets}
+                  previousData={previousPerformance[ex.id] || null}
+                  prData={session.sessionPrs[ex.id] || null}
+                  onLogSet={handleLogSet}
+                  onInputFocus={handleDismissTimer}
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {/* + Add Exercise button */}
+        <button
+          onClick={() => setShowAddExercise(true)}
+          style={{
+            width: '100%', padding: '14px 16px', marginBottom: 12, marginTop: 4,
+            borderRadius: 12,
+            background: C.card,
+            border: '1px solid rgba(255,255,255,0.08)',
+            color: C.textSec, fontSize: 14, fontWeight: 500,
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          Add Exercise
+        </button>
+
         {/* Finish Workout button (sticky at bottom) */}
         <div style={{
           position: 'sticky', bottom: 'calc(70px + env(safe-area-inset-bottom, 0px))', zIndex: 15, paddingTop: 12,
@@ -656,6 +725,18 @@ function TodayView({ onLogout }) {
             onDismiss={() => setSavePromptData(null)}
           />
         )}
+
+        {/* Add Exercise Modal */}
+        {showAddExercise && (
+          <AddExerciseModal
+            onAdd={handleAddExercise}
+            onClose={() => setShowAddExercise(false)}
+            existingExerciseIds={[
+              ...(workout?.phases || []).filter(isStrengthPhase).flatMap(p => getPhaseExercises(p).map(ex => ex.id)),
+              ...addedExercises.map(ex => ex.id),
+            ]}
+          />
+        )}
       </div>
     );
   }
@@ -705,6 +786,7 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName }) {
   const [restTimerEndTime, setRestTimerEndTime] = useState(null);
   const [userSettings, setUserSettings] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAddExercise, setShowAddExercise] = useState(false);
   const restTimerActivatedAtRef = useRef(null);
   const startedRef = useRef(false);
 
@@ -781,6 +863,20 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName }) {
       }
     }
     return result;
+  }
+
+  async function handleAddExercise(exercise) {
+    setExercises(prev => {
+      if (prev.some(e => e.id === exercise.id)) return prev;
+      return [...prev, exercise];
+    });
+    // Fetch previous performance for the new exercise
+    try {
+      const data = await api.get(`/session/previous-performance?exerciseIds=${exercise.id}`);
+      if (data.previousPerformance) {
+        setPreviousPerformance(prev => ({ ...prev, ...data.previousPerformance }));
+      }
+    } catch { /* ignore */ }
   }
 
   async function handleFinish() {
@@ -890,23 +986,31 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName }) {
             No exercises added yet
           </div>
           <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 16 }}>
-            Browse the Strength tab to find exercises,
-            or finish to save an empty session.
+            Tap below to add exercises to your workout.
           </div>
-          <button
-            onClick={() => navigate('/strength')}
-            style={{
-              padding: '10px 20px', borderRadius: 8,
-              background: 'rgba(245,158,11,0.15)',
-              border: '1px solid rgba(245,158,11,0.25)',
-              color: '#f59e0b', fontSize: 13, fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            Browse Exercises
-          </button>
         </div>
       )}
+
+      {/* + Add Exercise button */}
+      <button
+        onClick={() => setShowAddExercise(true)}
+        style={{
+          width: '100%', padding: '14px 16px', marginBottom: 12,
+          borderRadius: 12,
+          background: C.card,
+          border: '1px solid rgba(255,255,255,0.08)',
+          color: C.textSec, fontSize: 14, fontWeight: 500,
+          cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+        Add Exercise
+      </button>
 
       {/* Finish Workout button */}
       <div style={{
@@ -970,6 +1074,15 @@ function EmptyWorkoutView({ initialExerciseId, initialExerciseName }) {
           confirmColor="rgba(239,68,68,0.3)"
           onConfirm={handleDiscard}
           onCancel={() => setConfirmDiscard(false)}
+        />
+      )}
+
+      {/* Add Exercise Modal */}
+      {showAddExercise && (
+        <AddExerciseModal
+          onAdd={handleAddExercise}
+          onClose={() => setShowAddExercise(false)}
+          existingExerciseIds={exercises.map(ex => ex.id)}
         />
       )}
     </div>

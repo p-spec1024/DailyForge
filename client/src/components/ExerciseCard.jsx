@@ -203,7 +203,7 @@ function PrBadgeInline({ prs }) {
 }
 
 /* ── Set Row (active session mode) ── */
-function SetRow({ setNum, setData, previousSet, prs, onComplete, onWeightChange, onRepsChange, onSetTypeChange, onInputFocus, inputRef }) {
+function SetRow({ setNum, setData, previousSet, prs, onComplete, onWeightChange, onRepsChange, onSetTypeChange, onInputFocus, inputRef, repsOnly }) {
   const [weight, setWeight] = useState(setData?.weight ?? '');
   const [reps, setReps] = useState(setData?.reps ?? '');
   const [showTypeMenu, setShowTypeMenu] = useState(false);
@@ -228,7 +228,7 @@ function SetRow({ setNum, setData, previousSet, prs, onComplete, onWeightChange,
   }, [hasPrs]);
 
   function handleComplete() {
-    const w = parseFloat(weight) || 0;
+    const w = repsOnly ? 0 : (parseFloat(weight) || 0);
     const r = parseInt(reps) || 0;
     if (w === 0 && r === 0) return;
     onComplete({ weight: w, reps: r, set_type: setType });
@@ -236,7 +236,7 @@ function SetRow({ setNum, setData, previousSet, prs, onComplete, onWeightChange,
 
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: '36px 72px 1fr 1fr 40px',
+      display: 'grid', gridTemplateColumns: repsOnly ? '36px 72px 1fr 40px' : '36px 72px 1fr 1fr 40px',
       gap: 6, alignItems: 'center', padding: '6px 0',
       opacity: isWarmup && !isCompleted ? 0.5 : 1,
       background: hasPrs ? 'rgba(255,215,0,0.06)' : isCompleted ? 'rgba(29,158,117,0.06)' : 'transparent',
@@ -280,32 +280,37 @@ function SetRow({ setNum, setData, previousSet, prs, onComplete, onWeightChange,
       {/* Previous performance */}
       <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', fontFamily: MONO, textAlign: 'center', whiteSpace: 'nowrap' }}>
         {previousSet
-          ? `${previousSet.weight ?? 0}kg × ${previousSet.reps ?? 0}`
+          ? repsOnly
+            ? `${previousSet.reps ?? 0} reps`
+            : `${previousSet.weight ?? 0}kg × ${previousSet.reps ?? 0}`
           : '—'}
       </div>
 
-      {/* Weight input */}
-      <input
-        ref={inputRef}
-        type="text"
-        inputMode="decimal"
-        value={weight}
-        onChange={e => {
-          setWeight(e.target.value);
-          onWeightChange(e.target.value);
-        }}
-        onFocus={e => { e.target.select(); if (onInputFocus) onInputFocus(); }}
-        placeholder="kg"
-        style={{
-          height: 44, borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)',
-          background: isCompleted ? 'rgba(29,158,117,0.08)' : 'rgba(255,255,255,0.04)',
-          color: C.text, fontSize: 15, fontFamily: MONO, textAlign: 'center',
-          outline: 'none', width: '100%',
-        }}
-      />
+      {/* Weight input (hidden for reps-only / bodyweight exercises) */}
+      {!repsOnly && (
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="decimal"
+          value={weight}
+          onChange={e => {
+            setWeight(e.target.value);
+            onWeightChange(e.target.value);
+          }}
+          onFocus={e => { e.target.select(); if (onInputFocus) onInputFocus(); }}
+          placeholder="kg"
+          style={{
+            height: 44, borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)',
+            background: isCompleted ? 'rgba(29,158,117,0.08)' : 'rgba(255,255,255,0.04)',
+            color: C.text, fontSize: 15, fontFamily: MONO, textAlign: 'center',
+            outline: 'none', width: '100%',
+          }}
+        />
+      )}
 
       {/* Reps input */}
       <input
+        ref={repsOnly ? inputRef : undefined}
         type="text"
         inputMode="numeric"
         value={reps}
@@ -663,44 +668,54 @@ export function ExerciseSessionCard({ exercise, sets, previousData, prData, onLo
           </>
         ) : (
           <>
-            <div style={{
-              display: 'grid', gridTemplateColumns: '36px 72px 1fr 1fr 40px',
-              gap: 6, padding: '4px 4px', marginBottom: 2,
-            }}>
-              {['SET', 'PREVIOUS', 'KG', 'REPS', ''].map((h, i) => (
-                <div key={i} style={{
-                  fontSize: 9, fontWeight: 600, color: C.textMuted,
-                  letterSpacing: '1px', textAlign: 'center',
-                }}>{h}</div>
-              ))}
-            </div>
-            {suggestion && suggestion.suggestedWeight != null && (
-              <SuggestionHint
-                suggestedWeight={suggestion.suggestedWeight}
-                suggestedReps={suggestion.suggestedReps}
-                unit={suggestion.unit}
-                onApply={applySuggestion}
-              />
-            )}
-            {Array.from({ length: setCount }, (_, i) => i + 1).map(setNum => (
-              <SetRow
-                key={setNum}
-                setNum={setNum}
-                setData={localSets[setNum]}
-                previousSet={previousData?.sets?.find(s => s.setNumber === setNum) || null}
-                prs={prData?.[setNum] || null}
-                onComplete={(data) => handleComplete(setNum, data)}
-                onWeightChange={(v) => setLocalSets(prev => ({
-                  ...prev, [setNum]: { ...prev[setNum], weight: v },
-                }))}
-                onRepsChange={(v) => setLocalSets(prev => ({
-                  ...prev, [setNum]: { ...prev[setNum], reps: v },
-                }))}
-                onSetTypeChange={(t) => handleSetTypeChange(setNum, t)}
-                onInputFocus={onInputFocus}
-                inputRef={el => { inputRefs.current[setNum] = el; }}
-              />
-            ))}
+            {(() => {
+              const isRepsOnly = exercise.tracking_type === 'reps_only';
+              const cols = isRepsOnly ? '36px 72px 1fr 40px' : '36px 72px 1fr 1fr 40px';
+              const headers = isRepsOnly ? ['SET', 'PREVIOUS', 'REPS', ''] : ['SET', 'PREVIOUS', 'KG', 'REPS', ''];
+              return (
+                <>
+                  <div style={{
+                    display: 'grid', gridTemplateColumns: cols,
+                    gap: 6, padding: '4px 4px', marginBottom: 2,
+                  }}>
+                    {headers.map((h, i) => (
+                      <div key={i} style={{
+                        fontSize: 9, fontWeight: 600, color: C.textMuted,
+                        letterSpacing: '1px', textAlign: 'center',
+                      }}>{h}</div>
+                    ))}
+                  </div>
+                  {!isRepsOnly && suggestion && suggestion.suggestedWeight != null && (
+                    <SuggestionHint
+                      suggestedWeight={suggestion.suggestedWeight}
+                      suggestedReps={suggestion.suggestedReps}
+                      unit={suggestion.unit}
+                      onApply={applySuggestion}
+                    />
+                  )}
+                  {Array.from({ length: setCount }, (_, i) => i + 1).map(setNum => (
+                    <SetRow
+                      key={setNum}
+                      setNum={setNum}
+                      setData={localSets[setNum]}
+                      previousSet={previousData?.sets?.find(s => s.setNumber === setNum) || null}
+                      prs={prData?.[setNum] || null}
+                      onComplete={(data) => handleComplete(setNum, data)}
+                      onWeightChange={(v) => setLocalSets(prev => ({
+                        ...prev, [setNum]: { ...prev[setNum], weight: v },
+                      }))}
+                      onRepsChange={(v) => setLocalSets(prev => ({
+                        ...prev, [setNum]: { ...prev[setNum], reps: v },
+                      }))}
+                      onSetTypeChange={(t) => handleSetTypeChange(setNum, t)}
+                      onInputFocus={onInputFocus}
+                      inputRef={el => { inputRefs.current[setNum] = el; }}
+                      repsOnly={isRepsOnly}
+                    />
+                  ))}
+                </>
+              );
+            })()}
           </>
         )}
 

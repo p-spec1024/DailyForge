@@ -337,6 +337,38 @@ CREATE TABLE IF NOT EXISTS user_breathwork_prefs (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (user_id, phase)
 );
+
+-- S6-T2.1: Flag bodyweight exercises as reps_only (no weight input needed)
+-- Only run if we haven't flagged any yet (idempotent guard)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM exercises WHERE tracking_type = 'reps_only' LIMIT 1) THEN
+    -- Equipment-based detection (most reliable — "body weight" or "body only" in description)
+    UPDATE exercises SET tracking_type = 'reps_only'
+    WHERE tracking_type = 'weight_reps'
+      AND workout_id IS NULL
+      AND (
+        LOWER(description) LIKE '%equipment: body weight%'
+        OR LOWER(description) LIKE '%equipment: bodyweight%'
+        OR LOWER(description) LIKE '%equipment: body only%'
+      );
+
+    -- Seeded workout exercises that are bodyweight (exact names)
+    UPDATE exercises SET tracking_type = 'reps_only'
+    WHERE tracking_type = 'weight_reps'
+      AND workout_id IS NOT NULL
+      AND LOWER(name) IN (
+        'pull-ups', 'push-ups', 'tricep dips',
+        'russian twists', 'hanging leg raises',
+        'bicycle crunches', 'dead bugs'
+      );
+  END IF;
+END $$;
+
+-- Fix recovery/mobility exercises that have duration but wrong tracking_type
+UPDATE exercises SET tracking_type = 'duration'
+WHERE tracking_type = 'weight_reps'
+  AND default_duration_secs IS NOT NULL
+  AND default_reps IS NULL;
 `;
 
 const indexes = `
