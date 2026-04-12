@@ -62,6 +62,9 @@ Features that are **not in the current build plan** but worth revisiting later. 
 | 52 | useYogaSwap hook extraction | Refactor | S5-T6 /review | Apr 12, 2026 | Extract yoga swap logic into reusable hook. Logged as architecture recommendation. |
 | 53 | Breathwork cancel-resume handling | UX | S5-T6 /review | Apr 12, 2026 | Handle cancel/resume edge cases in breathwork sessions. |
 | 54 | Alternatives caching | Performance | S5-T6 /review | Apr 12, 2026 | Cache exercise alternatives to reduce API calls. |
+| 55 | Remove exercise from workout | UX | S6-T2 testing | Apr 13, 2026 | Allow users to remove added exercises mid-workout (X button on exercise card) |
+| 56 | Workout start optimization | Performance | S6-T2 testing | Apr 13, 2026 | "Starting workout..." screen takes too long — lazy load previous performance or batch API calls |
+| 57 | Extract useAddExercise hook | Refactor | S6-T2 /review | Apr 13, 2026 | handleAddExercise is triplicated across EmptyWorkoutView, SessionMainWork, and TodayView — extract to shared hook |
 
 ---
 
