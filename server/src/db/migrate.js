@@ -327,6 +327,16 @@ UPDATE exercises SET tracking_type = 'duration' WHERE tracking_type = 'weight_re
   'wall sit', 'dead hang', 'l-sit',
   'hollow body hold', 'superman hold', 'glute bridge hold'
 );
+
+-- S5-T6: User breathwork technique preferences for mid-session swap
+CREATE TABLE IF NOT EXISTS user_breathwork_prefs (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  phase VARCHAR(10) NOT NULL CHECK (phase IN ('opening', 'closing')),
+  technique_id INTEGER NOT NULL REFERENCES breathwork_techniques(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (user_id, phase)
+);
 `;
 
 const indexes = `
@@ -360,6 +370,7 @@ CREATE INDEX IF NOT EXISTS idx_breathwork_logs_technique ON breathwork_logs(tech
 CREATE INDEX IF NOT EXISTS idx_breathwork_logs_date ON breathwork_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_body_measurements_user_date ON body_measurements(user_id, measured_at DESC);
 CREATE INDEX IF NOT EXISTS idx_progress_photos_user_date ON progress_photos(user_id, taken_at DESC);
+CREATE INDEX IF NOT EXISTS idx_breathwork_prefs_user ON user_breathwork_prefs(user_id);
 `;
 
 async function migrate() {

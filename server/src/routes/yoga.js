@@ -336,6 +336,57 @@ router.get('/generate', authenticate, async (req, res, next) => {
   }
 });
 
+// GET /api/yoga/alternatives — alternative poses for mid-session swap
+router.get('/alternatives', authenticate, async (req, res, next) => {
+  try {
+    const exerciseId = parseInt(req.query.exerciseId, 10);
+    const { category, practiceType, maxDifficulty } = req.query;
+
+    if (isNaN(exerciseId)) {
+      return res.status(400).json({ error: 'exerciseId is required' });
+    }
+    if (!category) {
+      return res.status(400).json({ error: 'category is required' });
+    }
+
+    // Filter alternatives by difficulty ceiling (graceful: unknown values return all)
+    const allowedDifficulties = maxDifficulty ? (DIFFICULTY_MAP[maxDifficulty] || null) : null;
+
+    const params = [category, exerciseId];
+    let idx = 3;
+    let ptClause = '';
+    if (practiceType) {
+      ptClause = ` AND practice_types @> ARRAY[$${idx}]::text[]`;
+      params.push(practiceType);
+      idx++;
+    }
+    let diffClause = '';
+    if (allowedDifficulties) {
+      const ph = allowedDifficulties.map((_, i) => `$${idx + i}`).join(',');
+      diffClause = ` AND difficulty IN (${ph})`;
+      params.push(...allowedDifficulties);
+      idx += allowedDifficulties.length;
+    }
+
+    const { rows } = await pool.query(
+      `SELECT id, name, sanskrit_name, category, difficulty, description, media_url
+       FROM exercises
+       WHERE type = 'yoga'
+         AND category = $1
+         ${ptClause}
+         ${diffClause}
+         AND id != $2
+       ORDER BY RANDOM()
+       LIMIT 8`,
+      params
+    );
+
+    res.json({ alternatives: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/yoga/recent — last 3 yoga sessions for current user
 router.get('/recent', authenticate, async (req, res, next) => {
   try {

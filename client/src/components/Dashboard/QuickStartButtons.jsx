@@ -1,9 +1,9 @@
 import { C } from '../workout/tokens.jsx';
 
 const BUTTONS = [
-  { key: 'strength', icon: '🏋️', label: 'Strength Only' },
-  { key: 'yoga',     icon: '🧘', label: 'Yoga Only' },
-  { key: 'breathe',  icon: '🌬️', label: 'Breathwork Only' },
+  { key: 'strength', icon: '🏋️', label: 'Strength' },
+  { key: 'yoga',     icon: '🧘', label: 'Yoga' },
+  { key: 'breathe',  icon: '🌬️', label: 'Breathwork' },
 ];
 
 export default function QuickStartButtons({ onSelect, disabled }) {

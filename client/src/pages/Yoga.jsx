@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useYogaSession } from '../hooks/useYogaSession.js';
 import PracticeTypeSelector from '../components/yoga/PracticeTypeSelector.jsx';
 import LevelSelector from '../components/yoga/LevelSelector.jsx';
@@ -30,7 +29,6 @@ const s = {
 };
 
 export default function Yoga() {
-  const navigate = useNavigate();
   const [playingSession, setPlayingSession] = useState(null);
   const {
     config,
@@ -77,16 +75,6 @@ export default function Yoga() {
       <FocusChips selected={config.focus} onToggle={toggleFocus} />
       <RecentSessions sessions={recentSessions} onLoad={loadRecent} />
       <StartButton config={config} isGenerating={isGenerating} onStart={handleStart} />
-
-      {/* Full session entry point */}
-      <button
-        onClick={() => navigate('/session?type=yoga')}
-        style={{
-          width: '100%', padding: '12px', borderRadius: 10, marginTop: 8,
-          background: 'rgba(93,202,165,0.08)', border: '0.5px solid rgba(93,202,165,0.2)',
-          color: '#5DCAA5', fontSize: 13, fontWeight: 500, cursor: 'pointer',
-        }}
-      >Full Yoga Session (5-phase)</button>
 
       {generatedSession && !playingSession && (
         <PosePreviewModal

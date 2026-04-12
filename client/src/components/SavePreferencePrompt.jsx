@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { C } from './workout/tokens.jsx';
 import { api } from '../utils/api.js';
 
-export default function SavePreferencePrompt({ exerciseName, originalExerciseId, chosenExerciseId, onSave, onDismiss }) {
+export default function SavePreferencePrompt({ exerciseName, originalExerciseId, chosenExerciseId, onSave, onDismiss, saveAction }) {
   const [saving, setSaving] = useState(false);
   const [visible, setVisible] = useState(false);
 
@@ -21,7 +21,11 @@ export default function SavePreferencePrompt({ exerciseName, originalExerciseId,
   async function handleSave() {
     setSaving(true);
     try {
-      await api.put(`/workout/slot/${originalExerciseId}/choose`, { chosen_exercise_id: chosenExerciseId });
+      if (saveAction) {
+        await saveAction();
+      } else {
+        await api.put(`/workout/slot/${originalExerciseId}/choose`, { chosen_exercise_id: chosenExerciseId });
+      }
       onSave();
     } catch {
       onDismiss();

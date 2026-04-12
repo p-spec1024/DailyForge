@@ -50,6 +50,100 @@ router.get('/techniques/:id', async (req, res, next) => {
   }
 });
 
+// GET /api/breathwork/alternatives — alternative techniques for mid-session swap
+router.get('/alternatives', authenticate, async (req, res, next) => {
+  try {
+    const techniqueId = parseInt(req.query.techniqueId, 10);
+    const { category } = req.query;
+
+    if (isNaN(techniqueId)) {
+      return res.status(400).json({ error: 'techniqueId is required' });
+    }
+    if (!category) {
+      return res.status(400).json({ error: 'category is required' });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT id, name, tradition, category, difficulty, safety_level,
+              (protocol->'phases') AS phases, (protocol->>'cycles')::int AS cycles
+       FROM breathwork_techniques
+       WHERE category = $1
+         AND id != $2
+         AND safety_level IN ('green', 'yellow')
+       ORDER BY
+         CASE WHEN safety_level = 'green' THEN 1 WHEN safety_level = 'yellow' THEN 2 ELSE 3 END,
+         RANDOM()
+       LIMIT 6`,
+      [category, techniqueId]
+    );
+
+    const alternatives = rows.map(t => {
+      const phases = t.phases || [];
+      const phaseDuration = phases.reduce((sum, p) => sum + (p.duration || 0), 0);
+      const totalDuration = Math.round(phaseDuration * (t.cycles || 1));
+      return {
+        id: t.id,
+        name: t.name,
+        tradition: t.tradition,
+        category: t.category,
+        difficulty: t.difficulty,
+        safety_level: t.safety_level,
+        estimated_duration: totalDuration,
+      };
+    });
+
+    res.json({ alternatives });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/breathwork/preference — save preferred technique for a session phase
+router.put('/preference', authenticate, async (req, res, next) => {
+  try {
+    const { phase } = req.body;
+    const techniqueId = parseInt(req.body.technique_id, 10);
+    if (!phase || !['opening', 'closing'].includes(phase)) {
+      return res.status(400).json({ error: 'phase must be "opening" or "closing"' });
+    }
+    if (isNaN(techniqueId)) {
+      return res.status(400).json({ error: 'technique_id must be a valid integer' });
+    }
+
+    await pool.query(
+      `INSERT INTO user_breathwork_prefs (user_id, phase, technique_id)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, phase)
+       DO UPDATE SET technique_id = EXCLUDED.technique_id, created_at = NOW()`,
+      [req.user.id, phase, techniqueId]
+    );
+
+    res.json({ success: true, phase, technique_id: techniqueId });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/breathwork/preferences — fetch user's saved breathwork phase preferences
+router.get('/preferences', authenticate, async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT ubp.phase, ubp.technique_id, bt.name AS technique_name
+       FROM user_breathwork_prefs ubp
+       JOIN breathwork_techniques bt ON bt.id = ubp.technique_id
+       WHERE ubp.user_id = $1`,
+      [req.user.id]
+    );
+    const prefs = {};
+    for (const r of rows) {
+      prefs[r.phase] = { technique_id: r.technique_id, technique_name: r.technique_name };
+    }
+    res.json(prefs);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/breathwork/sessions — log a completed breathwork session
 router.post('/sessions', authenticate, async (req, res, next) => {
   try {

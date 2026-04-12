@@ -262,4 +262,27 @@ router.put('/slot/:exerciseId/reset', async (req, res, next) => {
   }
 });
 
+// PUT /api/workout/exercise-pref — save a generic exercise preference (yoga/breathwork swaps)
+router.put('/exercise-pref', authenticate, async (req, res, next) => {
+  try {
+    const exerciseId = parseInt(req.body.exercise_id, 10);
+    const chosenId = parseInt(req.body.chosen_exercise_id, 10);
+    if (isNaN(exerciseId) || isNaN(chosenId)) {
+      return res.status(400).json({ error: 'exercise_id and chosen_exercise_id must be valid integers' });
+    }
+
+    await pool.query(
+      `INSERT INTO user_exercise_prefs (user_id, exercise_id, chosen_exercise_id)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, exercise_id)
+       DO UPDATE SET chosen_exercise_id = EXCLUDED.chosen_exercise_id, created_at = NOW()`,
+      [req.user.id, exerciseId, chosenId]
+    );
+
+    res.json({ success: true, exercise_id: exerciseId, chosen_exercise_id: chosenId });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

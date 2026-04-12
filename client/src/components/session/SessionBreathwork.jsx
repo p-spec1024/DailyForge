@@ -5,6 +5,8 @@ import { useBreathworkTimer } from '../../hooks/useBreathworkTimer.js';
 import { usePausableTimer } from '../../hooks/usePausableTimer.js';
 import BreathCircle from '../breathwork/BreathCircle.jsx';
 import TimerControls from '../breathwork/TimerControls.jsx';
+import MidSessionPicker from './MidSessionPicker.jsx';
+import SavePreferencePrompt from '../SavePreferencePrompt.jsx';
 
 function formatElapsed(totalSeconds) {
   const m = Math.floor(totalSeconds / 60);
@@ -90,7 +92,17 @@ function SoundToggle({ enabled, onToggle }) {
   );
 }
 
-export default function SessionBreathwork({ techniqueId, duration, phase, onComplete }) {
+// Purpose-to-category mapping for breathwork phases
+const PHASE_CATEGORIES = {
+  opening: ['energizing', 'focus', 'performance'],
+  closing: ['calming', 'sleep', 'recovery'],
+};
+
+/**
+ * Inner player that re-mounts when techniqueId changes (via key prop).
+ * This ensures the breathwork timer hook reinitializes with the new protocol.
+ */
+function BreathworkPlayer({ techniqueId, phase, onComplete, onSwapRequest, onSwapCancelRef }) {
   const [technique, setTechnique] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -115,6 +127,13 @@ export default function SessionBreathwork({ techniqueId, duration, phase, onComp
 
   const timerRef = useRef(timer);
   timerRef.current = timer;
+
+  // Expose resume function so the outer wrapper can resume timer on swap cancel
+  useEffect(() => {
+    if (onSwapCancelRef) {
+      onSwapCancelRef.current = () => timer.resume();
+    }
+  }, [onSwapCancelRef, timer.resume]);
 
   // Ref-stabilize callbacks to avoid identity churn in effects
   const onCompleteRef = useRef(onComplete);
@@ -147,7 +166,7 @@ export default function SessionBreathwork({ techniqueId, duration, phase, onComp
     const actualDuration = Math.floor((Date.now() - phaseStartRef.current) / 1000);
     const t = timerRef.current;
     onCompleteRef.current({
-      completed: true,
+      completed,
       duration: actualDuration,
       technique_name: techniqueRef.current?.name,
       rounds_completed: completed ? t.totalRounds : Math.max(0, t.currentRound - 1),
@@ -247,9 +266,28 @@ export default function SessionBreathwork({ techniqueId, duration, phase, onComp
         width: '100%', marginBottom: 16,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>
+          <div style={{
+            fontSize: 14, fontWeight: 600, color: C.text,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            minWidth: 0,
+          }}>
             {technique.name}
           </div>
+          {/* Swap button */}
+          <button onClick={() => { timer.pause(); onSwapRequest(technique); }} title="Swap technique" style={{
+            width: 28, height: 28, borderRadius: 6,
+            background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.2)',
+            color: '#a78bfa', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M16 3l4 4-4 4" />
+              <path d="M20 7H4" />
+              <path d="M8 21l-4-4 4-4" />
+              <path d="M4 17h16" />
+            </svg>
+          </button>
           <SoundToggle enabled={timer.soundEnabled} onToggle={timer.toggleSound} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -292,5 +330,119 @@ export default function SessionBreathwork({ techniqueId, duration, phase, onComp
         onStop={handleSkip}
       />
     </div>
+  );
+}
+
+/**
+ * Outer wrapper that manages swap picker state and re-keys the inner player on swap.
+ */
+export default function SessionBreathwork({ techniqueId: initialTechniqueId, duration, phase, onComplete }) {
+  const [activeTechniqueId, setActiveTechniqueId] = useState(initialTechniqueId);
+  const [swapKey, setSwapKey] = useState(0);
+  const [showSwapPicker, setShowSwapPicker] = useState(false);
+  const [swapAlternatives, setSwapAlternatives] = useState([]);
+  const [swapLoading, setSwapLoading] = useState(false);
+  const [currentTechniqueName, setCurrentTechniqueName] = useState('');
+  const [swappedFrom, setSwappedFrom] = useState(null); // { originalId, originalName }
+  const [savePromptData, setSavePromptData] = useState(null);
+  const hasPromptedRef = useRef(false);
+  const deferredResultRef = useRef(null);
+  const swapCancelRef = useRef(null);
+
+  const handleSwapRequest = useCallback((technique) => {
+    setCurrentTechniqueName(technique.name);
+    setShowSwapPicker(true);
+    setSwapLoading(true);
+
+    // Determine category for alternatives based on phase
+    const categories = PHASE_CATEGORIES[phase] || PHASE_CATEGORIES.opening;
+    const category = technique.category && categories.includes(technique.category)
+      ? technique.category
+      : categories[0];
+
+    const params = new URLSearchParams({ techniqueId: technique.id, category });
+    api.get(`/breathwork/alternatives?${params}`)
+      .then(data => setSwapAlternatives(data.alternatives || []))
+      .catch(() => setSwapAlternatives([]))
+      .finally(() => setSwapLoading(false));
+  }, [phase]);
+
+  const handleSwapSelect = useCallback((alt) => {
+    setShowSwapPicker(false);
+    // Track the original technique for save prompt
+    if (!swappedFrom) {
+      setSwappedFrom({ originalId: activeTechniqueId, originalName: currentTechniqueName });
+    }
+    setActiveTechniqueId(alt.id);
+    setSwapKey(k => k + 1); // force re-mount of inner player
+  }, [activeTechniqueId, currentTechniqueName, swappedFrom]);
+
+  const handleSwapClose = useCallback(() => {
+    setShowSwapPicker(false);
+    swapCancelRef.current?.();
+  }, []);
+
+  // Wrap onComplete to show save prompt if technique was swapped
+  // When showing the prompt, defer onComplete until after the user responds —
+  // calling it immediately would unmount this component before the prompt renders.
+  const handleComplete = useCallback((result) => {
+    if (swappedFrom && result.completed && !hasPromptedRef.current) {
+      hasPromptedRef.current = true;
+      deferredResultRef.current = result;
+      setSavePromptData({
+        exerciseName: result.technique_name || 'this technique',
+        originalId: swappedFrom.originalId,
+        chosenId: activeTechniqueId,
+      });
+      return; // don't call onComplete yet
+    }
+    onComplete(result);
+  }, [onComplete, swappedFrom, activeTechniqueId]);
+
+  const flushDeferred = useCallback(() => {
+    setSavePromptData(null);
+    if (deferredResultRef.current) {
+      onComplete(deferredResultRef.current);
+      deferredResultRef.current = null;
+    }
+  }, [onComplete]);
+
+  return (
+    <>
+      <BreathworkPlayer
+        key={`breathwork-${activeTechniqueId}-${swapKey}`}
+        techniqueId={activeTechniqueId}
+        phase={phase}
+        onComplete={handleComplete}
+        onSwapRequest={handleSwapRequest}
+        onSwapCancelRef={swapCancelRef}
+      />
+
+      {showSwapPicker && (
+        <MidSessionPicker
+          type="breathwork"
+          currentName={currentTechniqueName}
+          alternatives={swapAlternatives}
+          loading={swapLoading}
+          onSelect={handleSwapSelect}
+          onClose={handleSwapClose}
+          accentColor="#a78bfa"
+        />
+      )}
+
+      {savePromptData && (
+        <SavePreferencePrompt
+          exerciseName={savePromptData.exerciseName}
+          originalExerciseId={savePromptData.originalId}
+          chosenExerciseId={savePromptData.chosenId}
+          saveAction={() => api.put('/breathwork/preference', {
+            phase,
+            technique_id: savePromptData.chosenId,
+          })}
+          onSave={flushDeferred}
+          onDismiss={flushDeferred}
+        />
+      )}
+    </>
   );
 }

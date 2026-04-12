@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '../../utils/api.js';
 import { C, MONO } from '../workout/tokens.jsx';
 import { usePausableTimer } from '../../hooks/usePausableTimer.js';
+import MidSessionPicker from '../session/MidSessionPicker.jsx';
+import SavePreferencePrompt from '../SavePreferencePrompt.jsx';
 
 function formatTime(secs) {
   const m = Math.floor(secs / 60);
@@ -109,7 +111,7 @@ const s = {
 };
 
 export default function YogaSessionPlayer({ session, config, onExit }) {
-  const poses = session?.poses || [];
+  const [activePoses, setActivePoses] = useState(session?.poses || []);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [completed, setCompleted] = useState(false);
   const [saveState, setSaveState] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'failed'
@@ -120,6 +122,13 @@ export default function YogaSessionPlayer({ session, config, onExit }) {
   const savedRef = useRef(false);
   const lastFinishArgsRef = useRef(null);
   const poseTimer = usePausableTimer({ autoStart: true });
+  const [showSwapPicker, setShowSwapPicker] = useState(false);
+  const [swapAlternatives, setSwapAlternatives] = useState([]);
+  const [swapLoading, setSwapLoading] = useState(false);
+  const [swappedPoses, setSwappedPoses] = useState({});
+  const [savePromptData, setSavePromptData] = useState(null);
+  const [promptedIndices, setPromptedIndices] = useState(new Set());
+  const wasPausedBeforeSwapRef = useRef(false);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -132,8 +141,57 @@ export default function YogaSessionPlayer({ session, config, onExit }) {
     if (navigatingRef.current) navigatingRef.current = false;
   }, [currentIndex]);
 
+  const poses = activePoses; // alias for minimal diff
   const currentPose = poses[currentIndex];
   const holdSeconds = currentPose?.hold_seconds || 30;
+
+  // Swap handlers
+  const handleOpenSwap = useCallback(() => {
+    if (!currentPose) return;
+    wasPausedBeforeSwapRef.current = poseTimer.isPaused;
+    poseTimer.pause();
+    setSwapLoading(true);
+    setShowSwapPicker(true);
+    const params = new URLSearchParams({
+      exerciseId: currentPose.id,
+      category: currentPose.category || currentPose.phase || 'peak',
+    });
+    if (currentPose.practice_types?.length > 0) {
+      params.set('practiceType', currentPose.practice_types[0]);
+    }
+    if (currentPose.difficulty) {
+      params.set('maxDifficulty', currentPose.difficulty);
+    }
+    api.get(`/yoga/alternatives?${params}`)
+      .then(data => setSwapAlternatives(data.alternatives || []))
+      .catch(() => setSwapAlternatives([]))
+      .finally(() => setSwapLoading(false));
+  }, [currentPose, poseTimer]);
+
+  const handleSwapSelect = useCallback((alt) => {
+    setShowSwapPicker(false);
+    const newPoses = [...activePoses];
+    const original = newPoses[currentIndex];
+    newPoses[currentIndex] = {
+      ...alt,
+      hold_seconds: original.hold_seconds,
+      phase: original.phase,
+      target_muscles: alt.target_muscles || original.target_muscles,
+    };
+    setSwappedPoses(prev => ({
+      ...prev,
+      [currentIndex]: { original, swapped: alt },
+    }));
+    setActivePoses(newPoses);
+    poseTimer.start();
+  }, [activePoses, currentIndex, poseTimer]);
+
+  const handleSwapClose = useCallback(() => {
+    setShowSwapPicker(false);
+    if (!wasPausedBeforeSwapRef.current) {
+      poseTimer.resume();
+    }
+  }, [poseTimer]);
 
   const saveSession = useCallback(async (payload) => {
     setSaveState('saving');
@@ -181,6 +239,16 @@ export default function YogaSessionPlayer({ session, config, onExit }) {
   }, [saveSession]);
 
   const goNext = useCallback(() => {
+    // Show save prompt for swapped pose
+    const swapInfo = swappedPoses[currentIndex];
+    if (swapInfo && !promptedIndices.has(currentIndex)) {
+      setPromptedIndices(prev => new Set(prev).add(currentIndex));
+      setSavePromptData({
+        exerciseName: swapInfo.swapped.name,
+        originalExerciseId: swapInfo.original.id,
+        chosenExerciseId: swapInfo.swapped.id,
+      });
+    }
     if (currentIndex >= poses.length - 1) {
       finish(true);
       return;
@@ -188,7 +256,7 @@ export default function YogaSessionPlayer({ session, config, onExit }) {
     navigatingRef.current = true;
     setCurrentIndex(i => i + 1);
     poseTimer.start();
-  }, [currentIndex, poses.length, finish, poseTimer]);
+  }, [currentIndex, poses.length, finish, poseTimer, swappedPoses, promptedIndices]);
 
   const goPrev = () => {
     if (currentIndex <= 0) return;
@@ -282,8 +350,36 @@ export default function YogaSessionPlayer({ session, config, onExit }) {
       </div>
 
       <div style={s.body}>
-        <div style={s.card}>
-          <div style={s.poseName}>{currentPose.name}</div>
+        <div style={{ ...s.card, position: 'relative' }}>
+          {/* Name + swap row */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: 8, marginBottom: 4, padding: '0 4px',
+          }}>
+            <div style={{
+              ...s.poseName, marginBottom: 0,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              minWidth: 0, flex: '0 1 auto',
+            }}>
+              {currentPose.name}
+            </div>
+            {currentPose.id && (
+              <button onClick={handleOpenSwap} title="Swap pose" style={{
+                flexShrink: 0, width: 32, height: 32, borderRadius: 8,
+                background: 'rgba(93,202,165,0.1)', border: '1px solid rgba(93,202,165,0.2)',
+                color: '#5DCAA5', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M16 3l4 4-4 4" />
+                  <path d="M20 7H4" />
+                  <path d="M8 21l-4-4 4-4" />
+                  <path d="M4 17h16" />
+                </svg>
+              </button>
+            )}
+          </div>
           {currentPose.sanskrit_name && (
             <div style={s.sanskrit}>{currentPose.sanskrit_name}</div>
           )}
@@ -347,6 +443,32 @@ export default function YogaSessionPlayer({ session, config, onExit }) {
           {currentIndex >= poses.length - 1 ? 'Finish' : 'Next →'}
         </button>
       </div>
+
+      {showSwapPicker && (
+        <MidSessionPicker
+          type="yoga"
+          currentName={currentPose.name}
+          alternatives={swapAlternatives}
+          loading={swapLoading}
+          onSelect={handleSwapSelect}
+          onClose={handleSwapClose}
+          accentColor="#5DCAA5"
+        />
+      )}
+
+      {savePromptData && (
+        <SavePreferencePrompt
+          exerciseName={savePromptData.exerciseName}
+          originalExerciseId={savePromptData.originalExerciseId}
+          chosenExerciseId={savePromptData.chosenExerciseId}
+          saveAction={() => api.put('/workout/exercise-pref', {
+            exercise_id: savePromptData.originalExerciseId,
+            chosen_exercise_id: savePromptData.chosenExerciseId,
+          })}
+          onSave={() => setSavePromptData(null)}
+          onDismiss={() => setSavePromptData(null)}
+        />
+      )}
     </div>
   );
 }
