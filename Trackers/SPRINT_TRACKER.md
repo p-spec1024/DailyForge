@@ -60,16 +60,18 @@ D:\projects\
 
 ---
 
-## Sprint 8 — Home + Strength (Planned)
+## Sprint 8 — Home + Strength — Apr 14, 2026 (In Progress)
 
-**Goal:** Rebuild core workout logging flow.
+**Goal:** Rebuild core workout pages in Flutter.
 
 | # | Ticket | Status | Notes |
 |---|--------|--------|-------|
-| 1 | Home Page Dashboard | ⏳ Planned | Greeting, streak, today card, quick starts |
-| 2 | Strength Page | ⏳ Planned | Exercise browser, routines list |
-| 3 | Workout Logging | ⏳ Planned | Set logging, rest timer, PR detection |
-| 4 | Exercise Detail + Add Modal | ⏳ Planned | Exercise info, add to workout |
+| 1 | Home Page Dashboard | ✅ Done | Greeting, streak, today card, quick starts, week progress. Built by Claude Code. |
+| 2 | Strength Page + Exercise Browser | ✅ Done | Exercise browser, routines carousel, muscle filters, detail sheet. Built by Gemini CLI, reviewed and fixed by Claude Code (9 convention issues found and resolved). |
+| 3 | Workout Session Logging (Full) | ⏳ Planned | Set logging, rest timer + settings, PR detection, exercise swap, smart suggestions, finish + summary |
+| 4 | Add Exercise + Save Routine + Resume | ⏳ Planned | Mid-workout add, save as routine, session resume, empty workout, routine pre-load |
+
+**Progress: 2/4 tickets done**
 
 ---
 
