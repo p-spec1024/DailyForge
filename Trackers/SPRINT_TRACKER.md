@@ -54,7 +54,7 @@ D:\projects\
 | 1 | Flutter Project Setup (Part 1) | ✅ Done | Project created, dependencies installed |
 | 2 | Folder Structure + Config (Part 2) | ✅ Done | 16 files, theme, routes, glass card, API config |
 | 3 | Services + Providers (Part 3) | ✅ Done | API service, auth provider, JWT storage, router guards, 401 handling |
-| 4 | Auth Pages + Navigation (Part 4) | ✅ Done | Polished login/register, 5-tab nav, splash, profile logout |
+| 4 | Auth Pages + Navigation (Part 4) | ✅ Done | Login, Register, 5-tab nav (StatefulShellRoute), splash screen, profile logout |
 
 **Progress: 4/4 tickets done — SPRINT 7 COMPLETE**
 
