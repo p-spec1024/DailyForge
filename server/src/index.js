@@ -22,7 +22,7 @@ import routinesRoutes from './routes/routines.js';
 const app = express();
 
 app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(cors({ origin: config.clientUrl }));
+app.use(cors({ origin: true }));
 app.use(express.json());
 
 // Health check
