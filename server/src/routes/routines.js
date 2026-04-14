@@ -88,7 +88,7 @@ router.get('/', async (req, res, next) => {
        ORDER BY r.updated_at DESC`,
       [req.user.id]
     );
-    res.json(result.rows);
+    res.json({ routines: result.rows });
   } catch (err) {
     next(err);
   }

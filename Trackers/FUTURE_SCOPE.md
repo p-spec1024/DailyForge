@@ -58,6 +58,8 @@ Features categorized for Android v1.0 launch vs future updates.
 | 59 | Routine edit/reorder exercises | UX | Edit routines: rename, reorder, add/remove |
 | 60 | Routine duplicate/fork | UX | Duplicate routine as starting point |
 
+---
+
 ## 🔄 Future Updates (12 items)
 
 | # | Feature | Category | Notes |
@@ -75,12 +77,16 @@ Features categorized for Android v1.0 launch vs future updates.
 | 26 | True adaptive AI coaching | AI | ML-based weekly adjustments (needs 10K+ sessions) |
 | 28 | ML-powered progressive overload | AI | Replace rule-based with ML (needs data) |
 
+---
+
 ## ❌ Cut (2 items)
 
 | # | Feature | Category | Reason |
 |---|---------|----------|--------|
 | 3 | Coach platform | Social | Not relevant for personal use app |
 | 6 | Desktop responsive layout | Platform | Mobile-first app, desktop not priority |
+
+---
 
 ## ✅ Already Done (6 items)
 

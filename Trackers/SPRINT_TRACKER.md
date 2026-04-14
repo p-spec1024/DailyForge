@@ -68,10 +68,18 @@ D:\projects\
 |---|--------|--------|-------|
 | 1 | Home Page Dashboard | ✅ Done | Greeting, streak, today card, quick starts, week progress. Built by Claude Code. |
 | 2 | Strength Page + Exercise Browser | ✅ Done | Exercise browser, routines carousel, muscle filters, detail sheet. Built by Gemini CLI, reviewed and fixed by Claude Code (9 convention issues found and resolved). |
-| 3 | Workout Session Logging (Full) | ⏳ Planned | Set logging, rest timer + settings, PR detection, exercise swap, smart suggestions, finish + summary |
-| 4 | Add Exercise + Save Routine + Resume | ⏳ Planned | Mid-workout add, save as routine, session resume, empty workout, routine pre-load |
+| 3 | Workout Session Logging (Full) | ✅ Done | Split into 3a/3b/3c — all shipped |
+| 3a | - Session Provider + Set Logging | ✅ Done | Session provider, set logging, order enforcement (1→2→3), empty input validation (floating SnackBar), back nav guard, finish workout, strength-only filtering. Multiple List<dynamic> type fixes. |
+| 3b | - Rest Timer + Settings | ✅ Done | RestTimer widget with CustomPainter ring, color transitions (green→yellow→red), SettingsProvider, SettingsBottomSheet with duration chips and toggles. |
+| 3c | - PR Detection + Swap + Summary | ✅ Done | SessionSummaryPage with stats + PRs, ExerciseSwapSheet with alternatives, PrBadge widget. Known issues: PR badge not showing on card, haptic not triggering — deferred to UI polish. |
+| 4 | Add Exercise + Save Routine + Resume | ✅ Done | AddExerciseSheet, SaveRoutineSheet, ResumeBanner, EmptyWorkoutPage, routine pre-load. Resume parsing fix applied. |
 
-**Progress: 2/4 tickets done**
+**Progress: 6/6 tickets done — SPRINT 8 COMPLETE**
+
+### Key Fixes During T3a:
+- CORS fix for physical device testing (server/src/index.js line 25: origin: true)
+- API config for physical device (lib/config/api_config.dart line 17: PC's local IP)
+- Wireless adb debugging setup (adb connect 192.168.0.XXX:5555)
 
 ---
 
