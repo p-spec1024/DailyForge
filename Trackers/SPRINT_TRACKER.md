@@ -60,7 +60,7 @@ D:\projects\
 
 ---
 
-## Sprint 8 — Home + Strength — Apr 14, 2026 (In Progress)
+## Sprint 8 — Home + Strength — Apr 14-15, 2026 ✅ COMPLETE
 
 **Goal:** Rebuild core workout pages in Flutter.
 
@@ -83,16 +83,18 @@ D:\projects\
 
 ---
 
-## Sprint 9 — Yoga + Breathwork (Planned)
+## Sprint 9 — Breathwork + Yoga — Apr 15-16, 2026 🔄 IN PROGRESS
 
-**Goal:** Rebuild yoga session builder and breathwork timer.
+**Goal:** Rebuild breathwork and yoga pillars in Flutter.
 
 | # | Ticket | Status | Notes |
 |---|--------|--------|-------|
-| 1 | Yoga Page + Session Builder | ⏳ Planned | Practice type, level, focus area |
-| 2 | Yoga Session Player | ⏳ Planned | Pose timer, skip, complete |
-| 3 | Breathwork Page | ⏳ Planned | Technique selection, goals |
-| 4 | Breathwork Timer | ⏳ Planned | Expanding circle, phase colors |
+| 1 | Breathwork Page | ✅ Done | Category filters, 49 techniques, safety levels, technique cards. |
+| 2 | Breathwork Timer | ⏳ Next | Expanding circle, phase colors, round counter |
+| 3 | Yoga Page + Session Builder | ⏳ Planned | Practice type, level, focus area |
+| 4 | Yoga Session Player | ⏳ Planned | Pose timer, skip, complete |
+
+**Progress: 1/4 tickets done**
 
 ---
 
