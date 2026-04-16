@@ -90,11 +90,11 @@ D:\projects\
 | # | Ticket | Status | Notes |
 |---|--------|--------|-------|
 | 1 | Breathwork Page | ✅ Done | Category filters, 49 techniques, safety levels, technique cards. |
-| 2 | Breathwork Timer | ⏳ Next | Expanding circle, phase colors, round counter |
+| 2 | Breathwork Timer | ✅ Done | Animated breath circle (inhale/hold/exhale), safety modal, timer provider, session logging, phase instructions, duration display fix. |
 | 3 | Yoga Page + Session Builder | ⏳ Planned | Practice type, level, focus area |
 | 4 | Yoga Session Player | ⏳ Planned | Pose timer, skip, complete |
 
-**Progress: 1/4 tickets done**
+**Progress: 2/4 tickets done**
 
 ---
 
