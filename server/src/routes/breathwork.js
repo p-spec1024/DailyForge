@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { authenticate } from '../middleware/auth.js';
 import { recalculateBreathwork } from '../services/progressService.js';
+import { getEstimatedDurationSeconds } from '../constants/breathwork-durations.js';
 
 const router = Router();
 
@@ -23,12 +24,10 @@ router.get('/techniques', async (req, res, next) => {
 
     const { rows } = await pool.query(query, params);
 
-    const techniques = rows.map((t) => {
-      const { phases, cycles } = t.protocol;
-      const phaseDuration = phases.reduce((sum, p) => sum + p.duration, 0);
-      const totalDuration = Math.round(phaseDuration * (cycles || 1));
-      return { ...t, estimated_duration: totalDuration };
-    });
+    const techniques = rows.map((t) => ({
+      ...t,
+      estimated_duration: getEstimatedDurationSeconds(t.name, t.category),
+    }));
 
     res.json(techniques);
   } catch (err) {
@@ -44,7 +43,11 @@ router.get('/techniques/:id', async (req, res, next) => {
       [req.params.id],
     );
     if (!rows.length) return res.status(404).json({ error: 'Technique not found' });
-    res.json(rows[0]);
+    const t = rows[0];
+    res.json({
+      ...t,
+      estimated_duration: getEstimatedDurationSeconds(t.name, t.category),
+    });
   } catch (err) {
     next(err);
   }
@@ -77,20 +80,15 @@ router.get('/alternatives', authenticate, async (req, res, next) => {
       [category, techniqueId]
     );
 
-    const alternatives = rows.map(t => {
-      const phases = t.phases || [];
-      const phaseDuration = phases.reduce((sum, p) => sum + (p.duration || 0), 0);
-      const totalDuration = Math.round(phaseDuration * (t.cycles || 1));
-      return {
-        id: t.id,
-        name: t.name,
-        tradition: t.tradition,
-        category: t.category,
-        difficulty: t.difficulty,
-        safety_level: t.safety_level,
-        estimated_duration: totalDuration,
-      };
-    });
+    const alternatives = rows.map((t) => ({
+      id: t.id,
+      name: t.name,
+      tradition: t.tradition,
+      category: t.category,
+      difficulty: t.difficulty,
+      safety_level: t.safety_level,
+      estimated_duration: getEstimatedDurationSeconds(t.name, t.category),
+    }));
 
     res.json({ alternatives });
   } catch (err) {
