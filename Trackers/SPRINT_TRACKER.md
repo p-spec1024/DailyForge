@@ -83,7 +83,7 @@ D:\projects\
 
 ---
 
-## Sprint 9 — Breathwork + Yoga — Apr 15-16, 2026 🔄 IN PROGRESS
+## Sprint 9 — Breathwork + Yoga — Apr 15-16, 2026 ✅ COMPLETE
 
 **Goal:** Rebuild breathwork and yoga pillars in Flutter.
 
@@ -91,23 +91,25 @@ D:\projects\
 |---|--------|--------|-------|
 | 1 | Breathwork Page | ✅ Done | Category filters, 49 techniques, safety levels, technique cards. |
 | 2 | Breathwork Timer | ✅ Done | Animated breath circle (inhale/hold/exhale), safety modal, timer provider, session logging, phase instructions, duration display fix. |
-| 3 | Yoga Page + Session Builder | ⏳ Planned | Practice type, level, focus area |
-| 4 | Yoga Session Player | ⏳ Planned | Pose timer, skip, complete |
+| 3 | Yoga Page + Session Builder | ✅ Done | Practice type, level, duration, focus chips, pose preview modal, config persistence. |
+| 4 | Yoga Session Player | ✅ Done | Pose timer with auto-advance, play/pause/stop controls, pose swap sheet, session completion logging, recent sessions working. |
 
-**Progress: 2/4 tickets done**
+**Progress: 4/4 tickets done — SPRINT 9 COMPLETE**
 
 ---
 
-## Sprint 10 — Profile + Analytics (Planned)
+## Sprint 10 — Profile + Analytics — Apr 16-17, 2026 ✅ COMPLETE
 
 **Goal:** Rebuild analytics and settings.
 
 | # | Ticket | Status | Notes |
 |---|--------|--------|-------|
-| 1 | Profile Page | ⏳ Planned | Settings, logout |
-| 2 | Workout Calendar | ⏳ Planned | Monthly view, session dots |
-| 3 | Progression Charts | ⏳ Planned | fl_chart for graphs |
-| 4 | Body Measurements | ⏳ Planned | Weight, circumferences, trends |
+| 1 | Profile Page + Settings | ✅ Done | User info, unit toggle, menu cards, logout |
+| 2 | Workout Calendar | ✅ Done | Streak counter, colored dots, month nav, scrollable session detail sheet |
+| 3 | Exercise History + Charts | ✅ Done | Pillar sections, fl_chart progression graphs, PR dots, tooltip, backend fix for names |
+| 4 | Body Measurements | ✅ Done | Chart/list toggle, hero number, fl_chart with gradient, month picker, full month page, entry detail sheet, edit/delete, circumference deltas. 2 rounds of bug fixes. |
+
+**Progress: 4/4 tickets done — SPRINT 10 COMPLETE**
 
 ---
 

@@ -6,14 +6,14 @@ Features categorized for Android v1.0 launch vs future updates.
 
 | Category | Count |
 |----------|-------|
-| 🚀 Before Android Launch | 40 |
-| 🔄 Future Updates | 12 |
+| 🚀 Before Android Launch | 42 |
+| 🔄 Future Updates | 13 |
 | ❌ Cut | 2 |
 | ✅ Already Done | 6 |
 
 ---
 
-## 🚀 Before Android Launch (40 items)
+## 🚀 Before Android Launch (42 items)
 
 | # | Feature | Category | Notes |
 |---|---------|----------|-------|
@@ -57,10 +57,12 @@ Features categorized for Android v1.0 launch vs future updates.
 | 57 | Extract useAddExercise hook | Refactor | Deduplicate add exercise logic |
 | 59 | Routine edit/reorder exercises | UX | Edit routines: rename, reorder, add/remove |
 | 60 | Routine duplicate/fork | UX | Duplicate routine as starting point |
+| 61 | Breathwork audio cues | Breathwork | Phase transition sounds. Options: (A) Simple chimes/tones for inhale/hold/exhale transitions, (B) Ambient soundscapes (ocean, forest, singing bowls), (C) Voice guidance via TTS ("inhale... hold... exhale..."), (D) Premium music + voice like Othership. Start with A or C, add B/D as Pro/Max tier feature. Use `just_audio` or `audioplayers` package. |
+| 62 | Premium breathwork soundscapes (Pro/Max) | Breathwork | Music-driven sessions like Othership. Curated soundscapes with background music + voice guidance. Could license royalty-free ambient tracks or commission custom production. Differentiates Pro/Max tiers. Research: Othership charges $17.99/mo primarily for their DJ-curated soundscapes. |
 
 ---
 
-## 🔄 Future Updates (12 items)
+## 🔄 Future Updates (13 items)
 
 | # | Feature | Category | Notes |
 |---|---------|----------|-------|
@@ -76,6 +78,7 @@ Features categorized for Android v1.0 launch vs future updates.
 | 25 | Apple Health / Google Fit sync | Integration | Sync workouts to health platforms |
 | 26 | True adaptive AI coaching | AI | ML-based weekly adjustments (needs 10K+ sessions) |
 | 28 | ML-powered progressive overload | AI | Replace rule-based with ML (needs data) |
+| 63 | Expanded chart view (tap to enlarge) | Analytics | Full-screen chart modal with zoom, pan, tap-for-details. Added Apr 17, 2026 |
 
 ---
 
