@@ -1,6 +1,6 @@
 # S10-T5: Home Page Redesign — Design Document
 
-**Status:** Blender mesh splitting ✅ **COMPLETE (27/27)**. All workflow learnings captured. Ready for GLB export and T5a Claude Code implementation.
+**Status:** Blender mesh splitting ✅ **COMPLETE (27/27)**. GLB exported ✅. Ready for T5a Claude Code implementation.
 **Created:** Apr 17, 2026
 **Last Updated:** Apr 22, 2026 (mesh splitting complete; final count 27 total = 26 muscle + 1 base)
 **Owner:** Prashob (CEO/PO), Claude.ai (PM)
@@ -156,6 +156,9 @@ After initial renaming confusion, the workflow pattern became rock-solid. Pace s
 
 Final session completed remaining 7 splits (quad_L/R, ham_L/R, calf_L/R, base rename).
 
+**GLB Export (Apr 22, post-splits):**
+Exported from Blender via `File → Export → glTF 2.0 (.glb)` to `D:\projects\dailyforge_flutter\assets\models\male_anatomy_split.glb`. Final size 977 KB (down from original 4 MB GLB — textures/materials stripped, which is fine because heatmap coloring overrides material anyway). Geometry intact; verified in gltf-viewer.donmccurdy.com — wireframe view showed full 37.6k triangle mesh with clear muscle definition preserved. All 27 named meshes present. Original `male_base_muscular_anatomy.glb` (4 MB) preserved in same folder as backup.
+
 **Final completed splits (27/27):**
 
 | # | Mesh | Method | Notes |
@@ -301,9 +304,11 @@ else:
 ## Sub-Ticket Breakdown
 
 ### S10-T5a: 3D Body Map UI + Rotation + Tap (Mock Data)
-**Status:** 🟢 **Unblocked** — all mesh splits complete. Ready for Claude Code prompt.
+**Status:** 🟢 **Unblocked** — all mesh splits complete, GLB exported. Ready for Claude Code prompt.
 **Estimate:** 3-4 days
-**Next step:** Export split model as GLB → write fresh Claude Code prompt → implement
+**GLB location:** `D:\projects\dailyforge_flutter\assets\models\male_anatomy_split.glb` (977 KB, verified in gltf-viewer)
+**Note on GLB:** Plain white material (original CharacterZone textures stripped during export). Not a problem — heatmap coloring overrides material anyway.
+**Next step:** Write fresh Claude Code prompt → implement
 
 ### S10-T5b: Backend Endpoints
 **Status:** ⏳ Planned (can start anytime — doesn't need the split)
@@ -350,6 +355,7 @@ Sprint 11 (5-phase session + Google Play launch) **starts after T5a/b/c complete
 - **Apr 22, 2026** — ✅ **FINAL 7 SPLITS COMPLETE** (quad_L/R, ham_L/R, calf_L/R, base). Total 27/27.
 - **Apr 22, 2026** — Knee Z discovered at -0.115 (not -0.128). Manual Circle Select was the primary tool for all leg muscles.
 - **Apr 22, 2026** — Final mesh count corrected from "28" to **27** (26 muscle + 1 base). Earlier "28" was an off-by-one typo in plan docs.
+- **Apr 22, 2026** — ✅ **GLB EXPORTED** to `D:\projects\dailyforge_flutter\assets\models\male_anatomy_split.glb` (977 KB). Verified in gltf-viewer; all 27 meshes intact. T5a fully unblocked.
 
 ---
 
