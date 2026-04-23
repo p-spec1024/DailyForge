@@ -145,38 +145,28 @@ const YOGA_REGION_TOKENS = {
   ]),
 };
 
-// Pose-name keyword overrides for poses whose target_muscles don't carry a
-// region signal but whose names clearly do. Keys are lowercased substrings.
-const YOGA_POSE_NAME_REGION_HINTS = [
-  { match: 'pigeon',      regions: ['Hips'] },
-  { match: 'eagle',       regions: ['Hips', 'Shoulders'] },
-  { match: 'cobra',       regions: ['Spine'] },
-  { match: 'cat',         regions: ['Spine'] },
-  { match: 'cow',         regions: ['Spine'] },
-  { match: 'fish',        regions: ['Spine', 'Shoulders'] },
-  { match: 'bow',         regions: ['Spine'] },
-  { match: 'wheel',       regions: ['Spine', 'Shoulders'] },
-  { match: 'bridge',      regions: ['Spine', 'Hips'] },
-  { match: 'camel',       regions: ['Spine'] },
-  { match: 'locust',      regions: ['Spine'] },
-  { match: 'twist',       regions: ['Spine'] },
-  { match: 'frog',        regions: ['Hips'] },
-  { match: 'lotus',       regions: ['Hips'] },
-  { match: 'squat',       regions: ['Hips'] },
-  { match: 'malasana',    regions: ['Hips'] },
-  { match: 'lunge',       regions: ['Hips'] },
-  { match: 'warrior',     regions: ['Hips'] },
-  { match: 'pigeon',      regions: ['Hips'] },
-  { match: 'dog',         regions: ['Shoulders'] }, // up/down dog stretch shoulders
-  { match: 'plank',       regions: ['Shoulders'] },
-  { match: 'dolphin',     regions: ['Shoulders'] },
-  { match: 'handstand',   regions: ['Shoulders'] },
-  { match: 'headstand',   regions: ['Shoulders'] },
-  { match: 'forearm stand', regions: ['Shoulders'] },
-  { match: 'chaturanga',  regions: ['Shoulders'] },
-  { match: 'cow-faced',   regions: ['Shoulders'] },
-  { match: 'cow face',    regions: ['Shoulders'] },
-  { match: "child",       regions: ['Spine'] },
+// Pose-name hints — only kept where the pose's target_muscles don't already
+// carry a region signal via tokens (audited 2026-04-23 against the live DB).
+// Hints are matched as whole WORDS in the lowercased pose name so that
+// "Cow Pose" → Spine doesn't also fire on "Cow-Faced Pose" (which is a
+// shoulder pose). The override list runs first; if any override matches,
+// generic hints below it are skipped to prevent the cross-classification.
+const YOGA_POSE_NAME_OVERRIDES = [
+  // Compound names that would otherwise be misclassified by a generic
+  // single-word hint sitting below them.
+  { match: ['cow', 'faced'],  regions: ['Shoulders'] }, // Cow-Faced Pose
+  { match: ['cow', 'face'],   regions: ['Shoulders'] }, // Cow Face Pose
+];
+
+const YOGA_POSE_NAME_HINTS = [
+  { match: 'pigeon',  regions: ['Hips'] },        // Pigeon Pose has only "legs, core" tokens
+  { match: 'fish',    regions: ['Spine'] },        // Fish Pose tokens lack any spine signal
+  { match: 'camel',   regions: ['Spine'] },        // Camel Pose tokens lack any spine signal
+  { match: 'frog',    regions: ['Hips'] },         // Frog Pose tokens lack any hip signal
+  { match: 'lunge',   regions: ['Hips'] },         // Lunge Pose has only "arms, core, legs"
+  { match: 'warrior', regions: ['Hips'] },         // Reverse Warrior has empty target_muscles
+  { match: 'dolphin', regions: ['Shoulders'] },    // Dolphin Pose tokens lack shoulder signal
+  { match: 'headstand', regions: ['Shoulders'] },  // Some headstand entries have prose-only muscles
 ];
 
 // One-time warning suppression for unknown muscles.
@@ -228,13 +218,25 @@ export function yogaPoseToRegions(poseName, targetMuscles, _category) {
     }
   }
 
-  // Pose name hints add coverage for poses whose target_muscles are vague
-  // (e.g. "back, core" → Spine via name match for "cobra").
-  const lowerName = (poseName || '').toLowerCase();
-  if (lowerName) {
-    for (const hint of YOGA_POSE_NAME_REGION_HINTS) {
-      if (lowerName.includes(hint.match)) {
-        for (const r of hint.regions) regions.add(r);
+  // Pose-name hints — whole-word match so "Cow Pose" doesn't poison
+  // "Cow-Faced Pose". Overrides run first; if any override fires we skip
+  // the generic single-word hints to avoid the cross-classification noted
+  // in the review.
+  const nameWords = (poseName || '').toLowerCase().split(/[\s\-]+/).filter(Boolean);
+  if (nameWords.length) {
+    const wordSet = new Set(nameWords);
+    let overrideMatched = false;
+    for (const ov of YOGA_POSE_NAME_OVERRIDES) {
+      if (ov.match.every((w) => wordSet.has(w))) {
+        for (const r of ov.regions) regions.add(r);
+        overrideMatched = true;
+      }
+    }
+    if (!overrideMatched) {
+      for (const hint of YOGA_POSE_NAME_HINTS) {
+        if (wordSet.has(hint.match)) {
+          for (const r of hint.regions) regions.add(r);
+        }
       }
     }
   }

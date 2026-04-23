@@ -23,10 +23,14 @@ import {
   STRENGTH_GROUPS,
   FLEXIBILITY_REGIONS,
 } from './muscleMapping.js';
-import { MILESTONES, calculateStreak, fmtDate } from './milestones.js';
+import { MILESTONES, fmtDate } from './milestones.js';
 
 export const RANGE_DAYS = { '7d': 7, '30d': 30, '90d': 90, 'year': 365 };
 const BASELINE_DAYS_MIN = 90;
+const MILESTONE_RECENCY_DAYS = 30;
+// PRs at exactly this weight are almost always placeholders for bodyweight
+// exercises whose load wasn't recorded. Filter them out of recent-wins.
+const MIN_PR_WEIGHT = 2;
 
 const WORKING_SET_FILTER = "(se.set_type = 'normal' OR se.set_type IS NULL)";
 
@@ -55,6 +59,22 @@ function rankNormalize(volumeByKey, keys) {
   return result;
 }
 
+// Compare two PG DATE values as YYYY-MM-DD strings to dodge any local-vs-UTC
+// drift in JS Date math. PG returns DATE as a Date at local-midnight; using
+// the same fmtDate helper on both sides keeps the comparison TZ-stable.
+function windowCutoffString(windowDays, today = new Date()) {
+  const cutoff = new Date(today);
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - windowDays);
+  return fmtDate(cutoff);
+}
+
+function rowDateString(rawDate) {
+  if (!rawDate) return null;
+  const d = rawDate instanceof Date ? rawDate : new Date(rawDate);
+  return fmtDate(d);
+}
+
 // ─── Muscle volumes ─────────────────────────────────────────────────────
 
 export async function getMuscleVolumes(userId, range) {
@@ -80,27 +100,20 @@ export async function getMuscleVolumes(userId, range) {
     [userId, baselineDays]
   );
 
-  // Today / window cutoff in JS so we don't double-query.
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const windowCutoff = new Date(today);
-  windowCutoff.setDate(today.getDate() - windowDays);
-
+  const cutoffStr = windowCutoffString(windowDays);
   const windowVolume = emptyVolumes(STRENGTH_GROUPS);
   const baselineVolume = emptyVolumes(STRENGTH_GROUPS);
 
   for (const row of rows) {
     const w = row.weight == null ? 0 : Number(row.weight);
     const reps = row.reps_completed == null ? 0 : Number(row.reps_completed);
-    const setVolume = w * reps; // bodyweight (NULL weight) contributes 0 — KNOWN LIMITATION
+    const setVolume = w * reps; // bodyweight (NULL weight) → 0; KNOWN LIMITATION
     if (setVolume === 0) continue;
 
     const groups = muscleTextToDbGroups(row.target_muscles);
     if (groups.size === 0) continue;
 
-    const dateRaw = row.date instanceof Date ? row.date : new Date(row.date);
-    const inWindow = dateRaw >= windowCutoff;
-
+    const inWindow = rowDateString(row.date) >= cutoffStr;
     for (const g of groups) {
       baselineVolume[g] += setVolume;
       if (inWindow) windowVolume[g] += setVolume;
@@ -155,11 +168,7 @@ export async function getFlexibility(userId, range) {
     posesPerSession.set(r.session_id, (posesPerSession.get(r.session_id) || 0) + 1);
   }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const windowCutoff = new Date(today);
-  windowCutoff.setDate(today.getDate() - windowDays);
-
+  const cutoffStr = windowCutoffString(windowDays);
   const windowMinutes = emptyVolumes(FLEXIBILITY_REGIONS);
   const baselineMinutes = emptyVolumes(FLEXIBILITY_REGIONS);
 
@@ -175,9 +184,7 @@ export async function getFlexibility(userId, range) {
     const regions = yogaPoseToRegions(r.pose_name, r.target_muscles, r.category);
     if (regions.size === 0) continue;
 
-    const dateRaw = r.date instanceof Date ? r.date : new Date(r.date);
-    const inWindow = dateRaw >= windowCutoff;
-
+    const inWindow = rowDateString(r.date) >= cutoffStr;
     for (const region of regions) {
       baselineMinutes[region] += minutes;
       if (inWindow) windowMinutes[region] += minutes;
@@ -198,38 +205,51 @@ export async function getFlexibility(userId, range) {
  * string values, matching the Dart `List<Map<String, String>>` shape in
  * lib/data/mock_body_map_data.dart. We sort internally by date but do not
  * expose it in the response (mock has no date field).
+ *
+ * Currently emits two kinds of wins: strength PRs and lifetime session-count
+ * milestones (10/25/50/100/250/500). Streak wins are intentionally not
+ * emitted because we don't track max-ever streak — without that, "current
+ * streak" isn't a record-class achievement worth a "win" slot. Re-add when
+ * users.max_streak (or equivalent) lands.
  */
 export async function getRecentWins(userId, limit) {
   const cap = Math.max(1, Math.min(10, Number(limit) || 5));
 
-  // 1) Strength PRs from the cache (last 60 days, by best_weight_date)
-  const { rows: prRows } = await pool.query(
-    `SELECT epc.exercise_id,
-            epc.best_weight,
-            epc.best_weight_date,
-            e.name AS exercise_name,
-            (SELECT MAX(se.reps_completed)
-               FROM session_exercises se
-               JOIN sessions s ON s.id = se.session_id
-              WHERE s.user_id = $1
-                AND se.exercise_id = epc.exercise_id
-                AND se.weight = epc.best_weight
-                AND se.completed = true
-                AND s.date = epc.best_weight_date) AS reps
-       FROM exercise_progress_cache epc
-       JOIN exercises e ON e.id = epc.exercise_id
-      WHERE epc.user_id = $1
-        AND epc.kind = 'strength'
-        AND epc.best_weight IS NOT NULL
-        AND epc.best_weight_date >= CURRENT_DATE - INTERVAL '60 days'
-      ORDER BY epc.best_weight_date DESC
-      LIMIT 10`,
-    [userId]
-  );
+  const [prResult, totalResult] = await Promise.all([
+    pool.query(
+      `SELECT epc.exercise_id,
+              epc.best_weight,
+              epc.best_weight_date,
+              e.name AS exercise_name,
+              (SELECT MAX(se.reps_completed)
+                 FROM session_exercises se
+                 JOIN sessions s ON s.id = se.session_id
+                WHERE s.user_id = $1
+                  AND se.exercise_id = epc.exercise_id
+                  AND se.weight = epc.best_weight
+                  AND se.completed = true
+                  AND s.date = epc.best_weight_date) AS reps
+         FROM exercise_progress_cache epc
+         JOIN exercises e ON e.id = epc.exercise_id
+        WHERE epc.user_id = $1
+          AND epc.kind = 'strength'
+          AND epc.best_weight IS NOT NULL
+          AND epc.best_weight >= $2
+          AND epc.best_weight_date >= CURRENT_DATE - INTERVAL '60 days'
+        ORDER BY epc.best_weight_date DESC
+        LIMIT 10`,
+      [userId, MIN_PR_WEIGHT]
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS total
+         FROM sessions WHERE user_id = $1 AND completed = true`,
+      [userId]
+    ),
+  ]);
 
   const wins = [];
 
-  for (const r of prRows) {
+  for (const r of prResult.rows) {
     const weight = Number(r.best_weight);
     const reps = r.reps != null ? Number(r.reps) : null;
     const subtitle = reps
@@ -243,17 +263,11 @@ export async function getRecentWins(userId, limit) {
     });
   }
 
-  // 2) Lifetime session-count milestones reached in the past 30 days.
-  // We approximate "crossed in window" via: total reached today is a
-  // milestone AND the session that pushed us over happened recently.
-  const { rows: totalRow } = await pool.query(
-    `SELECT COUNT(*)::int AS total
-       FROM sessions WHERE user_id = $1 AND completed = true`,
-    [userId]
-  );
-  const total = totalRow[0]?.total || 0;
+  // Lifetime session-count milestones — only surface if the milestone session
+  // happened within MILESTONE_RECENCY_DAYS. Without this guard, a user
+  // sitting at exactly 250 sessions would see the milestone forever.
+  const total = totalResult.rows[0]?.total || 0;
   if (MILESTONES.includes(total)) {
-    // Find the date of the Nth completed session.
     const { rows: nth } = await pool.query(
       `SELECT date FROM sessions
         WHERE user_id = $1 AND completed = true AND date IS NOT NULL
@@ -261,36 +275,20 @@ export async function getRecentWins(userId, limit) {
         OFFSET ($2::int - 1) LIMIT 1`,
       [userId, total]
     );
-    const milestoneDate = nth[0]?.date || new Date();
-    wins.push({
-      icon: 'star',
-      title: `${total} sessions`,
-      subtitle: 'Lifetime milestone',
-      _date: milestoneDate,
-    });
+    const milestoneDate = nth[0]?.date;
+    if (milestoneDate) {
+      const ageDays = (Date.now() - new Date(milestoneDate).getTime()) / 86400000;
+      if (ageDays <= MILESTONE_RECENCY_DAYS) {
+        wins.push({
+          icon: 'star',
+          title: `${total} sessions`,
+          subtitle: 'Lifetime milestone',
+          _date: milestoneDate,
+        });
+      }
+    }
   }
 
-  // 3) Streak win — emit if current streak is meaningful (>= 7).
-  const { rows: dateRows } = await pool.query(
-    `SELECT DISTINCT date FROM sessions
-      WHERE user_id = $1 AND completed = true AND date IS NOT NULL
-      ORDER BY date DESC LIMIT 400`,
-    [userId]
-  );
-  const dateSet = new Set(
-    dateRows.map((r) => (r.date instanceof Date ? fmtDate(r.date) : String(r.date).slice(0, 10)))
-  );
-  const streak = calculateStreak(dateSet);
-  if (streak >= 7) {
-    wins.push({
-      icon: 'flame',
-      title: `${streak}-day streak`,
-      subtitle: 'Keep it going',
-      _date: new Date(),
-    });
-  }
-
-  // Sort by _date desc, take top N, strip the internal date field.
   wins.sort((a, b) => new Date(b._date).getTime() - new Date(a._date).getTime());
   return wins.slice(0, cap).map(({ icon, title, subtitle }) => ({ icon, title, subtitle }));
 }

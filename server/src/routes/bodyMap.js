@@ -34,37 +34,22 @@ router.use(authenticate);
 
 router.get('/muscle-volumes', async (req, res, next) => {
   try {
-    const userId = req.user.id;
     const range = parseRange(req.query.range);
-    const volumes = await getMuscleVolumes(userId, range);
-    res.json(volumes);
-  } catch (err) {
-    console.error('[body-map/muscle-volumes]', err);
-    next(err);
-  }
+    res.json(await getMuscleVolumes(req.user.id, range));
+  } catch (err) { next(err); }
 });
 
 router.get('/flexibility', async (req, res, next) => {
   try {
-    const userId = req.user.id;
     const range = parseRange(req.query.range);
-    const scores = await getFlexibility(userId, range);
-    res.json(scores);
-  } catch (err) {
-    console.error('[body-map/flexibility]', err);
-    next(err);
-  }
+    res.json(await getFlexibility(req.user.id, range));
+  } catch (err) { next(err); }
 });
 
 router.get('/recent-wins', async (req, res, next) => {
   try {
-    const userId = req.user.id;
-    const wins = await getRecentWins(userId, req.query.limit);
-    res.json(wins);
-  } catch (err) {
-    console.error('[body-map/recent-wins]', err);
-    next(err);
-  }
+    res.json(await getRecentWins(req.user.id, req.query.limit));
+  } catch (err) { next(err); }
 });
 
 export default router;

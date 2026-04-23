@@ -37,6 +37,18 @@ async function pickTestUser() {
   return rows[0];
 }
 
+async function pickEmptyUser() {
+  const { rows } = await pool.query(
+    `SELECT u.id, u.email
+       FROM users u
+      WHERE NOT EXISTS (
+        SELECT 1 FROM sessions s WHERE s.user_id = u.id AND s.completed = true
+      )
+      LIMIT 1`
+  );
+  return rows[0] || null;
+}
+
 function signTokenForUser(user) {
   return jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, {
     expiresIn: '1h',
@@ -120,6 +132,35 @@ async function main() {
   console.log('\nNo-auth call:');
   const noauth = await fetch(`${BASE}/muscle-volumes`);
   check('rejects without token', noauth.status === 401);
+
+  // ── 6) invalid range param defaults to 30d (does not 400) ───────────
+  console.log('\nInvalid range:');
+  const bad = await callEndpoint('/muscle-volumes?range=garbage', token);
+  check('invalid range → 200 (defaults to 30d)', bad.status === 200);
+  check('invalid range still has all 11 keys',
+        bad.body && STRENGTH_GROUPS.every((g) => Object.prototype.hasOwnProperty.call(bad.body, g)));
+
+  // ── 7) zero-history user returns all-zeros, not 404 ─────────────────
+  console.log('\nZero-history user:');
+  const empty = await pickEmptyUser();
+  if (empty) {
+    const emptyToken = signTokenForUser(empty);
+    const mvE = await callEndpoint('/muscle-volumes?range=30d', emptyToken);
+    const fxE = await callEndpoint('/flexibility?range=30d', emptyToken);
+    const rwE = await callEndpoint('/recent-wins?limit=5', emptyToken);
+    console.log(`  user id=${empty.id} muscles:`, JSON.stringify(mvE.body));
+    check('empty user muscles 200', mvE.status === 200);
+    check('empty user muscles all zero',
+          STRENGTH_GROUPS.every((g) => mvE.body[g] === 0));
+    check('empty user flexibility 200', fxE.status === 200);
+    check('empty user flexibility all zero',
+          FLEXIBILITY_REGIONS.every((r) => fxE.body[r] === 0));
+    check('empty user wins 200', rwE.status === 200);
+    check('empty user wins is empty array',
+          Array.isArray(rwE.body) && rwE.body.length === 0);
+  } else {
+    console.log('  (skipped — no zero-history user exists)');
+  }
 
   console.log(`\n=== ${pass} pass, ${fail} fail ===`);
   process.exitCode = fail === 0 ? 0 : 1;
