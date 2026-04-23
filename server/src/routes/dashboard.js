@@ -1,18 +1,10 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { authenticate } from '../middleware/auth.js';
+import { MILESTONES, fmtDate, calculateStreak } from '../services/milestones.js';
 
 const router = Router();
 router.use(authenticate);
-
-const MILESTONES = [10, 25, 50, 100, 250, 500];
-
-function fmtDate(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
 
 function startOfWeekMonday(today) {
   const d = new Date(today);
@@ -123,26 +115,13 @@ router.get('/', async (req, res, next) => {
     const fullName = userRow.rows[0]?.name || '';
     const firstName = fullName.trim().split(/\s+/)[0] || '';
 
-    // Streak calculation
+    // Streak calculation (shared helper)
     const dateSet = new Set(
       sessionDatesRows.rows.map(r =>
         r.date instanceof Date ? fmtDate(r.date) : String(r.date).slice(0, 10)
       )
     );
-    let streak = 0;
-    {
-      const cursor = new Date(today);
-      cursor.setHours(0, 0, 0, 0);
-      // If today has no entry, start counting from yesterday so we don't
-      // penalize users who haven't worked out yet today.
-      if (!dateSet.has(fmtDate(cursor))) {
-        cursor.setDate(cursor.getDate() - 1);
-      }
-      while (dateSet.has(fmtDate(cursor))) {
-        streak++;
-        cursor.setDate(cursor.getDate() - 1);
-      }
-    }
+    const streak = calculateStreak(dateSet, today);
 
     // Last session
     let lastSession = null;
