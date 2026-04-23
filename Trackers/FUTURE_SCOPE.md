@@ -7,7 +7,7 @@ Features categorized for Android v1.0 launch vs future updates.
 | Category | Count |
 |----------|-------|
 | 🚀 Before Android Launch | 43 |
-| 🔄 Future Updates | 30 |
+| 🔄 Future Updates | 40 |
 | ❌ Cut | 2 |
 | ✅ Already Done | 6 |
 
