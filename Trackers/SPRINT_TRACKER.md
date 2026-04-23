@@ -111,7 +111,7 @@ D:\projects\
 | 5 | Home Page Redesign (3D Body Map) | 🔄 In Progress | See S10-T5-DESIGN.md for full details |
 | 5-prep | - Blender mesh split (27/27) | ✅ Done | 26 muscle meshes + base. File: `D:\projects\dailyforge\media\3d-source\male_anatomy_split_fbx.blend` |
 | 5a | - 3D Body Map UI + Rotation + Tap (mock data) | ✅ Done (architecture) | Package (interactive_3d) validated, data layer shipped, selection/tap working. UX/visual polish deferred to post-Blender-resplit (see FUTURE_SCOPE items #93-#102). Committed Apr 23, 2026. |
-| 5b | - Backend Endpoints (muscle heatmap, flexibility, recent wins) | 🟢 Unblocked | 1-2 days. API response shape must match the client contract already defined in `lib/data/mock_body_map_data.dart` (Flutter app, S10-T5a commit `8cdb6a8`): `Map<String, int>` for muscle volumes and flexibility scores keyed by group/region name; `MockMuscleDetail` struct for per-muscle card data; same `mockRecentWins` shape for wins list. Treat that file as the source-of-truth contract, not the other way around. |
+| 5b | - Backend Endpoints (muscle heatmap, flexibility, recent wins) | ✅ Done | Three endpoints under `/api/body-map/*` (muscle-volumes, flexibility, recent-wins). Built on `lib/data/mock_body_map_data.dart` as the contract. Smoke test at `server/scripts/test-body-map-endpoints.js` (59 checks pass). Branch `s10-t5b`, commit `501714e`. **Mock divergence:** `mockRecentWins` is `List<Map<String,String>>` with only `icon/title/subtitle` — no `type` or `achieved_at` as the original spec assumed; endpoint returns the mock shape. |
 | 5c | - Remaining Home Sections + Real Data Wiring | ⏳ Planned | 3-4 days. |
 
 **Status (Apr 22):** T1-T4 shipped. T5-prep complete. T5a unblocked, ready for Claude Code prompt.
