@@ -111,7 +111,7 @@ D:\projects\
 | 5 | Home Page Redesign (3D Body Map) | 🔄 In Progress | See S10-T5-DESIGN.md for full details |
 | 5-prep | - Blender mesh split (27/27) | ✅ Done | 26 muscle meshes + base. File: `D:\projects\dailyforge\media\3d-source\male_anatomy_split_fbx.blend` |
 | 5a | - 3D Body Map UI + Rotation + Tap (mock data) | ✅ Done (architecture) | Package (interactive_3d) validated, data layer shipped, selection/tap working. UX/visual polish deferred to post-Blender-resplit (see FUTURE_SCOPE items #93-#102). Committed Apr 23, 2026. |
-| 5b | - Backend Endpoints (muscle heatmap, flexibility, recent wins) | ⏳ Planned | 1-2 days. Can run parallel to T5a. |
+| 5b | - Backend Endpoints (muscle heatmap, flexibility, recent wins) | 🟢 Unblocked | 1-2 days. API response shape must match the client contract already defined in `lib/data/mock_body_map_data.dart` (Flutter app, S10-T5a commit `8cdb6a8`): `Map<String, int>` for muscle volumes and flexibility scores keyed by group/region name; `MockMuscleDetail` struct for per-muscle card data; same `mockRecentWins` shape for wins list. Treat that file as the source-of-truth contract, not the other way around. |
 | 5c | - Remaining Home Sections + Real Data Wiring | ⏳ Planned | 3-4 days. |
 
 **Status (Apr 22):** T1-T4 shipped. T5-prep complete. T5a unblocked, ready for Claude Code prompt.
@@ -139,6 +139,8 @@ D:\projects\
 - **Apr 23, 2026 learning:** `interactive_3d` package treats native as the source of truth for selection state. Bidirectional sync from Dart → native (imperatively calling `clearSelections()` on state transitions) creates a race condition with the native input pipeline — symptoms were taps dropping after the first and intermittent rotation. Fix: let native own selection, drop reactive clear calls, use only one explicit clear on mode switch (an isolated user-driven event). General principle: with small-audience packages that wrap native renderers, the native side usually owns more state than the API surface suggests. Prefer one-way observation (Flutter reads native state via callbacks) over two-way sync.
 
 - **Apr 23, 2026 learning:** Coordinate-bounds mesh splits (used for arms in particular) produce highlight regions that don't match user expectation of where a muscle "is." Bicep split in particular covers only ~30-40% of the perceived bicep surface on the rendered figure. Fix requires re-doing the Blender split with Circle Select for rounded/curvy muscles, not re-export settings. Decision: complete all visual/interaction polish after Blender re-split, since polishing highlight behavior on meshes being replaced is wasted work.
+
+- **Apr 23, 2026 learning:** When scoping backend endpoints for features whose Flutter client already exists (even in mock form), treat the mock data files as the API contract. Saves a round-trip of "build API → adapt client → find mismatch → fix API." For T5b specifically, `lib/data/mock_body_map_data.dart` defines the exact response shapes expected. General principle: whichever side of the client/server boundary ships first defines the contract; the other side conforms.
 
 ---
 

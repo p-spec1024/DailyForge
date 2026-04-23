@@ -340,6 +340,35 @@ Sprint 11 (5-phase session + Google Play launch) **starts after T5a/b/c complete
 
 ---
 
+## Implementation Notes (Captured Apr 23, 2026)
+
+These are small details that surfaced during T5a execution and aren't obvious from reading the code. Worth keeping discoverable.
+
+### Entity name format from interactive_3d
+
+The package's `onSelectionChanged` callback passes `List<EntityData>`, **not** `List<String>` as the pub.dev summary claims. `EntityData` has two separate fields:
+
+- `.name` — the raw glTF node name as a plain `String` (e.g. `chest_L`, `quad_R`). Clean — no suffix, no namespace prefix.
+- `.id` — the Filament entity ID (Android) or SceneKit hash (iOS). Useful only if you need per-instance controller calls like `unselectEntities(entityIds:)`.
+
+`body_map_3d.dart`'s tap handler uses `entities.first.name` directly as the lookup key into `buildMeshToGroup()`. **Do not** add `.split('#').first` or similar guards — there's no `#` in the name. The spike page's log formatter printed `${e.name}#${e.id}` which initially read like a suffix; it isn't.
+
+If we ever swap the renderer (Plan B: Thermion, or a future engine), the entity shape may differ. The mesh-to-group mapping in `muscle_groups.dart` assumes bare names — keep it that way, handle any format normalization at the widget boundary.
+
+### Figure scale: defaultZoom is 2.5, not 1.0
+
+The package default `defaultZoom: 1.0` rendered the figure at roughly 15% of the 420px frame height during the spike — visibly tiny. Bumping to `defaultZoom: 2.5` fills the frame naturally without any layout gymnastics.
+
+This number was empirically chosen for our specific GLB (the split CharacterZone anatomy) at a 420px container height. If the container height changes or the GLB is replaced with a differently-scaled model (e.g. future Tripo AI personalized character — FUTURE_SCOPE item #67), defaultZoom will need re-tuning.
+
+### Race condition lesson for future package integrations
+
+`interactive_3d` treats its native side as the source of truth for selection state. Flutter observes via `onSelectionChanged` but should not imperatively push state back. The initial T5a design did (via `clearSelections()` on every state transition) and caused a race condition — taps dropped after the first, rotation became intermittent. Fix: one-way observation only, with one isolated clear call for mode-switch (an explicit user event, not a continuous sync loop).
+
+**General principle:** with small-audience packages that wrap native renderers, the native side usually owns more state than the Dart API surface suggests. Prefer observation over sync. If a package provides a "clear" or "reset" API, treat it as a one-shot user-intent command, not a reactive state-sync tool.
+
+---
+
 ## Change Log
 
 - **Apr 17, 2026** — Ticket scoped. Model chosen. Design direction locked.
