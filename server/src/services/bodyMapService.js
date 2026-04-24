@@ -233,6 +233,7 @@ export async function getRecentWins(userId, limit) {
          JOIN exercises e ON e.id = epc.exercise_id
         WHERE epc.user_id = $1
           AND epc.kind = 'strength'
+          AND e.type = 'strength'
           AND epc.best_weight IS NOT NULL
           AND epc.best_weight >= $2
           AND epc.best_weight_date >= CURRENT_DATE - INTERVAL '60 days'
