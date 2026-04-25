@@ -77,12 +77,32 @@ async function main() {
   console.log('  body  :', JSON.stringify(mv.body));
   check('status 200', mv.status === 200);
   check('object response', mv.body && typeof mv.body === 'object' && !Array.isArray(mv.body));
-  if (mv.body && typeof mv.body === 'object') {
+  // T5c-b shape: { volumes: {...}, details: {...} }
+  check('has `volumes` map',
+        mv.body && typeof mv.body.volumes === 'object' && !Array.isArray(mv.body.volumes));
+  check('has `details` map',
+        mv.body && typeof mv.body.details === 'object' && !Array.isArray(mv.body.details));
+  if (mv.body && mv.body.volumes) {
     for (const g of STRENGTH_GROUPS) {
-      check(`key "${g}" present`, Object.prototype.hasOwnProperty.call(mv.body, g));
-      const v = mv.body[g];
-      check(`value "${g}" int 0–100`, Number.isInteger(v) && v >= 0 && v <= 100,
+      check(`volumes["${g}"] present`,
+            Object.prototype.hasOwnProperty.call(mv.body.volumes, g));
+      const v = mv.body.volumes[g];
+      check(`volumes["${g}"] int 0–100`,
+            Number.isInteger(v) && v >= 0 && v <= 100,
             `got ${JSON.stringify(v)}`);
+    }
+  }
+  if (mv.body && mv.body.details) {
+    for (const g of STRENGTH_GROUPS) {
+      const d = mv.body.details[g];
+      check(`details["${g}"] present`, d && typeof d === 'object');
+      if (d && typeof d === 'object') {
+        check(`details["${g}"].lastTrained string`, typeof d.lastTrained === 'string');
+        check(`details["${g}"].volumeLabel string`, typeof d.volumeLabel === 'string');
+        check(`details["${g}"].topExercise string`, typeof d.topExercise === 'string');
+        check(`details["${g}"].setsThisWeek int`, Number.isInteger(d.setsThisWeek),
+              `got ${JSON.stringify(d.setsThisWeek)}`);
+      }
     }
   }
 
@@ -137,10 +157,11 @@ async function main() {
   console.log('\nInvalid range:');
   const bad = await callEndpoint('/muscle-volumes?range=garbage', token);
   check('invalid range → 200 (defaults to 30d)', bad.status === 200);
-  check('invalid range still has all 11 keys',
-        bad.body && STRENGTH_GROUPS.every((g) => Object.prototype.hasOwnProperty.call(bad.body, g)));
+  check('invalid range still has all 11 volume keys',
+        bad.body && bad.body.volumes &&
+        STRENGTH_GROUPS.every((g) => Object.prototype.hasOwnProperty.call(bad.body.volumes, g)));
 
-  // ── 7) zero-history user returns all-zeros, not 404 ─────────────────
+  // ── 7) zero-history user returns all-zeros + zero-state details ─────
   console.log('\nZero-history user:');
   const empty = await pickEmptyUser();
   if (empty) {
@@ -150,8 +171,19 @@ async function main() {
     const rwE = await callEndpoint('/recent-wins?limit=5', emptyToken);
     console.log(`  user id=${empty.id} muscles:`, JSON.stringify(mvE.body));
     check('empty user muscles 200', mvE.status === 200);
-    check('empty user muscles all zero',
-          STRENGTH_GROUPS.every((g) => mvE.body[g] === 0));
+    check('empty user volumes all zero',
+          mvE.body && mvE.body.volumes &&
+          STRENGTH_GROUPS.every((g) => mvE.body.volumes[g] === 0));
+    check('empty user details zero-state well-formed',
+          mvE.body && mvE.body.details &&
+          STRENGTH_GROUPS.every((g) => {
+            const d = mvE.body.details[g];
+            return d &&
+              d.lastTrained === 'Not yet' &&
+              d.volumeLabel === '—' &&
+              d.topExercise === '—' &&
+              d.setsThisWeek === 0;
+          }));
     check('empty user flexibility 200', fxE.status === 200);
     check('empty user flexibility all zero',
           FLEXIBILITY_REGIONS.every((r) => fxE.body[r] === 0));

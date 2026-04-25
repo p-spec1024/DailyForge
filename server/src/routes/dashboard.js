@@ -1,19 +1,15 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { authenticate } from '../middleware/auth.js';
-import { MILESTONES, fmtDate, calculateStreak } from '../services/milestones.js';
+import {
+  MILESTONES,
+  fmtDate,
+  calculateStreak,
+  startOfWeekMonday,
+} from '../services/milestones.js';
 
 const router = Router();
 router.use(authenticate);
-
-function startOfWeekMonday(today) {
-  const d = new Date(today);
-  d.setHours(0, 0, 0, 0);
-  const dow = d.getDay(); // 0=Sun
-  const back = (dow + 6) % 7; // days since Monday
-  d.setDate(d.getDate() - back);
-  return d;
-}
 
 router.get('/', async (req, res, next) => {
   try {

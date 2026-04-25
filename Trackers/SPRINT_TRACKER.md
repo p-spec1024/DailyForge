@@ -98,7 +98,7 @@ D:\projects\
 
 ---
 
-## Sprint 10 — Profile + Analytics + Home Redesign — Apr 16-22, 2026 🔄 IN PROGRESS
+## Sprint 10 — Profile + Analytics + Home Redesign — Apr 16-24, 2026 ✅ COMPLETE
 
 **Goal:** Rebuild analytics, settings, and home page.
 
@@ -108,14 +108,15 @@ D:\projects\
 | 2 | Workout Calendar | ✅ Done | Streak counter, colored dots, month nav, session detail sheet |
 | 3 | Exercise History + Charts | ✅ Done | Pillar sections, fl_chart graphs, PR dots |
 | 4 | Body Measurements | ✅ Done | Chart/list toggle, month picker, edit/delete |
-| 5 | Home Page Redesign (3D Body Map) | 🔄 In Progress | See S10-T5-DESIGN.md for full details |
+| 5 | Home Page Redesign (3D Body Map) | ✅ Done | See S10-T5-DESIGN.md for full details |
 | 5-prep | - Blender mesh split (27/27) | ✅ Done | 26 muscle meshes + base. File: `D:\projects\dailyforge\media\3d-source\male_anatomy_split_fbx.blend` |
 | 5a | - 3D Body Map UI + Rotation + Tap (mock data) | ✅ Done (architecture) | Package (interactive_3d) validated, data layer shipped, selection/tap working. UX/visual polish deferred to post-Blender-resplit (see FUTURE_SCOPE items #93-#102). Committed Apr 23, 2026. |
 | 5b | - Backend Endpoints (muscle heatmap, flexibility, recent wins) | ✅ Done | Three endpoints under `/api/body-map/*` (muscle-volumes, flexibility, recent-wins) wired to the `lib/data/mock_body_map_data.dart` contract. Smoke test at `server/scripts/test-body-map-endpoints.js` — 67 checks, all passing. Branch `s10-t5b`, head `c00ba9d` (pushed, **not merged** — T5c will merge together). **Mock divergence:** `mockRecentWins` is `List<Map<String,String>>` with only `icon/title/subtitle` — no `type` or `achieved_at` as the original spec assumed; endpoint returns the mock shape. **Yoga data quality improved as part of T5b cleanup:** 269 → 258 poses (11 dirty deletes), flexibility region coverage 87.7% → 93.8%, **0 dirty rows remaining**. Migrations kept under `server/scripts/{cleanup,populate}-yoga-muscles-2026-04-24.mjs` as audit trail. |
-| 5c | - Remaining Home Sections + Real Data Wiring | 🔄 In Progress | Split into 5c-a (heatmap + flexibility + recent-wins wiring) and 5c-b (muscle-mode selected-muscle card — see FUTURE_SCOPE #112). |
+| 5c | - Remaining Home Sections + Real Data Wiring | ✅ Done | Split into 5c-a (heatmap + flexibility + recent-wins wiring) and 5c-b (three pillars + stats + weekly chart + footer + muscle-mode card). |
 | 5c-a | - Home Real Data Wiring (heatmap / flexibility / recent-wins) | ✅ Done | Home page wired to real backend. 3 rounds of iterative fixes (error handling, heatmap colors, selection behavior, retry spinner). Visual polish deferred — figure washed out on cream background is a native renderer lighting issue, not a color constant issue. See FUTURE_SCOPE #110/#111. Branch `s10-t5c-a`, head `f6dd354`. |
+| 5c-b | - Remaining Home Sections (pillars / stats / weekly chart / footer) | ✅ Done Apr 24, 2026 | Three-pillar home section (Strength / Yoga / Breathwork cards), Full Session placeholder (disabled, "Available in Sprint 11"), stats row, 4-week stacked chart, inspirational footer. Also shipped: FUTURE_SCOPE #107 (api_service ClientException rewrap) and #112 (muscle-mode card wired to real backend via extended muscle-volumes endpoint). 125/0 smoke test pass. Device verified on Android. Branch `s10-t5c-b`, head `4f244f2`. |
 
-**Status (Apr 22):** T1-T4 shipped. T5-prep complete. T5a unblocked, ready for Claude Code prompt.
+**Status (Apr 24):** Sprint 10 complete. All 5 tickets + 4 sub-tickets (5-prep / 5a / 5b / 5c-a / 5c-b) shipped. Ready for Sprint 11 T1 (5-phase orchestrator).
 
 ---
 

@@ -77,13 +77,37 @@ function rowDateString(rawDate) {
 
 // ─── Muscle volumes ─────────────────────────────────────────────────────
 
+// "3 days ago" / "Yesterday" / "1 week ago" — server-computed so the Flutter
+// card just prints the string. Range clips at months for anything > ~3 weeks.
+function humanRelativeDays(days) {
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days} days ago`;
+  if (days < 14) return '1 week ago';
+  if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
+  const months = Math.max(1, Math.floor(days / 30));
+  return `${months} ${months === 1 ? 'month' : 'months'} ago`;
+}
+
+function zeroDetail() {
+  return {
+    lastTrained: 'Not yet',
+    volumeLabel: '—',
+    topExercise: '—',
+    setsThisWeek: 0,
+  };
+}
+
 export async function getMuscleVolumes(userId, range) {
   const windowDays = RANGE_DAYS[range];
   const baselineDays = Math.max(BASELINE_DAYS_MIN, windowDays);
 
   // Pull all completed working sets in the BASELINE window (covers window).
+  // We also need e.name for topExercise attribution in the new `details`
+  // payload (T5c-b / FUTURE_SCOPE #112).
   const { rows } = await pool.query(
     `SELECT s.date,
+            e.name AS exercise_name,
             e.target_muscles,
             se.weight,
             se.reps_completed
@@ -101,22 +125,55 @@ export async function getMuscleVolumes(userId, range) {
   );
 
   const cutoffStr = windowCutoffString(windowDays);
+  const sevenDayCutoffStr = windowCutoffString(7);
   const windowVolume = emptyVolumes(STRENGTH_GROUPS);
   const baselineVolume = emptyVolumes(STRENGTH_GROUPS);
+
+  // Per-group accumulators for the `details` payload. sevenDayVolume and
+  // sevenDaySets feed setsThisWeek + volumeLabel. perExerciseVolume[g] maps
+  // exercise_name → 7d-window volume, whose max yields topExercise.
+  // lastTrainedDate[g] is the max date across the baseline window.
+  const sevenDayVolume = emptyVolumes(STRENGTH_GROUPS);
+  const sevenDaySets = emptyVolumes(STRENGTH_GROUPS);
+  const perExerciseVolume = Object.fromEntries(
+    STRENGTH_GROUPS.map((g) => [g, new Map()])
+  );
+  const lastTrainedDate = Object.fromEntries(
+    STRENGTH_GROUPS.map((g) => [g, null])
+  );
 
   for (const row of rows) {
     const w = row.weight == null ? 0 : Number(row.weight);
     const reps = row.reps_completed == null ? 0 : Number(row.reps_completed);
     const setVolume = w * reps; // bodyweight (NULL weight) → 0; KNOWN LIMITATION
-    if (setVolume === 0) continue;
-
+    const rowDate = rowDateString(row.date);
     const groups = muscleTextToDbGroups(row.target_muscles);
     if (groups.size === 0) continue;
 
-    const inWindow = rowDateString(row.date) >= cutoffStr;
+    // lastTrained uses set presence, not volume, so bodyweight sets still
+    // register a training event.
+    for (const g of groups) {
+      if (!lastTrainedDate[g] || rowDate > lastTrainedDate[g]) {
+        lastTrainedDate[g] = rowDate;
+      }
+    }
+
+    if (setVolume === 0) continue;
+
+    const inWindow = rowDate >= cutoffStr;
+    const inSevenDays = rowDate >= sevenDayCutoffStr;
     for (const g of groups) {
       baselineVolume[g] += setVolume;
       if (inWindow) windowVolume[g] += setVolume;
+      if (inSevenDays) {
+        sevenDayVolume[g] += setVolume;
+        sevenDaySets[g] += 1;
+        const name = row.exercise_name || '';
+        if (name) {
+          const prev = perExerciseVolume[g].get(name) || 0;
+          perExerciseVolume[g].set(name, prev + setVolume);
+        }
+      }
     }
   }
 
@@ -127,7 +184,51 @@ export async function getMuscleVolumes(userId, range) {
     ? windowVolume
     : baselineVolume;
 
-  return rankNormalize(totalsForRanking, STRENGTH_GROUPS);
+  const volumes = rankNormalize(totalsForRanking, STRENGTH_GROUPS);
+
+  // Build details payload. todayStr is the server's local today — same
+  // reference used by the baseline window, so days-ago math stays consistent.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayStr = fmtDate(today);
+
+  const details = {};
+  for (const g of STRENGTH_GROUPS) {
+    const lastDate = lastTrainedDate[g];
+    if (!lastDate) {
+      details[g] = zeroDetail();
+      continue;
+    }
+    const daysSince = Math.max(
+      0,
+      Math.round(
+        (new Date(todayStr).getTime() - new Date(lastDate).getTime()) /
+          86400000
+      )
+    );
+
+    const sevenVol = sevenDayVolume[g];
+    const volumeLabel =
+      sevenVol > 0 ? `${sevenVol.toLocaleString('en-US')} kg this week` : '—';
+
+    let topExercise = '—';
+    let topVol = 0;
+    for (const [name, vol] of perExerciseVolume[g]) {
+      if (vol > topVol) {
+        topVol = vol;
+        topExercise = name;
+      }
+    }
+
+    details[g] = {
+      lastTrained: humanRelativeDays(daysSince),
+      volumeLabel,
+      topExercise,
+      setsThisWeek: sevenDaySets[g],
+    };
+  }
+
+  return { volumes, details };
 }
 
 // ─── Flexibility ────────────────────────────────────────────────────────

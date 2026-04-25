@@ -19,6 +19,7 @@ import dashboardRoutes from './routes/dashboard.js';
 import exercisesRoutes from './routes/exercises.js';
 import routinesRoutes from './routes/routines.js';
 import bodyMapRoutes from './routes/bodyMap.js';
+import homeRoutes from './routes/home.js';
 
 const app = express();
 
@@ -46,6 +47,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/exercises', exercisesRoutes);
 app.use('/api/routines', routinesRoutes);
 app.use('/api/body-map', bodyMapRoutes);
+app.use('/api/home', homeRoutes);
 
 app.use(errorHandler);
 
