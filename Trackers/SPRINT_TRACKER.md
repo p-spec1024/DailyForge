@@ -1,7 +1,8 @@
 # DailyForge — Sprint Tracker
 
-**28 tickets + 1 health check shipped across 6 sprints (React PWA).**
-**Sprint 7+: Flutter rebuild for Android.**
+**28 tickets shipped across Sprints 1-6 (React PWA, archived).**
+**Sprints 7-10 shipped (Flutter rebuild). Sprint 10 closed Apr 25, 2026.**
+**Sprint 11 next: 5-phase orchestrator, polish, Google Play submission.**
 
 ---
 
@@ -19,19 +20,26 @@
 - Native performance for media-heavy app
 - Used by Down Dog (our main competitor)
 
-### Folder Structure
+### Folder Structure (Updated Apr 25, 2026 — Monorepo)
 ```
 D:\projects\
-├── dailyforge/              ← Keep for backend + reference
-│   ├── client/              ← OLD React app (reference only)
-│   ├── server/              ← Backend API (KEEP FOREVER)
-│   └── Trackers/            ← All tracker files
+├── dailyforge\              ← Active monorepo (single source of truth)
+│   ├── app\                 ← Flutter app (was D:\projects\dailyforge_flutter)
+│   │   ├── lib\
+│   │   ├── android\
+│   │   ├── assets\
+│   │   └── pubspec.yaml
+│   ├── server\              ← Backend API (unchanged)
+│   ├── Trackers\            ← All tracker files
+│   └── docs\                ← Blueprint v5
 │
-└── dailyforge_flutter/      ← NEW Flutter app (Sprint 7+)
-    ├── lib/
-    ├── android/
-    └── pubspec.yaml
+└── _archive\                ← Backups (do not modify)
+    ├── dailyforge-react-pwa-2026-04-24.zip
+    ├── dailyforge-backend-full-2026-04-24.zip
+    └── dailyforge-flutter-full-2026-04-24.zip
 ```
+
+**React PWA archived:** GitHub repo `dailyforge_flutter` is read-only archived; React `client/` folder zipped to `_archive/`.
 
 ### Flutter Project Status
 - ✅ Flutter installed (3.41.6)
