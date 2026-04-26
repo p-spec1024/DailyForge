@@ -392,6 +392,13 @@ UPDATE exercises SET tracking_type = 'duration'
 WHERE tracking_type = 'weight_reps'
   AND default_duration_secs IS NOT NULL
   AND default_reps IS NULL;
+
+-- S11-T1: Approach 5 breathwork tagging — duration ranges and session-position compatibility
+ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS duration_min INT;
+ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS duration_max INT;
+ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS pre_workout_compatible BOOLEAN;
+ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS post_workout_compatible BOOLEAN;
+ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS standalone_compatible BOOLEAN;
 `;
 
 const indexes = `
