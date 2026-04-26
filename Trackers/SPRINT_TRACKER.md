@@ -2,7 +2,38 @@
 
 **28 tickets shipped across Sprints 1-6 (React PWA, archived).**
 **Sprints 7-10 shipped (Flutter rebuild). Sprint 10 closed Apr 25, 2026.**
-**Sprint 11 next: 5-phase orchestrator, polish, Google Play submission.**
+**Sprint 11 REDIRECTED Apr 26, 2026 — Approach 5 pivot. Original 5-phase-as-flagship scope superseded.**
+
+---
+
+## ⚠️ Sprint 11 REDIRECTED — Approach 5 Pivot (Apr 26, 2026)
+
+**Original Sprint 11 scope is OBSOLETE.** Strategic planning session on Apr 26, 2026 produced a fundamental product-direction change.
+
+### What changed
+- DailyForge pivoted from **"5-phase session as flagship daily experience"** to **plan-first home page with cross-pillar focus areas (Approach 5)**.
+- The 5-phase session is now **one mode among several**, not the home page identity.
+- Google Play submission is **no longer a forcing function** on Sprint 11 — build it right, then ship.
+
+### Source of truth
+**`Trackers/PRE_SPRINT_11_PLANNING.md`** — full strategic decisions doc. Read this before writing any Sprint 11+ ticket prompt.
+
+### Sprint 11+ breakdown
+
+**Update Apr 26, 2026 (post-S11-T1):** Sprint 11 scope is now locked — see Sprint 11 section below for the 4-ticket breakdown (T1 shipped, T2–T4 pending). The 9-item sequence below maps roughly across Sprints 11–16; **Sprint 12+ remains TBD** pending a dedicated planning session.
+
+The full Approach 5 sprint sequence has not yet been designed. Next planning session: "lets continue dailyforge — sprint breakdown for Approach 5". The sprint plan needs to sequence:
+1. Breathwork tagging (content work — 49 techniques, schema in PRE_SPRINT_11_PLANNING.md §4)
+2. Focus area data model (body-focus + state-focus schema)
+3. Suggestion engine (focus + level → session)
+4. Weekly plan UI (calendar view, day-by-day focus picker)
+5. Session composer (build-your-own across pillars)
+6. New home page (today's planned session, hybrid suggest+build)
+7. 5-phase orchestrator (preserved, repositioned as one of several modes)
+8. Onboarding flow (level + initial plan)
+9. Polish + Google Play submission
+
+Roughly 4-6 sprints of work. Original Sprint 11 ticket list (below, struck through) is parked pending the new breakdown.
 
 ---
 
@@ -124,7 +155,15 @@ D:\projects\
 | 5c-a | - Home Real Data Wiring (heatmap / flexibility / recent-wins) | ✅ Done | Home page wired to real backend. 3 rounds of iterative fixes (error handling, heatmap colors, selection behavior, retry spinner). Visual polish deferred — figure washed out on cream background is a native renderer lighting issue, not a color constant issue. See FUTURE_SCOPE #110/#111. Branch `s10-t5c-a`, head `f6dd354`. |
 | 5c-b | - Remaining Home Sections (pillars / stats / weekly chart / footer) | ✅ Done Apr 24, 2026 | Three-pillar home section (Strength / Yoga / Breathwork cards), Full Session placeholder (disabled, "Available in Sprint 11"), stats row, 4-week stacked chart, inspirational footer. Also shipped: FUTURE_SCOPE #107 (api_service ClientException rewrap) and #112 (muscle-mode card wired to real backend via extended muscle-volumes endpoint). 125/0 smoke test pass. Device verified on Android. Branch `s10-t5c-b`, head `4f244f2`. |
 
-**Status (Apr 24):** Sprint 10 complete. All 5 tickets + 4 sub-tickets (5-prep / 5a / 5b / 5c-a / 5c-b) shipped. Ready for Sprint 11 T1 (5-phase orchestrator).
+**Status (Apr 24):** Sprint 10 complete. All 5 tickets + 4 sub-tickets (5-prep / 5a / 5b / 5c-a / 5c-b) shipped.
+
+**Note (Apr 26, 2026):** Several Sprint 10 deliverables were designed under the old "5-phase-as-flagship" model. They still work, but their *role* on the home page changes under Approach 5:
+- **Three-pillar home cards (5c-b):** Will likely be reworked under Approach 5 — pillars become composition surfaces rather than the primary home navigation. Treat as transitional UI.
+- **Full Session placeholder (5c-b):** "Available in Sprint 11" copy is now misleading. The 5-phase session ships eventually, but as one mode among several, not the home page identity.
+- **3D body map (5a–5c-a):** Role TBD under Approach 5. Could remain as a focus-picker shortcut ("tap a muscle to plan that focus area") or become a profile/analytics surface. Decision deferred to UI specifics planning session.
+- **Stats row + weekly chart:** Likely preserved largely as-is. Reframe under Approach 5 as "execution telemetry" rather than primary home content.
+
+These are not regressions — Sprint 10 work is valid and shipped. They're flagged here so future tickets can reference them with eyes open about the redirection.
 
 ---
 
@@ -160,20 +199,35 @@ D:\projects\
 
 - **Apr 24, 2026 learning:** For tickets where real-device verification is the acceptance bar, Claude Code should not auto-commit on "code done / flutter analyze clean." Device behavior can diverge from what the code looks correct for (e.g. race conditions, package quirks, renderer limitations). New pattern: Claude Code builds and stops, Prashob runs device test, then greenlights commit or asks for revert. Prevents broken commits from entering branch history.
 
+- **Apr 26, 2026 strategic learning:** "5-phase session as flagship daily experience" was an unproven structural assumption that no successful competitor validates. Down Dog, Peloton, Apple Fitness+, and Othership all use pillar-first / category-first home pages. Forcing every user into a 50-65 minute integrated session as the daily default would have alienated the 75% of users who fall outside the integrator archetype (strength-first, yoga-first, breathwork-first). Pivoted to Approach 5 — plan-first with cross-pillar focus areas — before locking Sprint 11 code. General principle: pressure-test structural assumptions against multiple user archetypes before building. If one archetype is implicitly assumed, the design has a blind spot.
+
+- **Apr 26, 2026 strategic learning:** Ancient-tradition justification for a modern synthesis is shakier than it looks. Tristhana is breath + posture + gaze *simultaneously inside one pose*, not breath → yoga → strength sequentially. Patanjali's eight limbs include asana/pranayama/dhyana but not strength training. Multiple traditions inspire the breath-movement-stillness triad, but no single tradition prescribes the specific 5-phase order. Lead with science (concurrent training, HRV, mobility-before-strength research), use ancient practice as inspiration only — not as the marketing claim.
+
 ---
 
-## Sprint 11 — 5-Phase Session + Launch — Planned (dates TBD)
+## Sprint 11 — Approach 5 Foundations (Data Layer) — Apr 26, 2026 ⏳ IN PROGRESS
 
-**Goal:** Ship the differentiator and submit to Google Play.
+**Goal:** Lay the data-layer foundations for the Approach 5 home page (cross-pillar focus areas + suggestion engine). Sprint 12 builds the suggestion engine on top of these foundations.
+
+**Source of truth:** `Trackers/PRE_SPRINT_11_PLANNING.md` for strategy. Sprint 12+ breakdown TBD.
 
 | # | Ticket | Status | Notes |
 |---|--------|--------|-------|
-| 1 | 5-Phase Session Integration | ⏳ Planned | Pre-session overview, orchestrator, auto-advance w/ 5s countdown, 5-phase summary |
-| 2 | Mid-Session Swap | ⏳ Planned | Yoga/breathwork swap during session |
-| 3 | Push Notifications | ⏳ Planned | Streak warnings, reminders |
-| 4 | Google Play Submission | ⏳ Planned | Store listing, APK build, screenshots using new home design |
+| 1 | Breathwork tagging — schema migration + seed null-fill | ✅ Shipped Apr 26, 2026 | 5 nullable columns added to `breathwork_techniques` (`duration_min`, `duration_max`, `pre_workout_compatible`, `post_workout_compatible`, `standalone_compatible`); seed writes null pending S11-T2. Commit `a407012` on `main`. |
+| 2 | Breathwork tagging — apply tags to all 49 techniques | ⏳ Next | Spec doc in flight from Claude.ai (planning artifact). Then prompt-and-execute. ~245 tag decisions (5 fields × 49 techniques). Populates the columns added in T1. |
+| 3 | Focus-area data model — `focus_areas` + `focus_content_compatibility` tables | ⏳ Pending | DB-only. Independent of T2; could run in parallel. Promotes FUTURE_SCOPE #123 from future scope. |
+| 4 | User level tracking — per-pillar level columns + history-based inference | ⏳ Pending | Promotes FUTURE_SCOPE #34 from future scope to launch-blocking. Required input for the suggestion engine. |
 
-**Note:** Sprint 11 starts *after* Sprint 10 T5a/b/c complete.
+### ⚠️ Original scope (NOW OBSOLETE — Apr 26, 2026 redirect)
+
+These tickets were planned under the old "5-phase-as-flagship" model. **They are no longer the Sprint 11 plan.** Kept here only as historical record.
+
+| # | Ticket (OBSOLETE) | Status | Notes |
+|---|------|--------|-------|
+| ~~1~~ | ~~5-Phase Session Integration~~ | ❌ Superseded | Pre-session overview, orchestrator, auto-advance w/ 5s countdown, 5-phase summary. **5-phase is now one mode among several, not the flagship.** |
+| ~~2~~ | ~~Mid-Session Swap~~ | ❌ Superseded | Yoga/breathwork swap during session. **Will fold into Approach 5 session player.** |
+| ~~3~~ | ~~Push Notifications~~ | ⏸️ Parked | Streak warnings, reminders. **Still valuable, will land in a later sprint.** |
+| ~~4~~ | ~~Google Play Submission~~ | ⏸️ Parked | Store listing, APK build, screenshots. **Will land at end of Approach 5 build, not Sprint 11.** |
 
 ---
 
@@ -194,6 +248,8 @@ D:\projects\
 - 1,015 exercises → Static PNG images
 - 35 complex exercises → Short MP4 videos
 - Total cost: ~$20 (Tripo AI Pro, 1 month)
+
+**Note (Apr 26, 2026):** Approach 5 pivot does not change the per-exercise media generation needs — exercises still need images and videos regardless of how the home page surfaces them. This track remains parallel and unaffected.
 
 ---
 
@@ -302,3 +358,4 @@ Ran `/health-check` after Sprint 6 completion. All 5 recommended fixes shipped o
 - After each ticket ships, update status to ✅ Done + date
 - At sprint retro, review what shipped and plan next sprint
 - Flutter rebuild uses same sprint process, different codebase
+- **As of Apr 26, 2026:** Sprint 11+ direction governed by `Trackers/PRE_SPRINT_11_PLANNING.md`. New sprint breakdown to be designed in dedicated planning session.
