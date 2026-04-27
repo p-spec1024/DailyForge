@@ -267,6 +267,41 @@ CREATE TABLE IF NOT EXISTS breathwork_logs (
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- S11-T3: Focus-area data model for Approach 5 suggestion engine.
+-- Three additive tables — no ALTER on existing tables. content_id in
+-- focus_content_compatibility is a soft-FK (exercises.id or
+-- breathwork_techniques.id depending on content_type); seed script verifies.
+CREATE TABLE IF NOT EXISTS focus_areas (
+  id            SERIAL PRIMARY KEY,
+  slug          VARCHAR(40) UNIQUE NOT NULL,
+  display_name  VARCHAR(80) NOT NULL,
+  focus_type    VARCHAR(10) NOT NULL CHECK (focus_type IN ('body', 'state')),
+  description   TEXT,
+  icon_name     VARCHAR(40),
+  sort_order    INT NOT NULL DEFAULT 0,
+  is_active     BOOLEAN NOT NULL DEFAULT true,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS focus_muscle_keywords (
+  id        SERIAL PRIMARY KEY,
+  focus_id  INT NOT NULL REFERENCES focus_areas(id) ON DELETE CASCADE,
+  keyword   VARCHAR(60) NOT NULL,
+  UNIQUE(focus_id, keyword)
+);
+
+CREATE TABLE IF NOT EXISTS focus_content_compatibility (
+  id           SERIAL PRIMARY KEY,
+  focus_id     INT NOT NULL REFERENCES focus_areas(id) ON DELETE CASCADE,
+  content_type VARCHAR(20) NOT NULL CHECK (content_type IN ('strength', 'yoga', 'breathwork')),
+  content_id   INT NOT NULL,
+  role         VARCHAR(20) NOT NULL CHECK (role IN ('main', 'warmup', 'cooldown', 'bookend_open', 'bookend_close')),
+  weight       DECIMAL(3,2),
+  notes        TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(focus_id, content_type, content_id, role)
+);
 `;
 
 const alterations = `
@@ -446,6 +481,17 @@ CREATE INDEX IF NOT EXISTS idx_breathwork_prefs_user ON user_breathwork_prefs(us
 CREATE INDEX IF NOT EXISTS idx_user_routines_user ON user_routines(user_id);
 CREATE INDEX IF NOT EXISTS idx_routine_exercises_routine ON user_routine_exercises(routine_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_routine ON sessions(routine_id);
+
+-- S11-T3: Focus-area indexes.
+CREATE INDEX IF NOT EXISTS idx_focus_areas_type_active
+  ON focus_areas(focus_type, is_active)
+  WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_focus_muscle_keywords_focus
+  ON focus_muscle_keywords(focus_id);
+CREATE INDEX IF NOT EXISTS idx_fcc_focus_role_type
+  ON focus_content_compatibility(focus_id, role, content_type);
+CREATE INDEX IF NOT EXISTS idx_fcc_content
+  ON focus_content_compatibility(content_type, content_id);
 `;
 
 async function migrate() {
