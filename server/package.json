@@ -10,7 +10,8 @@
     "db:seed": "node src/db/seeds/index.js",
     "db:seed:strength": "node src/db/seeds/seed-strength-exercises.js",
     "db:seed:breathwork": "node src/db/seeds/seed-breathwork-techniques.js",
-    "db:seed:focus-areas": "node src/db/seeds/seed-focus-areas.js"
+    "db:seed:focus-areas": "node src/db/seeds/seed-focus-areas.js",
+    "db:seed:pillar-levels-backfill": "node src/db/seeds/seed-pillar-levels-backfill.js"
   },
   "dependencies": {
     "@imagekit/nodejs": "^7.4.0",
