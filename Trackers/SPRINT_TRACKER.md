@@ -205,19 +205,33 @@ These are not regressions — Sprint 10 work is valid and shipped. They're flagg
 
 ---
 
-## Sprint 11 — Approach 5 Foundations (Data Layer) — Apr 26, 2026 ⏳ IN PROGRESS
+## Sprint 11 — Approach 5 Foundations (Data Layer) — Apr 26–27, 2026 ✅ CLOSED Apr 27, 2026
 
 **Goal:** Lay the data-layer foundations for the Approach 5 home page (cross-pillar focus areas + suggestion engine). Sprint 12 builds the suggestion engine on top of these foundations.
 
 **Source of truth:** `Trackers/PRE_SPRINT_11_PLANNING.md` for strategy. Sprint 12+ breakdown TBD.
+
+### Sprint 11 close
+
+All 5 tickets shipped (T1, T1.5, T2, T3, T4). Data-layer foundations now in place for the Approach 5 home page and the Sprint 12 suggestion engine.
+
+Foundations delivered:
+- Breathwork tagging schema + per-difficulty duration ranges (T1, T1.5)
+- Breathwork content tagged across all 49 techniques (T2, 9 columns × 49 rows)
+- Focus-area data model: 17 focus areas, 35 muscle keywords, 54 compatibility rows (T3)
+- User per-pillar level tracking + research-grounded inference (T4)
+
+Branch `s11-t3` accumulates both T3 and T4 commits — sprint-close merge to `main` is the next operation. **No `s11-t4` branch was created** — Sprint 11 was chained on `s11-t3` from T3 onward (matching the Sprint 10 T5b/T5c-a/T5c-b pattern).
+
+**Next planning gate:** Personalization algorithm. Sprint 12 (suggestion engine) cannot kick off until this is decided. Open the next planning session with: "lets continue dailyforge — personalization algorithm planning."
 
 | # | Ticket | Status | Notes |
 |---|--------|--------|-------|
 | 1 | Breathwork tagging — schema migration + seed null-fill | ✅ Shipped Apr 26, 2026 | 5 nullable columns added to `breathwork_techniques` (`duration_min`, `duration_max`, `pre_workout_compatible`, `post_workout_compatible`, `standalone_compatible`); seed writes null pending S11-T2. Commit `a407012` on `main`. |
 | 1.5 | Schema migration: per-difficulty duration columns | ✅ Shipped Apr 27, 2026 | Drops `duration_min`/`duration_max` (added in T1, verified NULL across all 49 rows before drop — no data loss); adds 6 new nullable INT columns: `beginner_/intermediate_/advanced_duration_min/max`. Required by S11-T2 v3 spec to model progression-by-difficulty. Kept inline-`alterations` pattern in `migrate.js`; migrations-folder refactor deferred. Branch `feature/s11-t1.5-per-difficulty-duration` → `main`. |
 | 2 | Breathwork tagging — apply tags to all 49 techniques | ✅ Shipped Apr 27, 2026 | Populates 9 columns on all 49 rows per `Trackers/S11-T2-tagging-spec.md` (v3, locked Apr 27, 2026): 6 per-difficulty duration columns (B/I/A × min/max — beginner NULL for the 8 advanced/red and intermediate-gated techniques per Decision 3) + 3 booleans (pre/post/standalone). Distribution: 20 pre-true / 29 post-true / 7 standalone-false. Conventions 1–4 (incl. v3 amendment for divergent-duration cluster mates) all verified row-by-row. Seed values live in a `TAGS_BY_NAME` lookup table; seed throws on any unmapped technique name. Spec + 3 upstream artifacts (research notes, framework decisions, breathwork list) committed alongside. Commit `f4cd69c` on `main`. |
-| 3 | Focus-area data model — `focus_areas` + `focus_content_compatibility` tables | ⏳ Pending | DB-only. Independent of T2; could run in parallel. Promotes FUTURE_SCOPE #123 from future scope. |
-| 4 | User level tracking — per-pillar level columns + history-based inference | ⏳ Pending | Promotes FUTURE_SCOPE #34 from future scope to launch-blocking. Required input for the suggestion engine. |
+| 3 | Focus-area data model — `focus_areas` + `focus_muscle_keywords` + `focus_content_compatibility` tables | ✅ Shipped Apr 27, 2026 | Schema + seed for Approach 5 focus areas. New tables: `focus_areas` (17 rows: 12 body + 5 state), `focus_muscle_keywords` (35 rows, 10 body focuses tagged — `mobility` and `full_body` are special-cased in S12 service-layer logic per spec), `focus_content_compatibility` (54 rows, role-tagged — 7 energize + 15 calm + 3 focus + 3 sleep + 2 recover state-mains, plus 24 body-focus bookends; `weight` column nullable and unpopulated until S12). Hybrid materialization per spec — body-focus content derived from existing `exercises.target_muscles` at query time; state-focus materialized. No API endpoint, no engine logic (those land in S12). Branch `s11-t3`, commit `6c12604`. Spec: `Trackers/S11-T3-focus-area-spec.md`. Closes FUTURE_SCOPE #123. |
+| 4 | User level tracking — per-pillar level columns + history-based inference | ✅ Shipped Apr 27, 2026 | Final Sprint 11 ticket. New `user_pillar_levels` table + 2 PL/pgSQL functions (`recompute_user_pillar_level`, `recompute_all_user_pillar_levels`) for the Sprint 12 suggestion engine. Research-grounded thresholds (ExRx, StrengthLevel, Santos-Junior 2021, contemporary yoga + pranayama literature). Promotion-only inference; `declared` / `manual_override` sources respected. Sex-specific strength thresholds default to male until `users.sex` exists (see followups). Backfill ran on dev users; production spot-check pending post-deploy. Branch `s11-t3` (sprint-chained), commit `e61e4b3`. Spec: `Trackers/S11-T4-level-tracking-spec.md`. Closes FUTURE_SCOPE #34. |
 
 ### ⚠️ Original scope (NOW OBSOLETE — Apr 26, 2026 redirect)
 

@@ -267,6 +267,292 @@ CREATE TABLE IF NOT EXISTS breathwork_logs (
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- S11-T3: Focus-area data model for Approach 5 suggestion engine.
+-- Three additive tables — no ALTER on existing tables. content_id in
+-- focus_content_compatibility is a soft-FK (exercises.id or
+-- breathwork_techniques.id depending on content_type); seed script verifies.
+CREATE TABLE IF NOT EXISTS focus_areas (
+  id            SERIAL PRIMARY KEY,
+  slug          VARCHAR(40) UNIQUE NOT NULL,
+  display_name  VARCHAR(80) NOT NULL,
+  focus_type    VARCHAR(10) NOT NULL CHECK (focus_type IN ('body', 'state')),
+  description   TEXT,
+  icon_name     VARCHAR(40),
+  sort_order    INT NOT NULL DEFAULT 0,
+  is_active     BOOLEAN NOT NULL DEFAULT true,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS focus_muscle_keywords (
+  id        SERIAL PRIMARY KEY,
+  focus_id  INT NOT NULL REFERENCES focus_areas(id) ON DELETE CASCADE,
+  keyword   VARCHAR(60) NOT NULL,
+  UNIQUE(focus_id, keyword)
+);
+
+CREATE TABLE IF NOT EXISTS focus_content_compatibility (
+  id           SERIAL PRIMARY KEY,
+  focus_id     INT NOT NULL REFERENCES focus_areas(id) ON DELETE CASCADE,
+  content_type VARCHAR(20) NOT NULL CHECK (content_type IN ('strength', 'yoga', 'breathwork')),
+  content_id   INT NOT NULL,
+  role         VARCHAR(20) NOT NULL CHECK (role IN ('main', 'warmup', 'cooldown', 'bookend_open', 'bookend_close')),
+  weight       DECIMAL(3,2),
+  notes        TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(focus_id, content_type, content_id, role)
+);
+
+-- S11-T4: Per-pillar level tracking. One row per user per pillar.
+-- source governs whether inference is allowed to overwrite (declared and
+-- manual_override are user-stated and never auto-changed).
+-- Promotion-only by design — see recompute_user_pillar_level() below.
+CREATE TABLE IF NOT EXISTS user_pillar_levels (
+  id          SERIAL PRIMARY KEY,
+  user_id     INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  pillar      VARCHAR(20) NOT NULL CHECK (pillar IN ('strength', 'yoga', 'breathwork')),
+  level       VARCHAR(15) NOT NULL DEFAULT 'beginner' CHECK (level IN ('beginner', 'intermediate', 'advanced')),
+  source      VARCHAR(20) NOT NULL DEFAULT 'inferred' CHECK (source IN ('declared', 'inferred', 'manual_override')),
+  computed_at TIMESTAMPTZ,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, pillar)
+);
+`;
+
+const s11t4Functions = `
+-- S11-T4: Single-pillar inference.
+-- Reads user history for the named pillar, applies research-grounded
+-- thresholds (see Trackers/S11-T4-level-tracking-spec.md), and UPSERTs
+-- the row in user_pillar_levels with promotion-only semantics.
+CREATE OR REPLACE FUNCTION recompute_user_pillar_level(
+  p_user_id INT,
+  p_pillar  VARCHAR(20)
+) RETURNS user_pillar_levels
+LANGUAGE plpgsql
+AS $func$
+DECLARE
+  v_existing       user_pillar_levels;
+  v_computed_level VARCHAR(15) := 'beginner';
+  v_session_count  INT := 0;
+  v_weeks_active   NUMERIC := 0;
+  v_first_date     DATE;
+  v_weight_kg      NUMERIC;
+  v_bench_1rm      NUMERIC;
+  v_squat_1rm      NUMERIC;
+  v_dl_1rm         NUMERIC;
+  v_int_distinct   INT := 0;
+  v_int_total      INT := 0;
+  v_first_int_date DATE;
+  v_int_weeks      NUMERIC := 0;
+  v_adv_distinct   INT := 0;
+  v_adv_total      INT := 0;
+  v_result         user_pillar_levels;
+  v_level_rank     INT;
+  v_existing_rank  INT;
+BEGIN
+  IF p_pillar NOT IN ('strength', 'yoga', 'breathwork') THEN
+    RAISE EXCEPTION 'Invalid pillar: %', p_pillar;
+  END IF;
+
+  SELECT * INTO v_existing
+    FROM user_pillar_levels
+   WHERE user_id = p_user_id AND pillar = p_pillar;
+
+  -- Never overwrite user-stated levels.
+  IF v_existing.id IS NOT NULL AND v_existing.source IN ('declared', 'manual_override') THEN
+    RETURN v_existing;
+  END IF;
+
+  IF p_pillar = 'strength' THEN
+    SELECT COUNT(*)::INT, MIN(date)
+      INTO v_session_count, v_first_date
+      FROM sessions
+     WHERE user_id = p_user_id
+       AND type IN ('strength', '5phase')
+       AND completed = true;
+
+    IF v_first_date IS NOT NULL THEN
+      v_weeks_active := GREATEST(0, (CURRENT_DATE - v_first_date)::NUMERIC / 7);
+    END IF;
+
+    SELECT weight_kg INTO v_weight_kg
+      FROM body_measurements
+     WHERE user_id = p_user_id
+     ORDER BY measured_at DESC
+     LIMIT 1;
+
+    SELECT MAX(epc.estimated_1rm) INTO v_bench_1rm
+      FROM exercise_progress_cache epc
+      JOIN exercises e ON e.id = epc.exercise_id
+     WHERE epc.user_id = p_user_id
+       AND epc.kind = 'strength'
+       AND epc.estimated_1rm IS NOT NULL
+       AND e.name ILIKE '%bench press%'
+       AND e.name NOT ILIKE '%dumbbell%'
+       AND e.name NOT ILIKE '%incline%'
+       AND e.name NOT ILIKE '%decline%';
+
+    SELECT MAX(epc.estimated_1rm) INTO v_squat_1rm
+      FROM exercise_progress_cache epc
+      JOIN exercises e ON e.id = epc.exercise_id
+     WHERE epc.user_id = p_user_id
+       AND epc.kind = 'strength'
+       AND epc.estimated_1rm IS NOT NULL
+       AND e.name ILIKE '%squat%'
+       AND e.name ILIKE '%barbell%'
+       AND e.name NOT ILIKE '%front%'
+       AND e.name NOT ILIKE '%goblet%';
+
+    SELECT MAX(epc.estimated_1rm) INTO v_dl_1rm
+      FROM exercise_progress_cache epc
+      JOIN exercises e ON e.id = epc.exercise_id
+     WHERE epc.user_id = p_user_id
+       AND epc.kind = 'strength'
+       AND epc.estimated_1rm IS NOT NULL
+       AND e.name ILIKE '%deadlift%'
+       AND e.name NOT ILIKE '%romanian%'
+       AND e.name NOT ILIKE '%stiff%'
+       AND e.name NOT ILIKE '%sumo%';
+
+    -- Male thresholds (users.sex absent — see spec §Sex handling).
+    -- Advanced: volume-floor AND any advanced ratio.
+    IF v_session_count >= 50
+       AND v_weeks_active >= 78
+       AND v_weight_kg IS NOT NULL
+       AND (
+            (v_bench_1rm IS NOT NULL AND v_bench_1rm >= 1.5  * v_weight_kg)
+         OR (v_squat_1rm IS NOT NULL AND v_squat_1rm >= 1.75 * v_weight_kg)
+         OR (v_dl_1rm    IS NOT NULL AND v_dl_1rm    >= 2.0  * v_weight_kg)
+       ) THEN
+      v_computed_level := 'advanced';
+    -- Intermediate: Path A (volume floor) OR Path B (performance gate).
+    ELSIF (v_session_count >= 12 AND v_weeks_active >= 8)
+       OR (v_weight_kg IS NOT NULL AND (
+              (v_bench_1rm IS NOT NULL AND v_bench_1rm >= 1.0  * v_weight_kg)
+           OR (v_squat_1rm IS NOT NULL AND v_squat_1rm >= 1.25 * v_weight_kg)
+           OR (v_dl_1rm    IS NOT NULL AND v_dl_1rm    >= 1.5  * v_weight_kg)
+          )) THEN
+      v_computed_level := 'intermediate';
+    END IF;
+
+  ELSIF p_pillar = 'yoga' THEN
+    SELECT COUNT(*)::INT, MIN(date)
+      INTO v_session_count, v_first_date
+      FROM sessions
+     WHERE user_id = p_user_id
+       AND type = 'yoga'
+       AND completed = true;
+
+    IF v_first_date IS NOT NULL THEN
+      v_weeks_active := GREATEST(0, (CURRENT_DATE - v_first_date)::NUMERIC / 7);
+    END IF;
+
+    IF v_session_count >= 100 AND v_weeks_active >= 78 THEN
+      v_computed_level := 'advanced';
+    ELSIF v_session_count >= 25 AND v_weeks_active >= 12 THEN
+      v_computed_level := 'intermediate';
+    END IF;
+
+  ELSIF p_pillar = 'breathwork' THEN
+    SELECT COUNT(*)::INT, MIN(created_at)::DATE
+      INTO v_session_count, v_first_date
+      FROM breathwork_sessions
+     WHERE user_id = p_user_id
+       AND completed = true;
+
+    IF v_first_date IS NOT NULL THEN
+      v_weeks_active := GREATEST(0, (CURRENT_DATE - v_first_date)::NUMERIC / 7);
+    END IF;
+
+    SELECT
+        COUNT(DISTINCT bs.technique_id)::INT,
+        COUNT(*)::INT,
+        MIN(bs.created_at)::DATE
+      INTO v_int_distinct, v_int_total, v_first_int_date
+      FROM breathwork_sessions bs
+      JOIN breathwork_techniques bt ON bt.id = bs.technique_id
+     WHERE bs.user_id = p_user_id
+       AND bs.completed = true
+       AND bt.difficulty = 'intermediate';
+
+    IF v_first_int_date IS NOT NULL THEN
+      v_int_weeks := GREATEST(0, (CURRENT_DATE - v_first_int_date)::NUMERIC / 7);
+    END IF;
+
+    SELECT
+        COUNT(DISTINCT bs.technique_id)::INT,
+        COUNT(*)::INT
+      INTO v_adv_distinct, v_adv_total
+      FROM breathwork_sessions bs
+      JOIN breathwork_techniques bt ON bt.id = bs.technique_id
+     WHERE bs.user_id = p_user_id
+       AND bs.completed = true
+       AND bt.difficulty = 'advanced';
+
+    -- Advanced: ≥5 advanced sessions across ≥2 distinct techniques AND
+    -- ≥12 weeks since first intermediate-tier completion (conjunction).
+    IF v_adv_total >= 5 AND v_adv_distinct >= 2 AND v_int_weeks >= 12 THEN
+      v_computed_level := 'advanced';
+    -- Intermediate: Path A (technique exposure) OR Path B (volume floor).
+    ELSIF (v_int_total >= 8 AND v_int_distinct >= 2)
+       OR (v_session_count >= 30 AND v_weeks_active >= 12) THEN
+      v_computed_level := 'intermediate';
+    END IF;
+  END IF;
+
+  -- INSERT if absent.
+  IF v_existing.id IS NULL THEN
+    INSERT INTO user_pillar_levels (user_id, pillar, level, source, computed_at, updated_at)
+    VALUES (p_user_id, p_pillar, v_computed_level, 'inferred', NOW(), NOW())
+    RETURNING * INTO v_result;
+    RETURN v_result;
+  END IF;
+
+  -- Promotion-only update (never demote).
+  v_level_rank := CASE v_computed_level
+                    WHEN 'beginner'     THEN 1
+                    WHEN 'intermediate' THEN 2
+                    WHEN 'advanced'     THEN 3
+                  END;
+  v_existing_rank := CASE v_existing.level
+                    WHEN 'beginner'     THEN 1
+                    WHEN 'intermediate' THEN 2
+                    WHEN 'advanced'     THEN 3
+                  END;
+
+  IF v_level_rank > v_existing_rank THEN
+    UPDATE user_pillar_levels
+       SET level       = v_computed_level,
+           source      = 'inferred',
+           computed_at = NOW(),
+           updated_at  = NOW()
+     WHERE id = v_existing.id
+     RETURNING * INTO v_result;
+  ELSE
+    -- Same or lower computed level — only bump computed_at, leave level alone.
+    UPDATE user_pillar_levels
+       SET computed_at = NOW()
+     WHERE id = v_existing.id
+     RETURNING * INTO v_result;
+  END IF;
+
+  RETURN v_result;
+END;
+$func$;
+
+-- S11-T4: Wrapper — recomputes all three pillars for one user.
+CREATE OR REPLACE FUNCTION recompute_all_user_pillar_levels(p_user_id INT)
+RETURNS SETOF user_pillar_levels
+LANGUAGE plpgsql
+AS $func$
+BEGIN
+  RETURN QUERY SELECT * FROM recompute_user_pillar_level(p_user_id, 'strength');
+  RETURN QUERY SELECT * FROM recompute_user_pillar_level(p_user_id, 'yoga');
+  RETURN QUERY SELECT * FROM recompute_user_pillar_level(p_user_id, 'breathwork');
+  RETURN;
+END;
+$func$;
 `;
 
 const alterations = `
@@ -446,6 +732,21 @@ CREATE INDEX IF NOT EXISTS idx_breathwork_prefs_user ON user_breathwork_prefs(us
 CREATE INDEX IF NOT EXISTS idx_user_routines_user ON user_routines(user_id);
 CREATE INDEX IF NOT EXISTS idx_routine_exercises_routine ON user_routine_exercises(routine_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_routine ON sessions(routine_id);
+
+-- S11-T3: Focus-area indexes.
+CREATE INDEX IF NOT EXISTS idx_focus_areas_type_active
+  ON focus_areas(focus_type, is_active)
+  WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_focus_muscle_keywords_focus
+  ON focus_muscle_keywords(focus_id);
+CREATE INDEX IF NOT EXISTS idx_fcc_focus_role_type
+  ON focus_content_compatibility(focus_id, role, content_type);
+CREATE INDEX IF NOT EXISTS idx_fcc_content
+  ON focus_content_compatibility(content_type, content_id);
+
+-- S11-T4: Per-user lookup index for the inference function.
+CREATE INDEX IF NOT EXISTS idx_upl_user
+  ON user_pillar_levels(user_id);
 `;
 
 async function migrate() {
@@ -455,6 +756,8 @@ async function migrate() {
   await pool.query(alterations);
   console.log('Creating indexes...');
   await pool.query(indexes);
+  console.log('Defining functions...');
+  await pool.query(s11t4Functions);
   console.log('Migrations complete.');
   await pool.end();
 }
