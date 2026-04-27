@@ -1246,6 +1246,65 @@ const techniques = [
 ];
 
 // ---------------------------------------------------------------------------
+// S11-T2 tagging spec values (v3, locked Apr 27, 2026)
+// Source of truth: Trackers/S11-T2-tagging-spec.md
+// Each row: [B_min, B_max, I_min, I_max, A_min, A_max, pre, post, std]
+// `null` for beginner range = technique gated to intermediate+ (Decision 3)
+// ---------------------------------------------------------------------------
+
+const TAGS_BY_NAME = {
+  'Nadi Shodhana':            [5,    10,   10, 15, 15, 25,  true,  true,  true],
+  'Anulom Vilom':             [5,    10,   10, 15, 15, 20,  true,  true,  true],
+  'Kapalabhati':              [1,    3,    5,  10, 10, 30,  true,  false, true],
+  'Bhastrika':                [3,    5,    5,  10, 10, 15,  true,  false, true],
+  'Bhramari':                 [5,    10,   10, 15, 15, 20,  false, true,  true],
+  'Ujjayi':                   [3,    5,    10, 15, 15, 30,  true,  true,  true],
+  'Sitali':                   [1,    3,    5,  10, 10, 15,  false, true,  true],
+  'Sitkari':                  [1,    3,    5,  10, 10, 15,  false, true,  true],
+  'Surya Bhedana':            [2,    3,    5,  10, 10, 15,  true,  false, true],
+  'Chandra Bhedana':          [3,    5,    5,  10, 10, 15,  false, true,  true],
+  'Dirga Pranayama':          [3,    5,    10, 15, 15, 20,  true,  true,  true],
+  'Sama Vritti':              [3,    5,    10, 15, 15, 25,  true,  true,  true],
+  'Visama Vritti':            [null, null, 5,  10, 10, 20,  false, true,  true],
+  'Udgeeth':                  [5,    10,   10, 15, 15, 30,  false, true,  true],
+  'Simhasana':                [1,    3,    2,  5,  3,  7,   false, false, false],
+  'Box Breathing':            [3,    5,    10, 15, 15, 25,  true,  true,  true],
+  '4-7-8 Breathing':          [1,    2,    3,  5,  5,  8,   false, true,  true],
+  'Wim Hof Method':           [null, null, 15, 20, 20, 30,  false, false, true],
+  'Physiological Sigh':       [1,    3,    3,  5,  5,  10,  false, false, false],
+  'Coherent Breathing':       [5,    10,   10, 20, 20, 30,  true,  true,  true],
+  'Resonant Breathing':       [5,    10,   10, 20, 20, 30,  true,  true,  true],
+  '2-to-1 Breathing':         [5,    10,   10, 15, 15, 20,  false, true,  true],
+  'Triangle Breathing':       [3,    5,    10, 15, 15, 20,  true,  true,  true],
+  'Extended Exhale':          [5,    10,   10, 15, 15, 20,  false, true,  true],
+  'Breath Counting':          [5,    10,   15, 20, 25, 45,  true,  true,  true],
+  'Cyclic Hyperventilation':  [3,    5,    5,  8,  8,  12,  true,  false, true],
+  '5-5-5-5 Square Breathing': [5,    10,   10, 20, 20, 30,  true,  true,  true],
+  'A52 Breath Method':        [5,    10,   10, 15, 15, 20,  true,  true,  true],
+  'Diaphragmatic Breathing':  [5,    10,   10, 15, 15, 30,  true,  true,  true],
+  'Pursed Lip Breathing':     [3,    5,    5,  10, 10, 15,  false, true,  true],
+  'Buteyko Method':           [10,   20,   20, 30, 30, 60,  false, false, true],
+  'Grounding Breath':         [1,    3,    3,  5,  5,  10,  false, true,  true],
+  'Stress Reset':             [1,    2,    1,  2,  1,  2,   false, false, false],
+  'Pain Management Breath':   [3,    10,   5,  15, 5,  15,  false, false, false],
+  'Anti-Anxiety Breath':      [3,    5,    5,  10, 10, 15,  false, true,  true],
+  'Sleep Preparation Breath': [1,    2,    3,  5,  5,  15,  false, true,  true],
+  'Morning Energizer':        [3,    8,    3,  8,  3,  8,   true,  false, true],
+  'Pre-Workout Activation':   [null, null, 3,  6,  3,  6,   true,  false, true],
+  'Between-Sets Recovery':    [1,    2,    1,  2,  1,  2,   false, false, false],
+  'Post-Workout Calm':        [5,    10,   5,  15, 10, 20,  false, true,  true],
+  'Focus Breath':             [3,    5,    10, 15, 15, 25,  true,  true,  true],
+  'Deep Sleep Induction':     [5,    10,   5,  15, 10, 20,  false, true,  true],
+  'Appetite Control':         [2,    5,    2,  5,  2,  5,   false, false, false],
+  'Craving Interrupt':        [2,    5,    2,  5,  2,  5,   false, false, false],
+  'Tummo':                    [null, null, 10, 15, 20, 55,  false, false, true],
+  'Kumbhaka':                 [null, null, 10, 15, 15, 25,  false, false, true],
+  'Holotropic Breathwork':    [null, null, 60, 90, 60, 180, false, false, true],
+  'Rebirthing Breath':        [null, null, 30, 60, 60, 90,  false, false, true],
+  'Apnea Training':           [null, null, 15, 25, 25, 40,  false, false, true],
+};
+
+// ---------------------------------------------------------------------------
 // Seed function
 // ---------------------------------------------------------------------------
 
@@ -1280,6 +1339,9 @@ async function seed() {
       let paramIndex = 1;
 
       for (const t of batch) {
+        const tags = TAGS_BY_NAME[t.name];
+        if (!tags) throw new Error(`Missing S11-T2 tags for technique: ${t.name}`);
+
         const placeholders = COLUMNS.map((col) => {
           const idx = paramIndex++;
           if (col === 'protocol') return `$${idx}::jsonb`;
@@ -1302,8 +1364,7 @@ async function seed() {
           t.contraindications,
           t.caution_note,
           t.source,
-          null, null, null, null, null, null, // S11-T1.5: beginner/intermediate/advanced _duration_min/_max — populated by S11-T2
-          null, null, null, // S11-T1: pre_workout_compatible, post_workout_compatible, standalone_compatible — populated by S11-T2
+          ...tags,
         );
       }
 
