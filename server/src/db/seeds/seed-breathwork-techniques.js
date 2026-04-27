@@ -1254,7 +1254,10 @@ const COLUMNS = [
   'name', 'sanskrit_name', 'tradition', 'category', 'purposes', 'difficulty',
   'safety_level', 'protocol', 'description', 'instructions', 'benefits',
   'contraindications', 'caution_note', 'source',
-  'duration_min', 'duration_max', 'pre_workout_compatible', 'post_workout_compatible', 'standalone_compatible',
+  'beginner_duration_min', 'beginner_duration_max',
+  'intermediate_duration_min', 'intermediate_duration_max',
+  'advanced_duration_min', 'advanced_duration_max',
+  'pre_workout_compatible', 'post_workout_compatible', 'standalone_compatible',
 ];
 
 async function seed() {
@@ -1299,7 +1302,8 @@ async function seed() {
           t.contraindications,
           t.caution_note,
           t.source,
-          null, null, null, null, null, // S11-T1: duration_min, duration_max, pre_workout_compatible, post_workout_compatible, standalone_compatible — populated by S11-T2
+          null, null, null, null, null, null, // S11-T1.5: beginner/intermediate/advanced _duration_min/_max — populated by S11-T2
+          null, null, null, // S11-T1: pre_workout_compatible, post_workout_compatible, standalone_compatible — populated by S11-T2
         );
       }
 
