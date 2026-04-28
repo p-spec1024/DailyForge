@@ -1,14 +1,14 @@
 # DailyForge — Future Scope
 
 **Triage completed: April 13, 2026**
-**Updated: April 27, 2026 — S11-T4 ship + Sprint 11 close; #34 closed; #136-#140 added (T4 followups)**
+**Updated: April 28, 2026 — #141 added (equipment column + filtering, surfaced from S12-T1 pre-flight inspection)**
 
 Features categorized for Android v1.0 launch vs future updates.
 
 | Category | Count |
 |----------|-------|
 | 🚀 Before Android Launch | 45 |
-| 🔄 Future Updates | 44 |
+| 🔄 Future Updates | 45 |
 | ❌ Cut | 2 |
 | ✅ Already Done | 7 |
 
@@ -94,7 +94,7 @@ A strategic planning session on Apr 26, 2026 redirected the app's home-page mode
 
 ---
 
-## 🔄 Future Updates (43 items)
+## 🔄 Future Updates (44 items)
 
 | # | Feature | Category | Notes |
 |---|---------|----------|-------|
@@ -166,6 +166,7 @@ A strategic planning session on Apr 26, 2026 redirected the app's home-page mode
 | 138 | Yoga skill gate via pose prerequisites | Algorithm | T4 yoga inference uses frequency-over-time only (sessions ≥ 25 + weeks ≥ 12 for intermediate; ≥ 100 + ≥ 78 for advanced). Once FUTURE_SCOPE #33 (pose prerequisites system) ships, add a skill-content path to yoga level promotion (e.g. "user has held shoulder stand 5+ times → eligible for advanced regardless of session count"). Currently yoga is the pillar with the weakest promotion signal — frequency alone misses dedicated practitioners with shorter but high-skill histories, and over-credits long-but-shallow practitioners. Added Apr 27, 2026 from S11-T4 build. |
 | 139 | Bodyweight exercise coefficient for strength performance gate | Algorithm | T4's strength performance gate (Path B) requires `body_measurements.weight_kg` AND a barbell-lift 1RM (Bench / Squat / Deadlift). Bodyweight-only lifters (calisthenics, push-up/pull-up dominant) cannot trigger Path B and are stuck on the 8-week volume floor (Path A). Adds to existing FUTURE_SCOPE #104 (bodyweight contribution for muscle heatmap) — same root problem, different surface. Resolve both together with a per-exercise bodyweight coefficient table (push-up = 0.65 × BW, pull-up = 1.0 × BW, dip = 0.85 × BW, etc.). Once available, treat coefficient × BW × max_reps as a virtual 1RM that can fire Path B for strength inference. Added Apr 27, 2026 from S11-T4 build. |
 | 140 | Level-change events emitted as home-page wins | UX | When inference promotes a user (beginner → intermediate or intermediate → advanced), emit an event the home page can surface as a "win" alongside FUTURE_SCOPE #103 (streak wins). Drives engagement around progression milestones — users who don't notice their level change won't celebrate it. Implementation: add a `pillar_level_promotions` log table (or fold into a generic `user_events` table), insert a row inside the function's promotion branch, surface via the recent-wins endpoint (extends `services/bodyMapService.js`). Pre-requisite: T4 must run periodically or be called from a session-finish hook so promotions actually fire. Added Apr 27, 2026 from S11-T4 build. |
+| 141 | Equipment column + filtering on `exercises` table | Schema / Data | The `exercises` table has no queryable equipment column — equipment info is implicit (embedded in names like "Barbell Bench Press" and present in the original `free-exercise-db` JSON seed but never normalized). Fine today because nothing queries by equipment; becomes blocking when any of these land: (a) **"filter by available equipment" UI** in the composer (Sprint 14+) — Hevy-style "I only have dumbbells today, show me dumbbell-compatible exercises"; was in the original Blueprint v3 strength scope but never implemented; (b) **equipment-aware engine signals** — any future weight formula or filter that wants equipment as input; (c) **onboarding equipment capture** — companion to FUTURE_SCOPE #44; the column is needed to enforce a user-declared "I train at home with dumbbells + bands only" preference downstream. **Implementation path:** add `equipment VARCHAR(40)` (or `TEXT[]` if multi-equipment is meaningful), backfill via either re-pull of `free-exercise-db` JSON joined by name/id (cleaner) or deterministic name-parse looking for `barbell`/`dumbbell`/`cable`/`machine`/`bodyweight`/`kettlebell`/`band`/`smith` (faster), add `idx_exercises_equipment`, audit + spot-check (S11-T2 / S11-T3 pattern). **Why parked:** v1 suggestion engine (Sprint 12) doesn't use equipment; Strength tab today doesn't filter by equipment; no current user feedback flagging it. **Trigger to pull off the shelf:** the first sprint that wants any of the three use cases — likely Sprint 14 (composer) or whichever sprint adds onboarding equipment capture. Surfaced during S12-T1 pre-flight (Apr 28, 2026) when the v1 engine was confirmed not to need it. Added Apr 28, 2026. |
 
 ---
 
