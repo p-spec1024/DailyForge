@@ -11,7 +11,9 @@
     "db:seed:strength": "node src/db/seeds/seed-strength-exercises.js",
     "db:seed:breathwork": "node src/db/seeds/seed-breathwork-techniques.js",
     "db:seed:focus-areas": "node src/db/seeds/seed-focus-areas.js",
-    "db:seed:pillar-levels-backfill": "node src/db/seeds/seed-pillar-levels-backfill.js"
+    "db:seed:pillar-levels-backfill": "node src/db/seeds/seed-pillar-levels-backfill.js",
+    "db:seed:focus-overlaps": "node src/db/seeds/seed-focus-overlaps.js",
+    "db:seed:settle-eligibility": "node src/db/seeds/seed-settle-eligibility.js"
   },
   "dependencies": {
     "@imagekit/nodejs": "^7.4.0",

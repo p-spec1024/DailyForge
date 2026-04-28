@@ -318,6 +318,42 @@ CREATE TABLE IF NOT EXISTS user_pillar_levels (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(user_id, pillar)
 );
+
+-- S12-T1: Suggestion-engine schema foundations.
+-- Three new tables: symmetric focus overlaps for muscle-group antagonist
+-- warnings, per-user content exclusion list, and per-user/exercise swap
+-- counters that drive the "always swap → keep or exclude" prompt.
+-- All content_id values in user_excluded_exercises are soft-FKs (resolves
+-- to exercises.id OR breathwork_techniques.id depending on content_type),
+-- matching the pattern used in focus_content_compatibility.
+CREATE TABLE IF NOT EXISTS focus_overlaps (
+  id               SERIAL PRIMARY KEY,
+  focus_id         INT NOT NULL REFERENCES focus_areas(id) ON DELETE CASCADE,
+  overlaps_with_id INT NOT NULL REFERENCES focus_areas(id) ON DELETE CASCADE,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(focus_id, overlaps_with_id),
+  CHECK(focus_id <> overlaps_with_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_excluded_exercises (
+  id           SERIAL PRIMARY KEY,
+  user_id      INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  content_type VARCHAR(20) NOT NULL CHECK (content_type IN ('strength', 'yoga', 'breathwork')),
+  content_id   INT NOT NULL,
+  excluded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, content_type, content_id)
+);
+
+CREATE TABLE IF NOT EXISTS exercise_swap_counts (
+  id              SERIAL PRIMARY KEY,
+  user_id         INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  exercise_id     INT NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+  swap_count      INT NOT NULL DEFAULT 0,
+  last_swapped_at TIMESTAMPTZ,
+  prompt_state    VARCHAR(20) NOT NULL DEFAULT 'never_prompted'
+    CHECK (prompt_state IN ('never_prompted', 'prompted_keep', 'excluded')),
+  UNIQUE(user_id, exercise_id)
+);
 `;
 
 const s11t4Functions = `
@@ -695,6 +731,14 @@ ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS intermediate_duration
 ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS intermediate_duration_max INT;
 ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS advanced_duration_min INT;
 ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS advanced_duration_max INT;
+
+-- S12-T1: Suggestion-engine column additions on existing tables.
+-- focus_slug populates only on new sessions created by the engine (T5);
+-- existing rows stay NULL by design — no backfill.
+-- settle_eligible_for is a state-focus tag array; defaults to {} on all
+-- 49 existing rows. Seed (seed-settle-eligibility.js) populates exactly 5.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS focus_slug VARCHAR(40);
+ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS settle_eligible_for TEXT[] DEFAULT '{}';
 `;
 
 const indexes = `
@@ -747,6 +791,22 @@ CREATE INDEX IF NOT EXISTS idx_fcc_content
 -- S11-T4: Per-user lookup index for the inference function.
 CREATE INDEX IF NOT EXISTS idx_upl_user
   ON user_pillar_levels(user_id);
+
+-- S12-T1: Suggestion-engine indexes.
+-- Partial index on sessions(user_id, focus_slug, date) is the recency-warning
+-- read path (T5); WHERE completed=true keeps the index lean — only finished
+-- sessions count toward overlap-warning windows.
+CREATE INDEX IF NOT EXISTS idx_focus_overlaps_focus
+  ON focus_overlaps(focus_id);
+CREATE INDEX IF NOT EXISTS idx_user_excluded_user
+  ON user_excluded_exercises(user_id);
+CREATE INDEX IF NOT EXISTS idx_swap_counts_user
+  ON exercise_swap_counts(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_focus_date
+  ON sessions(user_id, focus_slug, date)
+  WHERE completed = true;
+CREATE INDEX IF NOT EXISTS idx_breathwork_settle_eligible
+  ON breathwork_techniques USING GIN (settle_eligible_for);
 `;
 
 async function migrate() {
