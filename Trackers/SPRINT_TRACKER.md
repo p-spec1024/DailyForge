@@ -246,6 +246,33 @@ These tickets were planned under the old "5-phase-as-flagship" model. **They are
 
 ---
 
+## Sprint 12 — Suggestion Engine — Apr 28, 2026 onward
+
+**Goal:** Ship the rule-based composer that turns (focus + entry point + budget) into a level-appropriate, exclusion-aware session structure. Drives the Sprint 13 home page UI and Sprint 14 composer.
+
+**Source of truth:** `Trackers/S12-suggestion-engine-spec.md` (locked Apr 28, 2026 — algorithm shape, recipes per entry point, time-budget math, recency/exclusion mechanics, ticket breakdown).
+
+**Branch pattern:** Sprint-chained off `main` — T1 on `s12-t1`, T2 on `s12-t2` (off `main`, runs against the schema T1 already applied to prod DB out-of-band), T3 will branch from `s12-t2`. Sprint-close merge to `main` lands all of T1–T7 with a `sprint-12-close` tag, matching Sprints 10–11.
+
+| # | Ticket | Status | Notes |
+|---|--------|--------|-------|
+| 1 | Schema + seeds — `focus_overlaps`, `user_excluded_exercises`, `exercise_swap_counts`, `sessions.focus_slug`, `breathwork_techniques.settle_eligible_for` | ✅ Shipped Apr 28, 2026 | Three new tables + 1 column add + 1 column add. Idempotent. Seeded `focus_overlaps` (12 rows) and `settle_eligible_for` (5 techniques per spec table). Branch `s12-t1`, commit `7e3d0cb`. Schema applied to prod DB. **Not yet merged to `main`** — sprint-chained pattern. |
+| 2 | Engine v1 — body-focus paths (cross-pillar / strength tab / yoga tab) | ✅ Shipped Apr 28, 2026 | Service-layer composer in `server/src/services/suggestionEngine.js`. Three recipes implemented: `home` → 5-phase cross-pillar, `strength_tab` → strength-only, `yoga_tab` → yoga-only (warmup/main/cooldown). Reads `user_pillar_levels`, `focus_areas`, `focus_muscle_keywords`, `focus_content_compatibility`, `breathwork_techniques`, `exercises`, `user_excluded_exercises`. Out-of-scope inputs (mobility, full_body, state focuses, `breathwork_tab` entry) throw `NotImplementedError` with explicit T3/T4 hand-off messages — scope is locked, no silent fallthrough. Smoke (`scripts/test-suggestion-engine-t2.js`): **1531 pass, 0 fail** across 10 in-scope body focuses × 3 entry points × budget 30, plus biceps budget-60/15 variants and 4 NotImplementedError throws. `/review` graded **B+** — Top 5 critical fixes applied (spec-derived strength time computation, top-level `time_budget_min` validation, renamed dual-naming `userExcludedIds`/`sessionExcludedIds`, two new smoke assertions, prototype-pollution defensive Set-based pillar/level validation). Two data-shape findings handled in code with header comments: `exercises.target_muscles` is text not array (engine uses ILIKE substring); `exercises.practice_types` contains yoga STYLES not movement-quality tokens (warmup remapped to `vinyasa\|sun_salutation\|hatha`, cooldown to `restorative\|yin\|hatha`). Branch `s12-t2`, commit `28dd40e`. Spec: §Inputs/Outputs, §Recipes — body focus from home/strength_tab/yoga_tab. |
+| 3 | Engine v1 — state-focus path (Settle → Main → Integrate) | ⏳ Pending | Layers state focuses on top of T2. Will branch from `s12-t2`. |
+| 4 | Mobility + Full Body special-case branches | ⏳ Pending | Replaces T2's `NotImplementedError` throws for `mobility` / `full_body` with the practice-type / compound-detection paths per spec §Special Cases. |
+| 5 | Recency warning logic | ⏳ Pending | Implements §Recency Overlap. Wires `sessions.focus_slug` write on session start. |
+| 6 | Swap-counter + exclusion endpoints | ⏳ Pending | Extends swap handler to increment `exercise_swap_counts`. Adds `/api/exercises/:id/exclude` and `/keep-suggesting`. |
+| 7 | API endpoints — `POST /api/sessions/suggest`, `GET /api/sessions/last?focus=<slug>`, save-as-routine wiring | ⏳ Pending | HTTP surface over the engine. |
+
+**Followups noted during T2 (eligible for FUTURE_SCOPE — to be added post-sprint-close):**
+
+1. **Spec acceptance #9 ("session duration within 10% of budget") is not achievable at beginner level given current pick counts and bookend `*_duration_min` clamping.** Engine now exposes the truth via `metadata.estimated_total_min`; future ticket should either scale strength sets-per-exercise with budget, tighten bookend duration ranges, or revise the spec target band.
+2. **Tiny yoga pools at beginner level** for `biceps` (1 pose), `triceps` (6), `chest` (11) cause cooldown to degrade gracefully. Either re-tag yoga seed for these focuses or accept the degradation.
+3. **`focus_muscle_keywords` dead seeds (13 entries with 0 substring matches against `exercises.target_muscles`):** `biceps brachii`, `biceps femoris`, `brachialis`, `calf`, `gastrocnemius`, `gluteus`, `latissimus`, `semimembranosus`, `semitendinosus`, `soleus`, `transverse`, `triceps brachii`, `vastus`. Either populate `target_muscles` to include these tokens, or drop them from the seed.
+4. **`practice_types` taxonomy mismatch** — yoga STYLE labels in DB vs movement-quality tokens in spec. Either add a movement-quality tagging dimension or document the remap in the spec permanently.
+
+---
+
 ## Media Generation (Parallel Track)
 
 ### New Strategy: 3D Rigged Character (Decided Apr 13, 2026)
