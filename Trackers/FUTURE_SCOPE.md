@@ -1,14 +1,14 @@
 # DailyForge — Future Scope
 
 **Triage completed: April 13, 2026**
-**Updated: April 28, 2026 — #143 (energize content gap, post-T3.5 framing) and #144–147 (S12 v2 spec followups) added; #142 reframed**
+**Updated: April 29, 2026 — #148 / #150 (content gaps surfaced by S12-T3.5 pre-flight) and #149 (open question / UX decision, surfaced by S12-T3.5 pre-flight) added**
 
 Features categorized for Android v1.0 launch vs future updates.
 
 | Category | Count |
 |----------|-------|
 | 🚀 Before Android Launch | 45 |
-| 🔄 Future Updates | 50 |
+| 🔄 Future Updates | 53 |
 | ❌ Cut | 2 |
 | ✅ Already Done | 7 |
 
@@ -94,7 +94,7 @@ A strategic planning session on Apr 26, 2026 redirected the app's home-page mode
 
 ---
 
-## 🔄 Future Updates (50 items)
+## 🔄 Future Updates (53 items)
 
 | # | Feature | Category | Notes |
 |---|---------|----------|-------|
@@ -173,6 +173,9 @@ A strategic planning session on Apr 26, 2026 redirected the app's home-page mode
 | 145 | Reflection-phase user prompts | UX / Approach 5 | Reflection is a silent timer in v1. UX could rotate prompts ("notice how you feel now," "set an intention for the next hour"). Sprint 13+ design. Surfaced from S12 v2 spec followup #15. |
 | 146 | Endless mode session-length defaults from history | Engine / Approach 5 | First-time endless users get centering=2, reflection=2. Returning endless users could inherit their average actual practice duration. Sprint 13+ enrichment. Surfaced from S12 v2 spec followup #16. |
 | 147 | 45–60 min bracket for state-focus picker | Engine / Content | Currently no state-focus content reaches 60 min (only Breath Counting reaches 45 at advanced; nothing reaches 60). Add a 5th numbered bracket when content motivates it. Decision deferred until then. Surfaced from S12 v2 spec followup #18. |
+| 148 | Energize beginner: 21-30 and 30-45 brackets empty | Content / Approach 5 | Beginner energize users see only `0-10` and `10-20` brackets in the picker (plus `endless`). 21-30 and 30-45 are hidden because no beginner-tier energize technique reaches those durations at any level — they're not just locked, they're empty. Closely related to FUTURE_SCOPE #143 (beginner main pool = 1: Morning Energizer). Fix: author or extend energize techniques with beginner-tier columns reaching 20+ minutes. Could overlap with #143's beginner-safe energizer authoring (Three-Part Breath with inhale emphasis, paced Cyclic Hyperventilation lite). Sprint 13+ content authoring. Surfaced from S12-T3.5 pre-flight diagnostic (Apr 29, 2026). |
+| 149 | Short-duration locked for intermediate/advanced focus and recover users | **Open question / UX decision (NOT scheduled work)** | Intermediate and advanced focus users, and advanced recover users, see the `0-10` bracket as **empty**, not available. This happens because the higher-tier columns for these focuses are designed for longer protocols (Box Breathing intermediate = 10-15, etc.); the user *can* do shorter sessions but only at lower-tier columns the engine doesn't surface to them. Two possible interpretations: (a) **Bug** — an advanced user should still be able to do a 5-min session; fix at the engine layer to allow lower-tier columns when no user-level columns fit a bracket. (b) **Feature** — advanced users have outgrown 5-min sessions for these focuses; UI shows "Higher tiers practice longer — try a longer session." **Decision deferred to Sprint 13 picker UX design.** Current behavior (empty bracket = hidden in picker) is honest about the data. No build work scheduled until the UX call is made. Surfaced from S12-T3.5 pre-flight diagnostic (Apr 29, 2026). |
+| 150 | Sleep techniques don't reach 25+ minutes at any level | Content | Sleep pool (Deep Sleep Induction, Sleep Preparation, 4-7-8 cluster) tops out at advanced ~20 min. The 30-45 bracket is empty for all three levels. The 21-30 bracket is empty at beginner and locked-by-advanced at intermediate. Fix: author or extend sleep techniques to reach 25-40 min — could be longer Yoga Nidra-style guided sequences or extended 4-7-8 advanced protocols. Sprint 13+ content authoring. Surfaced from S12-T3.5 pre-flight diagnostic (Apr 29, 2026). |
 
 ---
 
