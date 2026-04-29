@@ -12,6 +12,7 @@ import { pool } from '../src/db/pool.js';
 import {
   generateSession,
   getAvailableDurations,
+  checkRecencyOverlap,
   BRACKET_TABLE,
   NotImplementedError,
 } from '../src/services/suggestionEngine.js';
@@ -960,6 +961,337 @@ async function main() {
     () => generateSession({ user_id: user.id, focus_slug: 'calm', entry_point: 'breathwork_tab', bracket: '5-15' }),
     'RangeError'
   );
+
+  // ── Phase 3d: T5 RECENCY BLOCK ───────────────────────────────────────
+  // Spec: Trackers/S12-T5-recency-warnings-spec.md.
+  // Tags every inserted row with notes='T5_RECENCY_SMOKE' (sessions) or marks
+  // breathwork inserts with a recognizable focus_slug (verified by test only).
+  // Cleanup deletes by tag in finally + on SIGINT/SIGTERM. Snapshots row
+  // counts before and asserts equality after cleanup.
+  console.log('\n=== T5 RECENCY BLOCK (recency_overlap warning + persistence) ===');
+
+  const T5_TAG = 'T5_RECENCY_SMOKE';
+
+  async function snapshotCounts() {
+    const s = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM sessions WHERE user_id = $1`, [user.id]);
+    const b = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM breathwork_sessions WHERE user_id = $1`, [user.id]);
+    return { sessions: s.rows[0].n, breathwork: b.rows[0].n };
+  }
+  async function deleteT5Rows() {
+    await pool.query(
+      `DELETE FROM sessions WHERE user_id = $1 AND notes = $2`,
+      [user.id, T5_TAG]
+    );
+    await pool.query(
+      `DELETE FROM breathwork_sessions WHERE user_id = $1 AND focus_slug LIKE 'T5_%'`,
+      [user.id]
+    );
+  }
+
+  // Helper: insert a tagged sessions row at a specific date and return id.
+  async function insertSession({ focus_slug, daysAgo, completed = true, type = 'strength', startedAtOffset = '0 hours' }) {
+    const r = await pool.query(
+      `INSERT INTO sessions (user_id, type, date, started_at, completed_at, completed, focus_slug, notes)
+       VALUES ($1, $2, CURRENT_DATE - INTERVAL '${daysAgo} days',
+               (CURRENT_DATE - INTERVAL '${daysAgo} days')::timestamp + INTERVAL '${startedAtOffset}',
+               CASE WHEN $3 THEN NOW() ELSE NULL END, $3, $4, $5)
+       RETURNING id`,
+      [user.id, type, completed, focus_slug, T5_TAG]
+    );
+    return r.rows[0].id;
+  }
+
+  const t5SnapshotBefore = await snapshotCounts();
+  console.log(`  pre-insert counts: sessions=${t5SnapshotBefore.sessions}, breathwork=${t5SnapshotBefore.breathwork}`);
+
+  // Signal handlers — restore cleanup before pool.js's shutdown closes the pool.
+  let t5CleanupRan = false;
+  const t5OnSignal = async (signal) => {
+    if (t5CleanupRan) return;
+    t5CleanupRan = true;
+    console.error(`\n[smoke] caught ${signal} mid T5 block — deleting tagged rows`);
+    try {
+      await deleteT5Rows();
+      console.error('[smoke] T5 cleanup OK');
+      process.exit(1);
+    } catch (err) {
+      console.error('[smoke] FAILED T5 cleanup:', err.message);
+      console.error(`[smoke] manual: DELETE FROM sessions WHERE user_id=${user.id} AND notes='${T5_TAG}'`);
+      process.exit(2);
+    }
+  };
+  process.prependOnceListener('SIGINT',  () => t5OnSignal('SIGINT'));
+  process.prependOnceListener('SIGTERM', () => t5OnSignal('SIGTERM'));
+
+  try {
+    // Sub-block 1: empty history baseline (criterion #2)
+    await deleteT5Rows();  // ensure clean slate for the user
+    {
+      const w = await checkRecencyOverlap(user.id, 'chest');
+      check('T5/1 empty history → null', w === null, `got ${JSON.stringify(w)}`);
+    }
+
+    // Sub-block 2: same-focus repeat (#3) — yesterday chest → today chest
+    {
+      await insertSession({ focus_slug: 'chest', daysAgo: 1 });
+      const w = await checkRecencyOverlap(user.id, 'chest');
+      check('T5/2 same-focus repeat returns warning', w != null && w.type === 'recency_overlap');
+      check('T5/2 yesterday_focus=chest, current=chest',
+        w?.yesterday_focus === 'chest' && w?.current_focus === 'chest');
+      check('T5/2 message contains "yesterday"',
+        typeof w?.message === 'string' && w.message.includes('yesterday'),
+        `got "${w?.message}"`);
+      check('T5/2 alternative_focus_slug=recover', w?.alternative_focus_slug === 'recover');
+      await deleteT5Rows();
+    }
+
+    // Sub-block 3: adjacent forward (#4) — today chest → today triceps
+    {
+      await insertSession({ focus_slug: 'chest', daysAgo: 0 });
+      const w = await checkRecencyOverlap(user.id, 'triceps');
+      check('T5/3 adjacent forward returns warning', w != null && w.type === 'recency_overlap');
+      check('T5/3 yesterday_focus=chest, current=triceps',
+        w?.yesterday_focus === 'chest' && w?.current_focus === 'triceps');
+      check('T5/3 message contains "today"',
+        typeof w?.message === 'string' && w.message.includes('today'),
+        `got "${w?.message}"`);
+      await deleteT5Rows();
+    }
+
+    // Sub-block 4: adjacent reverse (#5) — yesterday triceps → today chest
+    {
+      await insertSession({ focus_slug: 'triceps', daysAgo: 1 });
+      const w = await checkRecencyOverlap(user.id, 'chest');
+      check('T5/4 adjacent reverse returns warning', w != null && w.type === 'recency_overlap');
+      check('T5/4 yesterday_focus=triceps, current=chest',
+        w?.yesterday_focus === 'triceps' && w?.current_focus === 'chest');
+      await deleteT5Rows();
+    }
+
+    // Sub-block 5: non-adjacent no-fire (#6) — yesterday chest → today core (no edge)
+    {
+      await insertSession({ focus_slug: 'chest', daysAgo: 1 });
+      const w = await checkRecencyOverlap(user.id, 'core');
+      check('T5/5 non-adjacent (chest→core) returns null', w === null, `got ${JSON.stringify(w)}`);
+      await deleteT5Rows();
+    }
+
+    // Sub-block 6: mobility same-focus (#7a) — yesterday mobility → today mobility
+    {
+      await insertSession({ focus_slug: 'mobility', daysAgo: 1, type: 'yoga' });
+      const w = await checkRecencyOverlap(user.id, 'mobility');
+      check('T5/6 mobility same-focus returns warning',
+        w != null && w.yesterday_focus === 'mobility' && w.current_focus === 'mobility');
+      await deleteT5Rows();
+    }
+
+    // Sub-block 7: mobility no-adjacent (#7b) — yesterday mobility → today chest (no edge)
+    {
+      await insertSession({ focus_slug: 'mobility', daysAgo: 1, type: 'yoga' });
+      const w = await checkRecencyOverlap(user.id, 'chest');
+      check('T5/7 mobility→chest returns null (mobility has no overlap edges)',
+        w === null, `got ${JSON.stringify(w)}`);
+      await deleteT5Rows();
+    }
+
+    // Sub-block 8: full_body same-focus (#7c)
+    {
+      await insertSession({ focus_slug: 'full_body', daysAgo: 1 });
+      const w = await checkRecencyOverlap(user.id, 'full_body');
+      check('T5/8 full_body same-focus returns warning',
+        w != null && w.yesterday_focus === 'full_body' && w.current_focus === 'full_body');
+      await deleteT5Rows();
+    }
+
+    // Sub-block 9: state focus skipped (#8) — generateStateFocus must NOT call recency.
+    // Insert a yesterday calm row → today's calm bracket call should NOT show a warning.
+    {
+      await insertSession({ focus_slug: 'calm', daysAgo: 1 });
+      const session = await generateSession({
+        user_id: user.id, focus_slug: 'calm', entry_point: 'breathwork_tab', bracket: '0-10',
+      });
+      check('T5/9 state-focus session.warnings is empty array',
+        Array.isArray(session.warnings) && session.warnings.length === 0,
+        `got ${JSON.stringify(session.warnings)}`);
+      await deleteT5Rows();
+    }
+
+    // Sub-block 10: out-of-window no-fire (#9) — 2 days ago shouldn't fire
+    {
+      await insertSession({ focus_slug: 'chest', daysAgo: 2 });
+      const w = await checkRecencyOverlap(user.id, 'triceps');
+      check('T5/10 2-day-ago chest does not fire for triceps',
+        w === null, `got ${JSON.stringify(w)}`);
+      await deleteT5Rows();
+    }
+
+    // Sub-block 11: NULL focus_slug ignored (#10)
+    {
+      // Insert with focus_slug=NULL via direct query (insertSession requires non-null).
+      await pool.query(
+        `INSERT INTO sessions (user_id, type, date, started_at, completed, focus_slug, notes)
+         VALUES ($1, 'strength', CURRENT_DATE - INTERVAL '1 day', NOW(), true, NULL, $2)`,
+        [user.id, T5_TAG]
+      );
+      const w = await checkRecencyOverlap(user.id, 'chest');
+      check('T5/11 NULL focus_slug row ignored', w === null, `got ${JSON.stringify(w)}`);
+      await deleteT5Rows();
+    }
+
+    // Sub-block 12: incomplete sessions ignored (#11)
+    {
+      await insertSession({ focus_slug: 'chest', daysAgo: 1, completed: false });
+      const w = await checkRecencyOverlap(user.id, 'triceps');
+      check('T5/12 incomplete (completed=false) row ignored', w === null, `got ${JSON.stringify(w)}`);
+      await deleteT5Rows();
+    }
+
+    // Sub-block 13: yoga rows in sessions table (#12 — adapted: no separate yoga_sessions
+    // table in this codebase; yoga rows live in `sessions` with type='yoga')
+    {
+      await insertSession({ focus_slug: 'chest', daysAgo: 1, type: 'yoga' });
+      const w = await checkRecencyOverlap(user.id, 'triceps');
+      check('T5/13 yoga-typed row in sessions triggers warning',
+        w != null && w.yesterday_focus === 'chest');
+      await deleteT5Rows();
+    }
+
+    // Sub-block 14: breathwork_sessions rows are NOT read by recency (UNION arm dropped
+    // per Amendment-equivalent decision — no date column on breathwork_sessions)
+    {
+      await pool.query(
+        `INSERT INTO breathwork_sessions
+           (user_id, technique_id, duration_seconds, rounds_completed, completed, focus_slug)
+         VALUES ($1, 1, 60, 1, true, 'T5_chest_yesterday')`,
+        [user.id]
+      );
+      const w = await checkRecencyOverlap(user.id, 'triceps');
+      check('T5/14 breathwork_sessions row NOT read by recency (table excluded from UNION)',
+        w === null, `got ${JSON.stringify(w)}`);
+      await deleteT5Rows();
+    }
+
+    // Sub-block 15: most-recent tiebreaker (#13) — chest 9am + shoulders 6pm yesterday
+    // Both overlap triceps; warning names shoulders (more recent).
+    {
+      await insertSession({ focus_slug: 'chest', daysAgo: 1, startedAtOffset: '9 hours' });
+      await insertSession({ focus_slug: 'shoulders', daysAgo: 1, startedAtOffset: '18 hours' });
+      const w = await checkRecencyOverlap(user.id, 'triceps');
+      check('T5/15 most-recent tiebreaker → yesterday_focus=shoulders',
+        w?.yesterday_focus === 'shoulders',
+        `got ${w?.yesterday_focus}`);
+      await deleteT5Rows();
+    }
+
+    // Sub-block 16: full engine call from home — confirm warning lands in response
+    {
+      await insertSession({ focus_slug: 'chest', daysAgo: 1 });
+      const session = await generateSession({
+        user_id: user.id, focus_slug: 'triceps', entry_point: 'home', time_budget_min: 30,
+      });
+      check('T5/16 home triceps after yesterday chest: warnings has recency_overlap',
+        Array.isArray(session.warnings) && session.warnings.length === 1 &&
+        session.warnings[0].type === 'recency_overlap',
+        `got ${JSON.stringify(session.warnings)}`);
+      check('T5/16 warning yesterday_focus=chest', session.warnings[0]?.yesterday_focus === 'chest');
+      await deleteT5Rows();
+    }
+
+    // Sub-block 17: full engine call from strength_tab
+    {
+      await insertSession({ focus_slug: 'biceps', daysAgo: 1 });
+      const session = await generateSession({
+        user_id: user.id, focus_slug: 'back', entry_point: 'strength_tab', time_budget_min: 30,
+      });
+      check('T5/17 strength_tab back after yesterday biceps: warnings populated',
+        session.warnings.length === 1 && session.warnings[0].yesterday_focus === 'biceps',
+        `got ${JSON.stringify(session.warnings)}`);
+      await deleteT5Rows();
+    }
+
+    // Sub-block 18: full engine call from yoga_tab
+    {
+      await insertSession({ focus_slug: 'glutes', daysAgo: 1, type: 'yoga' });
+      const session = await generateSession({
+        user_id: user.id, focus_slug: 'hamstrings', entry_point: 'yoga_tab', time_budget_min: 30,
+      });
+      check('T5/18 yoga_tab hamstrings after yesterday glutes: warnings populated',
+        session.warnings.length === 1 && session.warnings[0].yesterday_focus === 'glutes',
+        `got ${JSON.stringify(session.warnings)}`);
+      await deleteT5Rows();
+    }
+
+    // Sub-block 19: full engine call to a state focus → no warnings
+    {
+      await insertSession({ focus_slug: 'calm', daysAgo: 1 });
+      const session = await generateSession({
+        user_id: user.id, focus_slug: 'calm', entry_point: 'breathwork_tab', bracket: '0-10',
+      });
+      check('T5/19 state-focus session: warnings empty (recency excluded)',
+        Array.isArray(session.warnings) && session.warnings.length === 0,
+        `got ${JSON.stringify(session.warnings)}`);
+      await deleteT5Rows();
+    }
+
+    // Persistence sub-blocks (criteria #14, #15) — direct INSERT through the pool
+    // mirrors the route handler's INSERT shape. Route-handler tests via fetch
+    // require a JWT-authenticated test client which doesn't exist in this harness;
+    // TODO: when T7 ships its HTTP test scaffold, replace these with route calls.
+
+    // Sub-block 20 (#14): strength session start writes focus_slug.
+    // Mimics session.js POST /api/session/start INSERT shape.
+    {
+      const r = await pool.query(
+        `INSERT INTO sessions (user_id, workout_id, type, date, started_at, routine_id, focus_slug, notes)
+         VALUES ($1, NULL, 'strength', CURRENT_DATE, NOW(), NULL, 'biceps', $2)
+         RETURNING id, focus_slug`,
+        [user.id, T5_TAG]
+      );
+      check('T5/20 strength session start persists focus_slug',
+        r.rows[0]?.focus_slug === 'biceps', `got ${r.rows[0]?.focus_slug}`);
+      await deleteT5Rows();
+    }
+
+    // Sub-block 21 (#15a): yoga session writes focus_slug. Mimics yoga.js
+    // POST /api/yoga/session shape.
+    {
+      const r = await pool.query(
+        `INSERT INTO sessions (user_id, workout_id, type, date, started_at, completed_at, completed, duration, notes, focus_slug)
+         VALUES ($1, NULL, 'yoga', CURRENT_DATE, NOW(), NOW(), true, 1800, $2, 'hamstrings')
+         RETURNING id, focus_slug`,
+        [user.id, T5_TAG]
+      );
+      check('T5/21 yoga session persists focus_slug',
+        r.rows[0]?.focus_slug === 'hamstrings', `got ${r.rows[0]?.focus_slug}`);
+      await deleteT5Rows();
+    }
+
+    // Sub-block 22 (#15b): breathwork session writes focus_slug. Mimics
+    // breathwork.js POST /api/breathwork/sessions shape.
+    {
+      const r = await pool.query(
+        `INSERT INTO breathwork_sessions
+           (user_id, technique_id, duration_seconds, rounds_completed, completed, focus_slug)
+         VALUES ($1, 1, 60, 1, true, 'T5_calm_persisted')
+         RETURNING id, focus_slug`,
+        [user.id]
+      );
+      check('T5/22 breathwork session persists focus_slug',
+        r.rows[0]?.focus_slug === 'T5_calm_persisted', `got ${r.rows[0]?.focus_slug}`);
+      await deleteT5Rows();
+    }
+  } finally {
+    await deleteT5Rows();
+    const t5SnapshotAfter = await snapshotCounts();
+    check('T5 cleanup: sessions count restored',
+      t5SnapshotAfter.sessions === t5SnapshotBefore.sessions,
+      `before=${t5SnapshotBefore.sessions} after=${t5SnapshotAfter.sessions}`);
+    check('T5 cleanup: breathwork_sessions count restored',
+      t5SnapshotAfter.breathwork === t5SnapshotBefore.breathwork,
+      `before=${t5SnapshotBefore.breathwork} after=${t5SnapshotAfter.breathwork}`);
+  }
 
   // ── Phase 4: pretty-print sample sessions ────────────────────────────
   console.log('\n=== Sample: biceps / home / 30 ===');

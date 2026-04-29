@@ -695,6 +695,16 @@ ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS intermediate_duration
 ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS intermediate_duration_max INT;
 ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS advanced_duration_min INT;
 ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS advanced_duration_max INT;
+
+-- S12-T5: focus_slug on breathwork_sessions for forward-compat analytics. The
+-- recency-overlap query (engine helper checkRecencyOverlap) does NOT read this
+-- column today — breathwork_sessions has no date/started_at column to fit the
+-- recency UNION shape, only created_at. State-focus rows land here (calm/
+-- energize/etc.); body-focus rows live in sessions(type=...). Persisting the
+-- slug here is useful for state-focus analytics down the road.
+-- (sessions.focus_slug was added by S12-T1 directly to prod DB out-of-band;
+--  not duplicated here. T1 schema reconciliation tracked separately.)
+ALTER TABLE breathwork_sessions ADD COLUMN IF NOT EXISTS focus_slug VARCHAR(40);
 `;
 
 const indexes = `
@@ -747,6 +757,14 @@ CREATE INDEX IF NOT EXISTS idx_fcc_content
 -- S11-T4: Per-user lookup index for the inference function.
 CREATE INDEX IF NOT EXISTS idx_upl_user
   ON user_pillar_levels(user_id);
+
+-- S12-T5: forward-compat index on breathwork_sessions.focus_slug. Adapted from
+-- the spec's (user_id, focus_slug, date) shape — breathwork_sessions has no
+-- date column, only created_at. Index is not load-bearing for T5's recency
+-- query (which excludes breathwork_sessions); kept for analytics queries.
+CREATE INDEX IF NOT EXISTS idx_breathwork_sessions_user_focus_created
+  ON breathwork_sessions(user_id, focus_slug, created_at)
+  WHERE completed = true;
 `;
 
 async function migrate() {

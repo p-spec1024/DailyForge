@@ -46,10 +46,15 @@ function parseIntParam(value) {
 router.post('/start', async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const { workout_id, workout_ids, type = 'strength', initial_exercises, routine_id } = req.body;
+    const { workout_id, workout_ids, type = 'strength', initial_exercises, routine_id, focus_slug } = req.body;
     const primaryId = workout_id || (workout_ids && workout_ids[0]) || null;
     const validatedType = ALLOWED_SESSION_TYPES.includes(type) ? type : 'strength';
     const validRoutineId = Number.isFinite(parseInt(routine_id, 10)) ? parseInt(routine_id, 10) : null;
+    // T5: focus_slug is optional. EmptyWorkout / routine-start paths can omit
+    // it; the row stays NULL and falls out of the recency-overlap query.
+    const validFocusSlug = (typeof focus_slug === 'string' && focus_slug.length > 0 && focus_slug.length <= 40)
+      ? focus_slug
+      : null;
 
     await client.query('BEGIN');
 
@@ -81,10 +86,10 @@ router.post('/start', async (req, res, next) => {
     }
 
     const result = await client.query(
-      `INSERT INTO sessions (user_id, workout_id, type, date, started_at, routine_id)
-       VALUES ($1, $2, $3, CURRENT_DATE, NOW(), $4)
+      `INSERT INTO sessions (user_id, workout_id, type, date, started_at, routine_id, focus_slug)
+       VALUES ($1, $2, $3, CURRENT_DATE, NOW(), $4, $5)
        RETURNING *`,
-      [req.user.id, primaryId, validatedType, validRoutineId]
+      [req.user.id, primaryId, validatedType, validRoutineId, validFocusSlug]
     );
 
     const sessionId = result.rows[0].id;
@@ -692,7 +697,7 @@ router.get('/overview/:workoutId', async (req, res, next) => {
 // POST /api/session/complete-5phase — log a completed 5-phase session
 router.post('/complete-5phase', async (req, res, next) => {
   try {
-    const { session_id, workout_id, total_duration, phases } = req.body;
+    const { session_id, workout_id, total_duration, phases, focus_slug } = req.body;
 
     if (!phases || typeof phases !== 'object' || Array.isArray(phases)) {
       return res.status(400).json({ error: 'phases object is required' });
@@ -704,16 +709,25 @@ router.post('/complete-5phase', async (req, res, next) => {
     }
 
     const dur = Math.max(0, parseInt(total_duration, 10) || 0);
+    // T5: focus_slug optional; persisted on the session row for recency lookups.
+    const validFocusSlug = (typeof focus_slug === 'string' && focus_slug.length > 0 && focus_slug.length <= 40)
+      ? focus_slug
+      : null;
 
     if (session_id) {
-      // Update existing session
+      // Update existing session — preserve start-time focus_slug per spec
+      // Decision 2 ("focus_slug is fixed once at planning time and doesn't
+      // change mid-session"). COALESCE keeps the existing column value if
+      // non-null; only writes $5 when the row had NULL (e.g. session created
+      // before T5 wired focus_slug into the start INSERT).
       const result = await pool.query(
         `UPDATE sessions
          SET completed = true, completed_at = NOW(),
-             duration = $1, type = '5phase', phases_json = $2
+             duration = $1, type = '5phase', phases_json = $2,
+             focus_slug = COALESCE(focus_slug, $5)
          WHERE id = $3 AND user_id = $4
          RETURNING *`,
-        [dur, phasesStr, session_id, req.user.id]
+        [dur, phasesStr, session_id, req.user.id, validFocusSlug]
       );
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Session not found' });
@@ -725,10 +739,10 @@ router.post('/complete-5phase', async (req, res, next) => {
     // Create new session record
     const wId = workout_id ? parseInt(workout_id, 10) : null;
     const result = await pool.query(
-      `INSERT INTO sessions (user_id, workout_id, type, date, started_at, completed_at, completed, duration, phases_json)
-       VALUES ($1, $2, '5phase', CURRENT_DATE, NOW() - INTERVAL '1 second' * $3, NOW(), true, $3, $4)
+      `INSERT INTO sessions (user_id, workout_id, type, date, started_at, completed_at, completed, duration, phases_json, focus_slug)
+       VALUES ($1, $2, '5phase', CURRENT_DATE, NOW() - INTERVAL '1 second' * $3, NOW(), true, $3, $4, $5)
        RETURNING *`,
-      [req.user.id, wId, dur, phasesStr]
+      [req.user.id, wId, dur, phasesStr, validFocusSlug]
     );
 
     recalculateForSession(result.rows[0].id).catch(() => {});
