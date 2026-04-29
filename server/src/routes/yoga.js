@@ -423,7 +423,7 @@ router.get('/recent', authenticate, async (req, res, next) => {
 router.post('/session', authenticate, async (req, res, next) => {
   const client = await pool.connect();
   try {
-    const { type, level, duration, focus, poses } = req.body;
+    const { type, level, duration, focus, poses, focus_slug } = req.body;
     const dur = parseInt(duration, 10);
     if (isNaN(dur) || dur < 5 || dur > 120) {
       client.release();
@@ -432,16 +432,20 @@ router.post('/session', authenticate, async (req, res, next) => {
     const validType = VALID_TYPES.includes(type) ? type : 'vinyasa';
     const validLevel = VALID_LEVELS.includes(level) ? level : 'intermediate';
     const durationSecs = dur * 60;
+    // T5: focus_slug optional; persisted on the session row for recency lookups.
+    const validFocusSlug = (typeof focus_slug === 'string' && focus_slug.length > 0 && focus_slug.length <= 40)
+      ? focus_slug
+      : null;
 
     const config = JSON.stringify({ practice_type: validType, level: validLevel, focus: focus || [] });
 
     await client.query('BEGIN');
 
     const { rows } = await client.query(
-      `INSERT INTO sessions (user_id, workout_id, type, date, started_at, completed_at, completed, duration, notes)
-       VALUES ($1, NULL, 'yoga', CURRENT_DATE, NOW() - INTERVAL '1 second' * $2, NOW(), true, $2, $3)
+      `INSERT INTO sessions (user_id, workout_id, type, date, started_at, completed_at, completed, duration, notes, focus_slug)
+       VALUES ($1, NULL, 'yoga', CURRENT_DATE, NOW() - INTERVAL '1 second' * $2, NOW(), true, $2, $3, $4)
        RETURNING id`,
-      [req.user.id, durationSecs, config]
+      [req.user.id, durationSecs, config, validFocusSlug]
     );
 
     const sessionId = rows[0].id;

@@ -145,7 +145,7 @@ router.get('/preferences', authenticate, async (req, res, next) => {
 // POST /api/breathwork/sessions — log a completed breathwork session
 router.post('/sessions', authenticate, async (req, res, next) => {
   try {
-    const { technique_id, duration_seconds, rounds_completed, completed } = req.body;
+    const { technique_id, duration_seconds, rounds_completed, completed, focus_slug } = req.body;
     const user_id = req.user.id;
 
     if (!Number.isInteger(technique_id) || technique_id < 1) {
@@ -157,11 +157,18 @@ router.post('/sessions', authenticate, async (req, res, next) => {
     if (!Number.isInteger(rounds_completed) || rounds_completed < 0) {
       return res.status(400).json({ error: 'Invalid rounds_completed' });
     }
+    // T5: focus_slug optional. State-focus sessions land here (calm/energize/etc.);
+    // body-focus rows are not written via this surface. Persisted for forward-compat
+    // analytics; not read by the recency-overlap query (breathwork_sessions has no
+    // date column, so the recency UNION omits this table).
+    const validFocusSlug = (typeof focus_slug === 'string' && focus_slug.length > 0 && focus_slug.length <= 40)
+      ? focus_slug
+      : null;
 
     const { rows } = await pool.query(
-      `INSERT INTO breathwork_sessions (user_id, technique_id, duration_seconds, rounds_completed, completed)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [user_id, technique_id, duration_seconds, rounds_completed, !!completed],
+      `INSERT INTO breathwork_sessions (user_id, technique_id, duration_seconds, rounds_completed, completed, focus_slug)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [user_id, technique_id, duration_seconds, rounds_completed, !!completed, validFocusSlug],
     );
 
     // Update progression cache for this technique (fire-and-forget)
