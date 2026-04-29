@@ -9,7 +9,12 @@
 
 import 'dotenv/config';
 import { pool } from '../src/db/pool.js';
-import { generateSession, NotImplementedError } from '../src/services/suggestionEngine.js';
+import {
+  generateSession,
+  getAvailableDurations,
+  BRACKET_TABLE,
+  NotImplementedError,
+} from '../src/services/suggestionEngine.js';
 
 const IN_SCOPE_FOCUSES = [
   'chest', 'back', 'shoulders', 'biceps', 'triceps',
@@ -209,131 +214,108 @@ async function assertSession(label, session, levels, exclusions, expectedShape, 
   }
 }
 
-// State-focus session assertion helper (T3). Mirrors assertSession but checks
-// the 3-phase shape, the curated settle-pool membership, and the fcc/main link.
-async function assertStateSession(label, session, focusSlug, levels, exclusions, budget) {
-  // B1 implicit: caller checked it didn't throw.
-  // B2: shape
-  check(`${label}: session_shape=state_focus`, session.session_shape === 'state_focus');
+// ── T3.5 state-focus contract ────────────────────────────────────────────
 
-  // B3: 3 phases in order
-  const phaseNames = session.phases.map((p) => p.phase);
-  check(`${label}: phases = settle/main/integrate`,
-    JSON.stringify(phaseNames) === JSON.stringify(['settle', 'main', 'integrate']),
-    `got ${phaseNames.join(' → ')}`);
+// BRACKET_TABLE imported from the engine — no local mirror. If the engine
+// changes the table (centering, reflection, window bounds), the smoke
+// automatically re-validates against the new values.
+const BRACKET_IDS = Object.keys(BRACKET_TABLE);
 
-  // B4: each phase has exactly 1 item
-  for (const ph of session.phases) {
-    check(`${label}/${ph.phase}: items.length === 1`, ph.items.length === 1,
-      `got ${ph.items.length}`);
-  }
+// Per Amendment 1 v1.1 (Apr 29, 2026 midday). 39 available / 20 locked / 16 empty.
+// For locked cells, the parenthetical is unlocks_at (i = intermediate, a = advanced).
+const APPENDIX_A = {
+  energize: {
+    beginner:     { '0-10': 'available', '10-20': 'available',       '21-30': 'empty',                                '30-45': 'empty',                                'endless': 'available' },
+    intermediate: { '0-10': 'available', '10-20': 'available',       '21-30': { state: 'locked_by_level', unlocks_at: 'advanced' }, '30-45': { state: 'locked_by_level', unlocks_at: 'advanced' }, 'endless': 'available' },
+    advanced:     { '0-10': 'available', '10-20': 'available',       '21-30': 'available',                            '30-45': 'available',                            'endless': 'available' },
+  },
+  calm: {
+    beginner:     { '0-10': 'available', '10-20': 'available', '21-30': { state: 'locked_by_level', unlocks_at: 'intermediate' }, '30-45': { state: 'locked_by_level', unlocks_at: 'advanced' }, 'endless': 'available' },
+    intermediate: { '0-10': 'available', '10-20': 'available', '21-30': 'available',                                 '30-45': { state: 'locked_by_level', unlocks_at: 'advanced' }, 'endless': 'available' },
+    advanced:     { '0-10': 'available', '10-20': 'available', '21-30': 'available',                                 '30-45': 'available',                            'endless': 'available' },
+  },
+  focus: {
+    beginner:     { '0-10': 'available', '10-20': 'available', '21-30': { state: 'locked_by_level', unlocks_at: 'intermediate' }, '30-45': { state: 'locked_by_level', unlocks_at: 'advanced' }, 'endless': 'available' },
+    intermediate: { '0-10': 'empty',     '10-20': 'available', '21-30': 'available',                                 '30-45': { state: 'locked_by_level', unlocks_at: 'advanced' }, 'endless': 'available' },
+    advanced:     { '0-10': 'empty',     '10-20': 'available', '21-30': 'available',                                 '30-45': 'available',                            'endless': 'available' },
+  },
+  sleep: {
+    beginner:     { '0-10': 'available', '10-20': 'available', '21-30': { state: 'locked_by_level', unlocks_at: 'advanced' }, '30-45': 'empty', 'endless': 'available' },
+    intermediate: { '0-10': 'available', '10-20': 'available', '21-30': { state: 'locked_by_level', unlocks_at: 'advanced' }, '30-45': 'empty', 'endless': 'available' },
+    advanced:     { '0-10': 'available', '10-20': 'available', '21-30': 'available',                                 '30-45': 'empty', 'endless': 'available' },
+  },
+  recover: {
+    beginner:     { '0-10': 'available', '10-20': 'available', '21-30': { state: 'locked_by_level', unlocks_at: 'advanced' }, '30-45': { state: 'locked_by_level', unlocks_at: 'advanced' }, 'endless': 'available' },
+    intermediate: { '0-10': 'available', '10-20': 'available', '21-30': { state: 'locked_by_level', unlocks_at: 'advanced' }, '30-45': { state: 'locked_by_level', unlocks_at: 'advanced' }, 'endless': 'available' },
+    advanced:     { '0-10': 'empty',     '10-20': 'available', '21-30': 'available',                                 '30-45': 'available',                            'endless': 'available' },
+  },
+};
+const STATE_FOCUSES = ['energize', 'calm', 'focus', 'sleep', 'recover'];
+const ALL_LEVELS    = ['beginner', 'intermediate', 'advanced'];
 
-  const settle = session.phases[0]?.items[0];
-  const main   = session.phases[1]?.items[0];
-  const integrate = session.phases[2]?.items[0];
+function expectedCellState(focus, level, bracketId) {
+  const v = APPENDIX_A[focus][level][bracketId];
+  return typeof v === 'string' ? { state: v } : v;
+}
 
-  // B5: settle is a real breathwork technique
-  check(`${label}/settle: content_type=breathwork`, settle?.content_type === 'breathwork');
-  check(`${label}/settle: content_id is positive int`,
-    Number.isInteger(settle?.content_id) && settle.content_id > 0);
+// Capture/restore user_pillar_levels.breathwork row for the test user.
+async function captureBreathworkLevelRow(userId) {
+  const { rows } = await pool.query(
+    `SELECT level, source FROM user_pillar_levels WHERE user_id = $1 AND pillar = 'breathwork'`,
+    [userId]
+  );
+  return rows[0] || null;
+}
 
-  // B6: main is a real breathwork technique
-  check(`${label}/main: content_type=breathwork`, main?.content_type === 'breathwork');
-  check(`${label}/main: content_id is positive int`,
-    Number.isInteger(main?.content_id) && main.content_id > 0);
+async function setBreathworkLevel(userId, level) {
+  await pool.query(
+    `INSERT INTO user_pillar_levels (user_id, pillar, level, source)
+     VALUES ($1, 'breathwork', $2, 'manual_override')
+     ON CONFLICT (user_id, pillar)
+     DO UPDATE SET level = EXCLUDED.level, source = EXCLUDED.source`,
+    [userId, level]
+  );
+}
 
-  // B7: integrate is a timer (no technique row)
-  check(`${label}/integrate: content_id === null`, integrate?.content_id === null);
-  check(`${label}/integrate: content_type=breathwork`, integrate?.content_type === 'breathwork');
-
-  // B8 (load-bearing): settle technique's settle_eligible_for contains the focus_slug
-  if (Number.isInteger(settle?.content_id)) {
-    const r = await pool.query(
-      `SELECT settle_eligible_for FROM breathwork_techniques WHERE id = $1`,
-      [settle.content_id]
+async function restoreBreathworkLevelRow(userId, savedRow) {
+  if (savedRow) {
+    await pool.query(
+      `INSERT INTO user_pillar_levels (user_id, pillar, level, source)
+       VALUES ($1, 'breathwork', $2, $3)
+       ON CONFLICT (user_id, pillar)
+       DO UPDATE SET level = EXCLUDED.level, source = EXCLUDED.source`,
+      [userId, savedRow.level, savedRow.source]
     );
-    const list = r.rows[0]?.settle_eligible_for || [];
-    check(`${label}/settle: bt#${settle.content_id} settle_eligible_for contains '${focusSlug}'`,
-      Array.isArray(list) && list.includes(focusSlug),
-      `got ${JSON.stringify(list)}`);
-  }
-
-  // B9: main is in fcc with role='main', content_type='breathwork', standalone_compatible=true
-  if (Number.isInteger(main?.content_id)) {
-    const r = await pool.query(
-      `SELECT 1
-         FROM focus_content_compatibility fcc
-         JOIN focus_areas fa ON fa.id = fcc.focus_id
-         JOIN breathwork_techniques bt ON bt.id = fcc.content_id
-        WHERE fa.slug = $1
-          AND fcc.role = 'main'
-          AND fcc.content_type = 'breathwork'
-          AND bt.id = $2
-          AND bt.standalone_compatible = true`,
-      [focusSlug, main.content_id]
-    );
-    check(`${label}/main: bt#${main.content_id} is fcc role=main + standalone for '${focusSlug}'`,
-      r.rows.length === 1);
-  }
-
-  // B10: difficulty <= breathwork_level for settle and main
-  const userLevel = levels.breathwork;
-  const userRank  = LEVEL_RANK[userLevel];
-  for (const it of [settle, main]) {
-    if (!Number.isInteger(it?.content_id)) continue;
-    const diff = await fetchBreathworkDifficulty(it.content_id);
-    check(`${label}: bt#${it.content_id} difficulty=${diff} <= user ${userLevel}`,
-      LEVEL_RANK[diff] <= userRank, `got rank ${LEVEL_RANK[diff]} > ${userRank}`);
-  }
-
-  // B11: neither settle nor main appears in exclusions
-  for (const it of [settle, main]) {
-    if (!Number.isInteger(it?.content_id)) continue;
-    check(`${label}: bt#${it.content_id} not excluded`,
-      !exclusions.has(`breathwork:${it.content_id}`));
-  }
-
-  // B12: estimated_total_min within ±10% of budget when the engine could fit,
-  // OR honestly shorter (UNDER — main_max < target) OR honestly longer (OVER —
-  // pool's lowest-min > target, content gap for this focus at this budget).
-  // Both UNDER and OVER are reported as DEGRADED but non-fatal.
-  const actual = session.metadata?.estimated_total_min;
-  if (!Number.isInteger(actual) || actual <= 0) {
-    check(`${label}: estimated_total_min is positive integer`, false, `got ${actual}`);
   } else {
-    const drift = Math.abs(actual - budget) / budget;
-    if (drift <= 0.10) {
-      check(`${label}: estimated_total_min ${actual} within ±10% of budget ${budget}`, true);
+    await pool.query(
+      `DELETE FROM user_pillar_levels WHERE user_id = $1 AND pillar = 'breathwork'`,
+      [userId]
+    );
+  }
+}
+
+async function assertThrowsMatching(label, fn, expectedErrName, messageFragment) {
+  try {
+    await fn();
+    fail++;
+    console.log(`  FAIL  ${label} — did not throw`);
+  } catch (err) {
+    let ok = err.name === expectedErrName;
+    if (ok && messageFragment != null) {
+      ok = String(err.message || '').includes(messageFragment);
+    }
+    if (ok) {
+      pass++;
+      console.log(`  PASS  ${label} — ${err.name}: ${err.message}`);
     } else {
-      // Engine couldn't fit the target — fetch main's level bounds for the report.
-      let bounds = '?';
-      if (Number.isInteger(main?.content_id)) {
-        const r = await pool.query(
-          `SELECT ${userLevel}_duration_min AS lo, ${userLevel}_duration_max AS hi
-             FROM breathwork_techniques WHERE id = $1`,
-          [main.content_id]
-        );
-        bounds = `${userLevel}_min=${r.rows[0]?.lo}, ${userLevel}_max=${r.rows[0]?.hi}`;
-      }
-      const dir = actual > budget ? 'OVER ' : 'UNDER';
+      fail++;
       console.log(
-        `  DEGRADED  ${label}: estimated ${actual} ${dir} budget ${budget} ` +
-        `(main '${main?.name}' ${bounds})`
+        `  FAIL  ${label} — expected ${expectedErrName}` +
+        (messageFragment ? ` w/ "${messageFragment}"` : '') +
+        `, got ${err.name}: ${err.message}`
       );
-      check(`${label}: estimated_total_min ${actual} present + valid (degraded ${dir.trim()})`,
-        actual > 0);
     }
   }
-
-  // B13/B14: settle and integrate clamp to [1, 3]
-  check(`${label}/settle: duration in [1,3]`,
-    Number.isInteger(settle?.duration_minutes) &&
-    settle.duration_minutes >= 1 && settle.duration_minutes <= 3,
-    `got ${settle?.duration_minutes}`);
-  check(`${label}/integrate: duration in [1,3]`,
-    Number.isInteger(integrate?.duration_minutes) &&
-    integrate.duration_minutes >= 1 && integrate.duration_minutes <= 3,
-    `got ${integrate?.duration_minutes}`);
 }
 
 async function assertThrows(label, fn, expectedErrName) {
@@ -428,36 +410,293 @@ async function main() {
     check(`${label}: main has >= 1 item`, main && main.items.length >= 1);
   }
 
-  // ── Phase 3a: T3 state-focus matrix (5 focuses × {breathwork_tab×4 + home×2}) ──
-  console.log('\n=== State-focus matrix: 5 focuses × 6 (entry_point, budget) combos ===');
-  const STATE_FOCUSES = ['energize', 'calm', 'focus', 'sleep', 'recover'];
-  const STATE_COMBOS = [
-    { entry_point: 'breathwork_tab', budget: 3 },
-    { entry_point: 'breathwork_tab', budget: 10 },
-    { entry_point: 'breathwork_tab', budget: 20 },
-    { entry_point: 'breathwork_tab', budget: 30 },
-    { entry_point: 'home',           budget: 30 },
-    { entry_point: 'home',           budget: 60 },
-  ];
+  // ── Phase 3a: T3.5 state-focus bracket-availability matrix (75 cells) ──
+  console.log('\n=== State-focus bracket matrix: 5 focuses × 3 levels × 5 brackets ===');
   for (const focus_slug of STATE_FOCUSES) {
-    for (const { entry_point, budget } of STATE_COMBOS) {
-      const label = `${focus_slug}/${entry_point}/${budget}`;
-      let session;
-      try {
-        session = await generateSession({
-          user_id: user.id, focus_slug, entry_point, time_budget_min: budget,
-        });
-      } catch (err) {
-        fail++;
-        console.log(`  FAIL  ${label}: threw ${err.name}: ${err.message}`);
-        continue;
+    for (const level of ALL_LEVELS) {
+      const result = await getAvailableDurations(focus_slug, level);
+      check(`getAvailableDurations(${focus_slug},${level}): focus_slug echoed`,
+        result.focus_slug === focus_slug);
+      check(`getAvailableDurations(${focus_slug},${level}): level echoed`,
+        result.breathwork_level === level);
+      check(`getAvailableDurations(${focus_slug},${level}): brackets is array of 5`,
+        Array.isArray(result.brackets) && result.brackets.length === 5);
+      const byId = Object.fromEntries(result.brackets.map((b) => [b.id, b]));
+      for (const bracketId of BRACKET_IDS) {
+        const expected = expectedCellState(focus_slug, level, bracketId);
+        const live = byId[bracketId];
+        const label = `${focus_slug}/${level}/${bracketId}`;
+        check(`${label}: state == ${expected.state}`,
+          live?.state === expected.state,
+          `got ${live?.state}`);
+        if (expected.state === 'locked_by_level') {
+          check(`${label}: unlocks_at == ${expected.unlocks_at}`,
+            live?.unlocks_at === expected.unlocks_at,
+            `got ${live?.unlocks_at}`);
+        }
+        if (expected.state === 'empty') {
+          check(`${label}: sample_count == 0`, live?.sample_count === 0,
+            `got ${live?.sample_count}`);
+        }
+        if (expected.state === 'available') {
+          check(`${label}: sample_count > 0`, Number.isInteger(live?.sample_count) && live.sample_count > 0,
+            `got ${live?.sample_count}`);
+        }
       }
-      await assertStateSession(label, session, focus_slug, levels, exclusions, budget);
     }
   }
 
-  // ── Phase 3b: throw assertions ─────────────────────────────────────────
-  console.log('\n=== T2 + T3 invalid-input throws ===');
+  // ── Phase 3b: per-available-cell generation pass + W4 throws + W1 spot-check ──
+  // All three sub-phases mutate user_pillar_levels.breathwork. Captured once,
+  // restored once. SIGINT/SIGTERM handlers attempt the restore on signal so a
+  // Ctrl-C mid-smoke doesn't leave the test user in 'manual_override / advanced'.
+  console.log('\n=== Generation pass for every "available" cell ===');
+  const savedBreathwork = await captureBreathworkLevelRow(user.id);
+
+  // W2: signal handlers. prependOnceListener so we run before pool.js's shutdown
+  // handler closes the pool out from under our restore query.
+  let cleanupRan = false;
+  const onSignal = async (signal) => {
+    if (cleanupRan) return;
+    cleanupRan = true;
+    console.error(`\n[smoke] caught ${signal} mid state-focus level mutation`);
+    try {
+      await restoreBreathworkLevelRow(user.id, savedBreathwork);
+      console.error('[smoke] user_pillar_levels.breathwork restored');
+      process.exit(1);
+    } catch (err) {
+      const expected = savedBreathwork
+        ? `level=${savedBreathwork.level}, source=${savedBreathwork.source}`
+        : 'no row (delete only)';
+      console.error('[smoke] FAILED to restore user_pillar_levels.breathwork:', err.message);
+      console.error(`[smoke] manual recovery — user_id=${user.id}, expected ${expected}`);
+      process.exit(2);
+    }
+  };
+  process.prependOnceListener('SIGINT',  () => onSignal('SIGINT'));
+  process.prependOnceListener('SIGTERM', () => onSignal('SIGTERM'));
+
+  try {
+    for (const level of ALL_LEVELS) {
+      await setBreathworkLevel(user.id, level);
+      for (const focus_slug of STATE_FOCUSES) {
+        for (const bracketId of BRACKET_IDS) {
+          const expected = expectedCellState(focus_slug, level, bracketId);
+          if (expected.state !== 'available') continue;
+
+          const label = `${focus_slug}/${level}/${bracketId}`;
+          let session;
+          try {
+            session = await generateSession({
+              user_id: user.id,
+              focus_slug,
+              entry_point: 'breathwork_tab',
+              bracket: bracketId,
+            });
+          } catch (err) {
+            fail++;
+            console.log(`  FAIL  ${label}: threw ${err.name}: ${err.message}`);
+            continue;
+          }
+
+          // Shape assertions
+          check(`${label}: session_shape == state_focus`,
+            session.session_shape === 'state_focus');
+          check(`${label}: phases.length == 3`, session.phases.length === 3);
+          check(`${label}: phases[0].phase == centering`,
+            session.phases[0]?.phase === 'centering');
+          check(`${label}: phases[1].phase == practice`,
+            session.phases[1]?.phase === 'practice');
+          check(`${label}: phases[2].phase == reflection`,
+            session.phases[2]?.phase === 'reflection');
+
+          const centering  = session.phases[0]?.items[0];
+          const practice   = session.phases[1]?.items[0];
+          const reflection = session.phases[2]?.items[0];
+
+          check(`${label}/centering: content_id positive int`,
+            Number.isInteger(centering?.content_id) && centering.content_id > 0);
+          check(`${label}/practice: content_id positive int`,
+            Number.isInteger(practice?.content_id) && practice.content_id > 0);
+          check(`${label}/reflection: content_id == null`,
+            reflection?.content_id === null);
+
+          // Centering tech is in the curated settle pool for this focus
+          if (Number.isInteger(centering?.content_id)) {
+            const r = await pool.query(
+              `SELECT settle_eligible_for FROM breathwork_techniques WHERE id = $1`,
+              [centering.content_id]
+            );
+            const list = r.rows[0]?.settle_eligible_for || [];
+            check(`${label}/centering: settle_eligible_for contains ${focus_slug}`,
+              Array.isArray(list) && list.includes(focus_slug),
+              `got ${JSON.stringify(list)}`);
+          }
+
+          // Practice tech is in fcc with role=main + standalone_compatible
+          if (Number.isInteger(practice?.content_id)) {
+            const r = await pool.query(
+              `SELECT 1
+                 FROM focus_content_compatibility fcc
+                 JOIN focus_areas fa ON fa.id = fcc.focus_id
+                 JOIN breathwork_techniques bt ON bt.id = fcc.content_id
+                WHERE fa.slug = $1
+                  AND fcc.role = 'main'
+                  AND fcc.content_type = 'breathwork'
+                  AND bt.id = $2
+                  AND bt.standalone_compatible = true`,
+              [focus_slug, practice.content_id]
+            );
+            check(`${label}/practice: fcc role=main + standalone for ${focus_slug}`,
+              r.rows.length === 1);
+          }
+
+          // Difficulty <= user level for centering and practice
+          for (const it of [centering, practice]) {
+            if (!Number.isInteger(it?.content_id)) continue;
+            const diff = await fetchBreathworkDifficulty(it.content_id);
+            check(`${label}: bt#${it.content_id} difficulty=${diff} <= ${level}`,
+              LEVEL_RANK[diff] <= LEVEL_RANK[level]);
+          }
+
+          // Metadata shape
+          const cfg = BRACKET_TABLE[bracketId];
+          check(`${label}: metadata.bracket == ${bracketId}`,
+            session.metadata?.bracket === bracketId);
+          check(`${label}: metadata.is_endless == ${cfg.is_endless}`,
+            session.metadata?.is_endless === cfg.is_endless);
+          check(`${label}: metadata.user_levels.breathwork == ${level}`,
+            session.metadata?.user_levels?.breathwork === level);
+
+          // Duration assertions
+          const total = session.metadata?.estimated_total_min;
+          if (cfg.is_endless) {
+            const expectedTotal = cfg.centering + practice.duration_minutes + cfg.reflection;
+            check(`${label}: endless total == centering(${cfg.centering}) + practice + reflection(${cfg.reflection})`,
+              total === expectedTotal,
+              `got ${total} expected ${expectedTotal}`);
+          } else {
+            check(`${label}: total ${total} ∈ [${cfg.window_min}, ${cfg.window_max}]`,
+              Number.isInteger(total) && total >= cfg.window_min && total <= cfg.window_max,
+              `got ${total}`);
+          }
+
+          // Centering / reflection durations match BRACKET_TABLE
+          check(`${label}/centering: duration == ${cfg.centering}`,
+            centering?.duration_minutes === cfg.centering,
+            `got ${centering?.duration_minutes}`);
+          check(`${label}/reflection: duration == ${cfg.reflection}`,
+            reflection?.duration_minutes === cfg.reflection,
+            `got ${reflection?.duration_minutes}`);
+        }
+      }
+    }
+
+    // ── W4: locked + empty bracket throws ─────────────────────────────
+    // Verify the engine's load-bearing safety throw fires when generateSession
+    // is called for a (focus, level, bracket) cell that getAvailableDurations
+    // would mark locked_by_level or empty. Spec wording: "caller must pre-check
+    // via getAvailableDurations".
+    console.log('\n=== W4: locked + empty bracket throws ===');
+    await setBreathworkLevel(user.id, 'beginner');
+    const w4MsgFragment = 'caller must pre-check via getAvailableDurations';
+    // Empty cells (Appendix A v1.1)
+    await assertThrowsMatching(
+      'W4 empty: energize/beginner/21-30',
+      () => generateSession({
+        user_id: user.id, focus_slug: 'energize', entry_point: 'breathwork_tab', bracket: '21-30',
+      }),
+      'Error', w4MsgFragment,
+    );
+    await assertThrowsMatching(
+      'W4 empty: energize/beginner/30-45',
+      () => generateSession({
+        user_id: user.id, focus_slug: 'energize', entry_point: 'breathwork_tab', bracket: '30-45',
+      }),
+      'Error', w4MsgFragment,
+    );
+    // Locked cells (Appendix A v1.1)
+    await assertThrowsMatching(
+      'W4 locked: calm/beginner/30-45',
+      () => generateSession({
+        user_id: user.id, focus_slug: 'calm', entry_point: 'breathwork_tab', bracket: '30-45',
+      }),
+      'Error', w4MsgFragment,
+    );
+    await assertThrowsMatching(
+      'W4 locked: focus/beginner/21-30',
+      () => generateSession({
+        user_id: user.id, focus_slug: 'focus', entry_point: 'breathwork_tab', bracket: '21-30',
+      }),
+      'Error', w4MsgFragment,
+    );
+
+    // ── W1: getAvailableDurations(userId) honors user_excluded_exercises ──
+    console.log('\n=== W1: getAvailableDurations userId-aware ===');
+    // Baseline (no userId): user-agnostic count.
+    const baseline = await getAvailableDurations('calm', 'beginner');
+    const baseline010 = baseline.brackets.find((b) => b.id === '0-10');
+    check('W1 baseline: calm/beginner/0-10 sample_count > 0',
+      Number.isInteger(baseline010?.sample_count) && baseline010.sample_count > 0,
+      `got ${baseline010?.sample_count}`);
+
+    // With userId, no exclusions yet → same count as baseline.
+    const withUserNoExcl = await getAvailableDurations('calm', 'beginner', user.id);
+    const withUser010 = withUserNoExcl.brackets.find((b) => b.id === '0-10');
+    check('W1 userId, no exclusions: calm/beginner/0-10 == baseline',
+      withUser010?.sample_count === baseline010?.sample_count,
+      `userId=${withUser010?.sample_count} baseline=${baseline010?.sample_count}`);
+
+    // Pick a calm-pool technique that fits 0-10 at beginner (practice window
+    // = [1, 8]); insert an exclusion; re-check.
+    const { rows: candidates } = await pool.query(
+      `SELECT bt.id, bt.name
+         FROM focus_content_compatibility fcc
+         JOIN focus_areas fa ON fa.id = fcc.focus_id
+         JOIN breathwork_techniques bt ON bt.id = fcc.content_id
+        WHERE fa.slug = 'calm'
+          AND fcc.role = 'main'
+          AND fcc.content_type = 'breathwork'
+          AND bt.standalone_compatible = true
+          AND bt.beginner_duration_min IS NOT NULL
+          AND bt.beginner_duration_max IS NOT NULL
+          AND GREATEST(bt.beginner_duration_min, 1) <= LEAST(bt.beginner_duration_max, 8)
+        ORDER BY bt.id
+        LIMIT 1`
+    );
+    if (candidates.length === 0) {
+      fail++;
+      console.log('  FAIL  W1: could not find a calm/beginner/0-10 candidate to exclude');
+    } else {
+      const techToExclude = candidates[0];
+      await pool.query(
+        `INSERT INTO user_excluded_exercises (user_id, content_type, content_id)
+         VALUES ($1, 'breathwork', $2)
+         ON CONFLICT DO NOTHING`,
+        [user.id, techToExclude.id]
+      );
+      try {
+        const filtered = await getAvailableDurations('calm', 'beginner', user.id);
+        const filtered010 = filtered.brackets.find((b) => b.id === '0-10');
+        check(
+          `W1 with exclusion bt#${techToExclude.id} (${techToExclude.name}): sample_count drops by 1`,
+          filtered010?.sample_count === withUser010.sample_count - 1,
+          `before=${withUser010.sample_count} after=${filtered010?.sample_count}`
+        );
+      } finally {
+        await pool.query(
+          `DELETE FROM user_excluded_exercises
+            WHERE user_id = $1 AND content_type = 'breathwork' AND content_id = $2`,
+          [user.id, techToExclude.id]
+        );
+      }
+    }
+  } finally {
+    await restoreBreathworkLevelRow(user.id, savedBreathwork);
+  }
+
+  // ── Phase 3c: throw assertions ───────────────────────────────────────
+  console.log('\n=== T2 + T3 + T3.5 invalid-input throws ===');
   // Still NotImplementedError (T4 — body-focus special cases)
   await assertThrows(
     'mobility/yoga_tab/30',
@@ -469,27 +708,33 @@ async function main() {
     () => generateSession({ user_id: user.id, focus_slug: 'full_body', entry_point: 'home', time_budget_min: 30 }),
     'NotImplementedError'
   );
-  // T3 changed: body focus from breathwork_tab is now RangeError (not NotImplementedError).
+  // Body focus from breathwork_tab → RangeError (T3 contract, unchanged).
   await assertThrows(
     'biceps/breathwork_tab/10',
     () => generateSession({ user_id: user.id, focus_slug: 'biceps', entry_point: 'breathwork_tab', time_budget_min: 10 }),
     'RangeError'
   );
-  // T3 added: state focus from a body-only tab is RangeError.
+  // State focus from body-only tabs → RangeError (T3 contract, unchanged).
   await assertThrows(
-    'calm/strength_tab/30',
-    () => generateSession({ user_id: user.id, focus_slug: 'calm', entry_point: 'strength_tab', time_budget_min: 30 }),
+    'calm/strength_tab (no bracket)',
+    () => generateSession({ user_id: user.id, focus_slug: 'calm', entry_point: 'strength_tab', bracket: '0-10' }),
     'RangeError'
   );
   await assertThrows(
-    'calm/yoga_tab/30',
-    () => generateSession({ user_id: user.id, focus_slug: 'calm', entry_point: 'yoga_tab', time_budget_min: 30 }),
+    'calm/yoga_tab (no bracket)',
+    () => generateSession({ user_id: user.id, focus_slug: 'calm', entry_point: 'yoga_tab', bracket: '0-10' }),
     'RangeError'
   );
-  // T3 added: budget out of range for entry_point.
+  // T3.5 NEW: state focus without bracket → RangeError.
   await assertThrows(
-    'calm/breathwork_tab/999',
-    () => generateSession({ user_id: user.id, focus_slug: 'calm', entry_point: 'breathwork_tab', time_budget_min: 999 }),
+    'calm/breathwork_tab — no bracket',
+    () => generateSession({ user_id: user.id, focus_slug: 'calm', entry_point: 'breathwork_tab' }),
+    'RangeError'
+  );
+  // T3.5 NEW: invalid bracket value → RangeError.
+  await assertThrows(
+    'calm/breathwork_tab — invalid bracket "5-15"',
+    () => generateSession({ user_id: user.id, focus_slug: 'calm', entry_point: 'breathwork_tab', bracket: '5-15' }),
     'RangeError'
   );
 
@@ -500,15 +745,15 @@ async function main() {
   });
   console.log(JSON.stringify(sample, null, 2));
 
-  console.log('\n=== Sample: calm / breathwork_tab / 10 ===');
+  console.log('\n=== Sample: calm / breathwork_tab / 0-10 ===');
   const sampleCalm = await generateSession({
-    user_id: user.id, focus_slug: 'calm', entry_point: 'breathwork_tab', time_budget_min: 10,
+    user_id: user.id, focus_slug: 'calm', entry_point: 'breathwork_tab', bracket: '0-10',
   });
   console.log(JSON.stringify(sampleCalm, null, 2));
 
-  console.log('\n=== Sample: energize / home / 30 ===');
+  console.log('\n=== Sample: energize / home / endless ===');
   const sampleEnergize = await generateSession({
-    user_id: user.id, focus_slug: 'energize', entry_point: 'home', time_budget_min: 30,
+    user_id: user.id, focus_slug: 'energize', entry_point: 'home', bracket: 'endless',
   });
   console.log(JSON.stringify(sampleEnergize, null, 2));
 
