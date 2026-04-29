@@ -16,6 +16,7 @@ import {
   BRACKET_TABLE,
   NotImplementedError,
 } from '../src/services/suggestionEngine.js';
+import { incrementSwap, setPromptState } from '../src/services/swapCounter.js';
 
 const IN_SCOPE_FOCUSES = [
   'chest', 'back', 'shoulders', 'biceps', 'triceps',
@@ -1291,6 +1292,274 @@ async function main() {
     check('T5 cleanup: breathwork_sessions count restored',
       t5SnapshotAfter.breathwork === t5SnapshotBefore.breathwork,
       `before=${t5SnapshotBefore.breathwork} after=${t5SnapshotAfter.breathwork}`);
+  }
+
+  // ── Phase 3e: T6 SWAP-EXCLUSION BLOCK ────────────────────────────────
+  // Spec: Trackers/S12-T6-swap-counter-exclusion-spec.md.
+  // Exercises swapCounter.js (incrementSwap + setPromptState) end-to-end
+  // against the live DB. Picks two strength exercises the user has no
+  // existing swap count for, snapshots row counts, and restores via DELETE.
+  console.log('\n=== T6 SWAP-EXCLUSION BLOCK (counter + prompt-state state machine) ===');
+
+  // Find two test exercises the user has no swap-count history for.
+  const t6Picks = await pool.query(
+    `SELECT e.id FROM exercises e
+      WHERE e.type = 'strength'
+        AND e.id NOT IN (
+          SELECT exercise_id FROM exercise_swap_counts WHERE user_id = $1
+        )
+      ORDER BY e.id ASC
+      LIMIT 2`,
+    [user.id]
+  );
+  if (t6Picks.rows.length < 2) {
+    console.log('  SKIP T6: need 2 strength exercises with no prior swap count for this user');
+  } else {
+    const T6_EX_A = t6Picks.rows[0].id;
+    const T6_EX_B = t6Picks.rows[1].id;
+    const T6_TEST_IDS = [T6_EX_A, T6_EX_B];
+
+    async function snapshotT6() {
+      const sc = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM exercise_swap_counts WHERE user_id = $1`, [user.id]);
+      const ux = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM user_excluded_exercises
+          WHERE user_id = $1 AND content_type = 'strength'`, [user.id]);
+      return { swap_counts: sc.rows[0].n, excluded: ux.rows[0].n };
+    }
+    async function deleteT6Rows() {
+      await pool.query(
+        `DELETE FROM exercise_swap_counts WHERE user_id = $1 AND exercise_id = ANY($2)`,
+        [user.id, T6_TEST_IDS]
+      );
+      await pool.query(
+        `DELETE FROM user_excluded_exercises
+          WHERE user_id = $1 AND content_type = 'strength' AND content_id = ANY($2)`,
+        [user.id, T6_TEST_IDS]
+      );
+    }
+
+    const t6SnapshotBefore = await snapshotT6();
+    console.log(`  pre-T6 counts: swap_counts=${t6SnapshotBefore.swap_counts}, excluded=${t6SnapshotBefore.excluded}`);
+
+    // Signal handlers for graceful cleanup if the harness is killed mid-block.
+    let t6CleanupRan = false;
+    const t6OnSignal = async (signal) => {
+      if (t6CleanupRan) return;
+      t6CleanupRan = true;
+      console.error(`\n[smoke] caught ${signal} mid T6 block — deleting test rows`);
+      try {
+        await deleteT6Rows();
+        console.error('[smoke] T6 cleanup OK');
+        process.exit(1);
+      } catch (err) {
+        console.error('[smoke] FAILED T6 cleanup:', err.message);
+        console.error(`[smoke] manual: DELETE FROM exercise_swap_counts WHERE user_id=${user.id} AND exercise_id IN (${T6_TEST_IDS.join(',')})`);
+        process.exit(2);
+      }
+    };
+    process.prependOnceListener('SIGINT',  () => t6OnSignal('SIGINT'));
+    process.prependOnceListener('SIGTERM', () => t6OnSignal('SIGTERM'));
+
+    try {
+      // Sub-block 1: first swap → swap_count=1, never_prompted, no prompt
+      {
+        const r = await incrementSwap(user.id, T6_EX_A);
+        check('T6/1 first swap → swap_count=1',
+          r.swap_count === 1, `got ${r.swap_count}`);
+        check('T6/1 first swap → prompt_state=never_prompted',
+          r.prompt_state === 'never_prompted', `got ${r.prompt_state}`);
+        check('T6/1 first swap → should_prompt=false', r.should_prompt === false);
+      }
+
+      // Sub-block 2: second swap → swap_count=2, no prompt
+      {
+        const r = await incrementSwap(user.id, T6_EX_A);
+        check('T6/2 second swap → swap_count=2', r.swap_count === 2);
+        check('T6/2 second swap → should_prompt=false', r.should_prompt === false);
+      }
+
+      // Sub-block 3: third swap → first prompt fires + auto-transition (Decision 5)
+      {
+        const r = await incrementSwap(user.id, T6_EX_A);
+        check('T6/3 third swap → swap_count=3', r.swap_count === 3);
+        check('T6/3 third swap → should_prompt=true', r.should_prompt === true);
+        check('T6/3 third swap → server transitions to prompted_keep',
+          r.prompt_state === 'prompted_keep', `got ${r.prompt_state}`);
+      }
+
+      // Sub-block 4: fourth swap → no prompt (already in prompted_keep, count<6)
+      {
+        const r = await incrementSwap(user.id, T6_EX_A);
+        check('T6/4 fourth swap → swap_count=4', r.swap_count === 4);
+        check('T6/4 fourth swap → prompt_state stays prompted_keep',
+          r.prompt_state === 'prompted_keep');
+        check('T6/4 fourth swap → should_prompt=false', r.should_prompt === false);
+      }
+
+      // Sub-block 5: fifth swap → no prompt
+      {
+        const r = await incrementSwap(user.id, T6_EX_A);
+        check('T6/5 fifth swap → swap_count=5', r.swap_count === 5);
+        check('T6/5 fifth swap → should_prompt=false', r.should_prompt === false);
+      }
+
+      // Sub-block 6: sixth swap → final prompt fires (count=6 + prompted_keep)
+      {
+        const r = await incrementSwap(user.id, T6_EX_A);
+        check('T6/6 sixth swap → swap_count=6', r.swap_count === 6);
+        check('T6/6 sixth swap → should_prompt=true (final prompt)', r.should_prompt === true);
+        check('T6/6 sixth swap → prompt_state stays prompted_keep (no transition on final)',
+          r.prompt_state === 'prompted_keep', `got ${r.prompt_state}`);
+      }
+
+      // Sub-block 7: seventh swap → no further prompts
+      {
+        const r = await incrementSwap(user.id, T6_EX_A);
+        check('T6/7 seventh swap → swap_count=7', r.swap_count === 7);
+        check('T6/7 seventh swap → should_prompt=false (no more prompts)',
+          r.should_prompt === false);
+      }
+
+      // Sub-block 8: setPromptState 'excluded' on a fresh exercise creates row
+      {
+        const r = await setPromptState(user.id, T6_EX_B, 'excluded');
+        check('T6/8 setPromptState excluded on fresh row → was_inserted=true',
+          r.was_inserted === true);
+        check('T6/8 setPromptState excluded → prompt_state=excluded',
+          r.prompt_state === 'excluded');
+        check('T6/8 setPromptState excluded → was_blocked=false',
+          r.was_blocked === false);
+      }
+
+      // Sub-block 9: setPromptState 'excluded' is idempotent
+      {
+        const r = await setPromptState(user.id, T6_EX_B, 'excluded');
+        check('T6/9 idempotent excluded → was_inserted=false', r.was_inserted === false);
+        check('T6/9 idempotent excluded → prompt_state=excluded',
+          r.prompt_state === 'excluded');
+      }
+
+      // Sub-block 10: setPromptState 'prompted_keep' on excluded row is BLOCKED
+      {
+        const r = await setPromptState(user.id, T6_EX_B, 'prompted_keep');
+        check('T6/10 keep_suggesting on excluded → was_blocked=true',
+          r.was_blocked === true);
+        check('T6/10 keep_suggesting on excluded → prompt_state still excluded',
+          r.prompt_state === 'excluded', `got ${r.prompt_state}`);
+      }
+
+      // Sub-block 11: incrementSwap on excluded row bumps count but state stays excluded
+      {
+        const r = await incrementSwap(user.id, T6_EX_B);
+        check('T6/11 incrementSwap on excluded → swap_count=1 (first bump)',
+          r.swap_count === 1, `got ${r.swap_count}`);
+        check('T6/11 incrementSwap on excluded → prompt_state stays excluded',
+          r.prompt_state === 'excluded');
+        check('T6/11 incrementSwap on excluded → should_prompt=false',
+          r.should_prompt === false);
+      }
+
+      // Sub-block 12: setPromptState 'prompted_keep' on never_prompted is allowed
+      // (clean up A so we can test fresh)
+      {
+        await deleteT6Rows();
+        const r = await setPromptState(user.id, T6_EX_A, 'prompted_keep');
+        check('T6/12 keep_suggesting on fresh row → was_inserted=true',
+          r.was_inserted === true);
+        check('T6/12 keep_suggesting on fresh row → prompt_state=prompted_keep',
+          r.prompt_state === 'prompted_keep');
+        check('T6/12 keep_suggesting on fresh row → was_blocked=false',
+          r.was_blocked === false);
+      }
+
+      // Sub-block 13: validation — non-integer userId throws TypeError
+      {
+        let threw = null;
+        try { await incrementSwap('not-a-number', T6_EX_A); }
+        catch (err) { threw = err; }
+        check('T6/13 incrementSwap rejects non-int userId',
+          threw instanceof TypeError, `got ${threw?.constructor?.name}`);
+      }
+
+      // Sub-block 14: validation — non-integer exerciseId throws TypeError
+      {
+        let threw = null;
+        try { await incrementSwap(user.id, null); }
+        catch (err) { threw = err; }
+        check('T6/14 incrementSwap rejects non-int exerciseId',
+          threw instanceof TypeError, `got ${threw?.constructor?.name}`);
+      }
+
+      // Sub-block 15: validation — invalid state value throws TypeError
+      {
+        let threw = null;
+        try { await setPromptState(user.id, T6_EX_A, 'never_prompted'); }
+        catch (err) { threw = err; }
+        check('T6/15 setPromptState rejects invalid state',
+          threw instanceof TypeError, `got ${threw?.constructor?.name}`);
+      }
+
+      // Sub-block 16: setPromptState 'prompted_keep' is idempotent on existing prompted_keep
+      {
+        const r = await setPromptState(user.id, T6_EX_A, 'prompted_keep');
+        check('T6/16 idempotent keep_suggesting → was_inserted=false',
+          r.was_inserted === false);
+        check('T6/16 idempotent keep_suggesting → prompt_state=prompted_keep',
+          r.prompt_state === 'prompted_keep');
+        check('T6/16 idempotent keep_suggesting → was_blocked=false',
+          r.was_blocked === false);
+      }
+
+      // Sub-block 17 (S6 gap): incrementSwap on an EXCLUDED row reaching count=3
+      // must NOT fire should_prompt — the prompt_state guard ('never_prompted')
+      // is the load-bearing piece. Future refactor that drops it would silently
+      // re-prompt users who explicitly excluded the exercise.
+      {
+        await deleteT6Rows();
+        await setPromptState(user.id, T6_EX_B, 'excluded');  // count=0, excluded
+        await incrementSwap(user.id, T6_EX_B);  // count=1
+        await incrementSwap(user.id, T6_EX_B);  // count=2
+        const r = await incrementSwap(user.id, T6_EX_B);  // count=3
+        check('T6/17 excluded row reaching count=3 → should_prompt=false',
+          r.should_prompt === false, `got ${r.should_prompt}`);
+        check('T6/17 excluded row at count=3 → prompt_state stays excluded',
+          r.prompt_state === 'excluded', `got ${r.prompt_state}`);
+        check('T6/17 excluded row at count=3 → swap_count=3',
+          r.swap_count === 3, `got ${r.swap_count}`);
+      }
+
+      // Sub-block 18 (C3 concurrency): 10 parallel incrementSwap calls for
+      // the same (user, exercise) — final count must be 10, exactly one call
+      // returns should_prompt=true at count=3, exactly one at count=6.
+      // Validates that ON CONFLICT DO UPDATE row-lock serialization holds.
+      {
+        await deleteT6Rows();
+        const promises = Array.from({ length: 10 },
+          () => incrementSwap(user.id, T6_EX_A));
+        const results = await Promise.all(promises);
+        const counts = results.map((r) => r.swap_count).sort((a, b) => a - b);
+        check('T6/18 concurrent 10x → counts are 1..10 unique',
+          JSON.stringify(counts) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
+          `got ${JSON.stringify(counts)}`);
+        const promptFired = results.filter((r) => r.should_prompt === true);
+        check('T6/18 concurrent 10x → exactly 2 prompts fired (count=3, count=6)',
+          promptFired.length === 2, `got ${promptFired.length}`);
+        const promptCounts = promptFired.map((r) => r.swap_count).sort((a, b) => a - b);
+        check('T6/18 concurrent 10x → prompts fired at counts [3, 6]',
+          JSON.stringify(promptCounts) === JSON.stringify([3, 6]),
+          `got ${JSON.stringify(promptCounts)}`);
+      }
+    } finally {
+      await deleteT6Rows();
+      const t6SnapshotAfter = await snapshotT6();
+      check('T6 cleanup: exercise_swap_counts restored',
+        t6SnapshotAfter.swap_counts === t6SnapshotBefore.swap_counts,
+        `before=${t6SnapshotBefore.swap_counts} after=${t6SnapshotAfter.swap_counts}`);
+      check('T6 cleanup: user_excluded_exercises restored',
+        t6SnapshotAfter.excluded === t6SnapshotBefore.excluded,
+        `before=${t6SnapshotBefore.excluded} after=${t6SnapshotAfter.excluded}`);
+    }
   }
 
   // ── Phase 4: pretty-print sample sessions ────────────────────────────

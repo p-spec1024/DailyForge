@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { authenticate } from '../middleware/auth.js';
+import { incrementSwap } from '../services/swapCounter.js';
 
 const router = Router();
 router.use(authenticate);
@@ -209,7 +210,10 @@ router.get('/:workoutId/slots/:exerciseId/alternatives', async (req, res, next) 
   }
 });
 
-// PUT /api/workout/slot/:exerciseId/choose — save preferred exercise for a slot
+// PUT /api/workout/slot/:exerciseId/choose — save preferred exercise for a slot.
+// S12-T6: also increments the swap counter for the exercise being swapped AWAY
+// from (chosenId !== exerciseId — Decision 2) and returns prompt-state hints.
+// UPSERT + counter-increment run in a single transaction (Decision 3).
 router.put('/slot/:exerciseId/choose', async (req, res, next) => {
   try {
     const exerciseId = parseInt(req.params.exerciseId, 10);
@@ -228,16 +232,58 @@ router.put('/slot/:exerciseId/choose', async (req, res, next) => {
       return res.status(400).json({ error: 'Invalid alternative for this exercise' });
     }
 
-    // Upsert user preference
-    await pool.query(
-      `INSERT INTO user_exercise_prefs (user_id, exercise_id, chosen_exercise_id)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (user_id, exercise_id)
-       DO UPDATE SET chosen_exercise_id = EXCLUDED.chosen_exercise_id, created_at = NOW()`,
-      [req.user.id, exerciseId, chosenId]
-    );
+    const isSwap = chosenId !== exerciseId;
+    let swap_count = 0;
+    let should_prompt = false;
+    let prompt_state = null;
 
-    res.json({ success: true, slot_id: exerciseId, chosen_exercise_id: chosenId });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      await client.query(
+        `INSERT INTO user_exercise_prefs (user_id, exercise_id, chosen_exercise_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (user_id, exercise_id)
+         DO UPDATE SET chosen_exercise_id = EXCLUDED.chosen_exercise_id, created_at = NOW()`,
+        [req.user.id, exerciseId, chosenId]
+      );
+
+      if (isSwap) {
+        const swapState = await incrementSwap(req.user.id, exerciseId, client);
+        swap_count = swapState.swap_count;
+        should_prompt = swapState.should_prompt;
+        prompt_state = swapState.prompt_state;
+      } else {
+        // Same-exercise re-pick: report current count if any. Spec Decision 8
+        // requires swap_count be present in every response.
+        const cur = await client.query(
+          `SELECT swap_count, prompt_state FROM exercise_swap_counts
+            WHERE user_id = $1 AND exercise_id = $2`,
+          [req.user.id, exerciseId]
+        );
+        if (cur.rows.length > 0) {
+          swap_count = cur.rows[0].swap_count;
+          prompt_state = cur.rows[0].prompt_state;
+        }
+      }
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    res.json({
+      success: true,
+      slot_id: exerciseId,
+      chosen_exercise_id: chosenId,
+      should_prompt,
+      swap_count,
+      prompt_state,
+    });
   } catch (err) {
     next(err);
   }

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { authenticate } from '../middleware/auth.js';
+import { setPromptState } from '../services/swapCounter.js';
 
 const router = Router();
 router.use(authenticate);
@@ -132,6 +133,112 @@ router.get('/:id', async (req, res, next) => {
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Exercise not found' });
     res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Strict id parse: rejects "1abc" (parseInt would accept), 0, negatives.
+function parseExerciseId(raw) {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+// S12-T6: POST /api/exercises/:id/exclude — exclude an exercise from suggestions.
+// Idempotent (Decision 6). Single transaction wraps the exists-check + both
+// writes (user_excluded_exercises + exercise_swap_counts.prompt_state='excluded')
+// to close the TOCTOU window between exists-check and the writes.
+// user_excluded_exercises uses pillar-aware shape (content_type='strength',
+// content_id=:id) per S11-T1.
+// Response: {excluded: true, already: bool, exercise_id: int} per spec.
+router.post('/:id/exclude', async (req, res, next) => {
+  try {
+    const id = parseExerciseId(req.params.id);
+    if (id === null) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const exists = await client.query(`SELECT 1 FROM exercises WHERE id = $1`, [id]);
+      if (exists.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Exercise not found' });
+      }
+
+      // Captured row count tells us already=false vs already=true (spec line 178).
+      const prior = await client.query(
+        `SELECT 1 FROM user_excluded_exercises
+          WHERE user_id = $1 AND content_type = 'strength' AND content_id = $2`,
+        [req.user.id, id]
+      );
+      const already = prior.rows.length > 0;
+
+      await client.query(
+        `INSERT INTO user_excluded_exercises (user_id, content_type, content_id)
+         VALUES ($1, 'strength', $2)
+         ON CONFLICT (user_id, content_type, content_id) DO NOTHING`,
+        [req.user.id, id]
+      );
+
+      await setPromptState(req.user.id, id, 'excluded', client);
+
+      await client.query('COMMIT');
+      res.json({ excluded: true, already, exercise_id: id });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    next(err);
+  }
+});
+
+// S12-T6: POST /api/exercises/:id/keep-suggesting — keep this exercise in rotation.
+// Idempotent. Guarded so it cannot downgrade an 'excluded' row (terminal state).
+// If currently 'excluded', the WHERE blocks the update — response is still
+// 200 with {kept: true, already: true} per spec criterion 14 (the call is
+// acknowledged even though state cannot change).
+// Response: {kept: true, already: bool, exercise_id: int} per spec.
+router.post('/:id/keep-suggesting', async (req, res, next) => {
+  try {
+    const id = parseExerciseId(req.params.id);
+    if (id === null) {
+      return res.status(400).json({ error: 'Invalid id' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const exists = await client.query(`SELECT 1 FROM exercises WHERE id = $1`, [id]);
+      if (exists.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Exercise not found' });
+      }
+
+      // Intentional UPSERT — row creation for users who have never swapped this
+      // exercise is by design, not a phantom row. /review flagged as C2; deferred
+      // per S12-T6 spec criterion #13 + Decision 7 (applied symmetrically here):
+      // /keep-suggesting must be callable from non-swap surfaces (e.g. a future
+      // Settings UI affordance). The row is a record of user intent.
+      const result = await setPromptState(req.user.id, id, 'prompted_keep', client);
+      // already = "row already in target/terminal state" — covers both the
+      // idempotent prompted_keep case and the blocked-by-excluded case.
+      const already = !result.was_inserted;
+
+      await client.query('COMMIT');
+      res.json({ kept: true, already, exercise_id: id });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     next(err);
   }
