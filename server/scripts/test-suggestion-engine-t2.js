@@ -209,6 +209,133 @@ async function assertSession(label, session, levels, exclusions, expectedShape, 
   }
 }
 
+// State-focus session assertion helper (T3). Mirrors assertSession but checks
+// the 3-phase shape, the curated settle-pool membership, and the fcc/main link.
+async function assertStateSession(label, session, focusSlug, levels, exclusions, budget) {
+  // B1 implicit: caller checked it didn't throw.
+  // B2: shape
+  check(`${label}: session_shape=state_focus`, session.session_shape === 'state_focus');
+
+  // B3: 3 phases in order
+  const phaseNames = session.phases.map((p) => p.phase);
+  check(`${label}: phases = settle/main/integrate`,
+    JSON.stringify(phaseNames) === JSON.stringify(['settle', 'main', 'integrate']),
+    `got ${phaseNames.join(' → ')}`);
+
+  // B4: each phase has exactly 1 item
+  for (const ph of session.phases) {
+    check(`${label}/${ph.phase}: items.length === 1`, ph.items.length === 1,
+      `got ${ph.items.length}`);
+  }
+
+  const settle = session.phases[0]?.items[0];
+  const main   = session.phases[1]?.items[0];
+  const integrate = session.phases[2]?.items[0];
+
+  // B5: settle is a real breathwork technique
+  check(`${label}/settle: content_type=breathwork`, settle?.content_type === 'breathwork');
+  check(`${label}/settle: content_id is positive int`,
+    Number.isInteger(settle?.content_id) && settle.content_id > 0);
+
+  // B6: main is a real breathwork technique
+  check(`${label}/main: content_type=breathwork`, main?.content_type === 'breathwork');
+  check(`${label}/main: content_id is positive int`,
+    Number.isInteger(main?.content_id) && main.content_id > 0);
+
+  // B7: integrate is a timer (no technique row)
+  check(`${label}/integrate: content_id === null`, integrate?.content_id === null);
+  check(`${label}/integrate: content_type=breathwork`, integrate?.content_type === 'breathwork');
+
+  // B8 (load-bearing): settle technique's settle_eligible_for contains the focus_slug
+  if (Number.isInteger(settle?.content_id)) {
+    const r = await pool.query(
+      `SELECT settle_eligible_for FROM breathwork_techniques WHERE id = $1`,
+      [settle.content_id]
+    );
+    const list = r.rows[0]?.settle_eligible_for || [];
+    check(`${label}/settle: bt#${settle.content_id} settle_eligible_for contains '${focusSlug}'`,
+      Array.isArray(list) && list.includes(focusSlug),
+      `got ${JSON.stringify(list)}`);
+  }
+
+  // B9: main is in fcc with role='main', content_type='breathwork', standalone_compatible=true
+  if (Number.isInteger(main?.content_id)) {
+    const r = await pool.query(
+      `SELECT 1
+         FROM focus_content_compatibility fcc
+         JOIN focus_areas fa ON fa.id = fcc.focus_id
+         JOIN breathwork_techniques bt ON bt.id = fcc.content_id
+        WHERE fa.slug = $1
+          AND fcc.role = 'main'
+          AND fcc.content_type = 'breathwork'
+          AND bt.id = $2
+          AND bt.standalone_compatible = true`,
+      [focusSlug, main.content_id]
+    );
+    check(`${label}/main: bt#${main.content_id} is fcc role=main + standalone for '${focusSlug}'`,
+      r.rows.length === 1);
+  }
+
+  // B10: difficulty <= breathwork_level for settle and main
+  const userLevel = levels.breathwork;
+  const userRank  = LEVEL_RANK[userLevel];
+  for (const it of [settle, main]) {
+    if (!Number.isInteger(it?.content_id)) continue;
+    const diff = await fetchBreathworkDifficulty(it.content_id);
+    check(`${label}: bt#${it.content_id} difficulty=${diff} <= user ${userLevel}`,
+      LEVEL_RANK[diff] <= userRank, `got rank ${LEVEL_RANK[diff]} > ${userRank}`);
+  }
+
+  // B11: neither settle nor main appears in exclusions
+  for (const it of [settle, main]) {
+    if (!Number.isInteger(it?.content_id)) continue;
+    check(`${label}: bt#${it.content_id} not excluded`,
+      !exclusions.has(`breathwork:${it.content_id}`));
+  }
+
+  // B12: estimated_total_min within ±10% of budget when the engine could fit,
+  // OR honestly shorter (UNDER — main_max < target) OR honestly longer (OVER —
+  // pool's lowest-min > target, content gap for this focus at this budget).
+  // Both UNDER and OVER are reported as DEGRADED but non-fatal.
+  const actual = session.metadata?.estimated_total_min;
+  if (!Number.isInteger(actual) || actual <= 0) {
+    check(`${label}: estimated_total_min is positive integer`, false, `got ${actual}`);
+  } else {
+    const drift = Math.abs(actual - budget) / budget;
+    if (drift <= 0.10) {
+      check(`${label}: estimated_total_min ${actual} within ±10% of budget ${budget}`, true);
+    } else {
+      // Engine couldn't fit the target — fetch main's level bounds for the report.
+      let bounds = '?';
+      if (Number.isInteger(main?.content_id)) {
+        const r = await pool.query(
+          `SELECT ${userLevel}_duration_min AS lo, ${userLevel}_duration_max AS hi
+             FROM breathwork_techniques WHERE id = $1`,
+          [main.content_id]
+        );
+        bounds = `${userLevel}_min=${r.rows[0]?.lo}, ${userLevel}_max=${r.rows[0]?.hi}`;
+      }
+      const dir = actual > budget ? 'OVER ' : 'UNDER';
+      console.log(
+        `  DEGRADED  ${label}: estimated ${actual} ${dir} budget ${budget} ` +
+        `(main '${main?.name}' ${bounds})`
+      );
+      check(`${label}: estimated_total_min ${actual} present + valid (degraded ${dir.trim()})`,
+        actual > 0);
+    }
+  }
+
+  // B13/B14: settle and integrate clamp to [1, 3]
+  check(`${label}/settle: duration in [1,3]`,
+    Number.isInteger(settle?.duration_minutes) &&
+    settle.duration_minutes >= 1 && settle.duration_minutes <= 3,
+    `got ${settle?.duration_minutes}`);
+  check(`${label}/integrate: duration in [1,3]`,
+    Number.isInteger(integrate?.duration_minutes) &&
+    integrate.duration_minutes >= 1 && integrate.duration_minutes <= 3,
+    `got ${integrate?.duration_minutes}`);
+}
+
 async function assertThrows(label, fn, expectedErrName) {
   try {
     await fn();
@@ -301,8 +428,37 @@ async function main() {
     check(`${label}: main has >= 1 item`, main && main.items.length >= 1);
   }
 
-  // ── Phase 3: out-of-scope inputs throw NotImplementedError ───────────
-  console.log('\n=== Out-of-scope NotImplementedError throws ===');
+  // ── Phase 3a: T3 state-focus matrix (5 focuses × {breathwork_tab×4 + home×2}) ──
+  console.log('\n=== State-focus matrix: 5 focuses × 6 (entry_point, budget) combos ===');
+  const STATE_FOCUSES = ['energize', 'calm', 'focus', 'sleep', 'recover'];
+  const STATE_COMBOS = [
+    { entry_point: 'breathwork_tab', budget: 3 },
+    { entry_point: 'breathwork_tab', budget: 10 },
+    { entry_point: 'breathwork_tab', budget: 20 },
+    { entry_point: 'breathwork_tab', budget: 30 },
+    { entry_point: 'home',           budget: 30 },
+    { entry_point: 'home',           budget: 60 },
+  ];
+  for (const focus_slug of STATE_FOCUSES) {
+    for (const { entry_point, budget } of STATE_COMBOS) {
+      const label = `${focus_slug}/${entry_point}/${budget}`;
+      let session;
+      try {
+        session = await generateSession({
+          user_id: user.id, focus_slug, entry_point, time_budget_min: budget,
+        });
+      } catch (err) {
+        fail++;
+        console.log(`  FAIL  ${label}: threw ${err.name}: ${err.message}`);
+        continue;
+      }
+      await assertStateSession(label, session, focus_slug, levels, exclusions, budget);
+    }
+  }
+
+  // ── Phase 3b: throw assertions ─────────────────────────────────────────
+  console.log('\n=== T2 + T3 invalid-input throws ===');
+  // Still NotImplementedError (T4 — body-focus special cases)
   await assertThrows(
     'mobility/yoga_tab/30',
     () => generateSession({ user_id: user.id, focus_slug: 'mobility', entry_point: 'yoga_tab', time_budget_min: 30 }),
@@ -313,23 +469,48 @@ async function main() {
     () => generateSession({ user_id: user.id, focus_slug: 'full_body', entry_point: 'home', time_budget_min: 30 }),
     'NotImplementedError'
   );
-  await assertThrows(
-    'calm/home/30',
-    () => generateSession({ user_id: user.id, focus_slug: 'calm', entry_point: 'home', time_budget_min: 30 }),
-    'NotImplementedError'
-  );
+  // T3 changed: body focus from breathwork_tab is now RangeError (not NotImplementedError).
   await assertThrows(
     'biceps/breathwork_tab/10',
     () => generateSession({ user_id: user.id, focus_slug: 'biceps', entry_point: 'breathwork_tab', time_budget_min: 10 }),
-    'NotImplementedError'
+    'RangeError'
+  );
+  // T3 added: state focus from a body-only tab is RangeError.
+  await assertThrows(
+    'calm/strength_tab/30',
+    () => generateSession({ user_id: user.id, focus_slug: 'calm', entry_point: 'strength_tab', time_budget_min: 30 }),
+    'RangeError'
+  );
+  await assertThrows(
+    'calm/yoga_tab/30',
+    () => generateSession({ user_id: user.id, focus_slug: 'calm', entry_point: 'yoga_tab', time_budget_min: 30 }),
+    'RangeError'
+  );
+  // T3 added: budget out of range for entry_point.
+  await assertThrows(
+    'calm/breathwork_tab/999',
+    () => generateSession({ user_id: user.id, focus_slug: 'calm', entry_point: 'breathwork_tab', time_budget_min: 999 }),
+    'RangeError'
   );
 
-  // ── Phase 4: pretty-print one session ────────────────────────────────
+  // ── Phase 4: pretty-print sample sessions ────────────────────────────
   console.log('\n=== Sample: biceps / home / 30 ===');
   const sample = await generateSession({
     user_id: user.id, focus_slug: 'biceps', entry_point: 'home', time_budget_min: 30,
   });
   console.log(JSON.stringify(sample, null, 2));
+
+  console.log('\n=== Sample: calm / breathwork_tab / 10 ===');
+  const sampleCalm = await generateSession({
+    user_id: user.id, focus_slug: 'calm', entry_point: 'breathwork_tab', time_budget_min: 10,
+  });
+  console.log(JSON.stringify(sampleCalm, null, 2));
+
+  console.log('\n=== Sample: energize / home / 30 ===');
+  const sampleEnergize = await generateSession({
+    user_id: user.id, focus_slug: 'energize', entry_point: 'home', time_budget_min: 30,
+  });
+  console.log(JSON.stringify(sampleEnergize, null, 2));
 
   console.log(`\n=== ${pass} pass, ${fail} fail ===`);
   process.exitCode = fail === 0 ? 0 : 1;

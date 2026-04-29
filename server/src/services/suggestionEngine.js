@@ -1,8 +1,10 @@
-// S12-T2: Suggestion engine v1, body-focus paths only.
-// Spec: Trackers/S12-suggestion-engine-spec.md (recipes — body focus from home/strength_tab/yoga_tab).
-// Out of scope (intentional throws): mobility, full_body, state focuses, breathwork_tab entry,
-// recency warnings, swap-counter, exclusion endpoints, HTTP routes.
-// T3 layers state focuses on top; T4 layers mobility/full_body; T5/T6/T7 layer the rest.
+// S12-T2 + S12-T3: Suggestion engine v1, body-focus and state-focus paths.
+// Spec: Trackers/S12-suggestion-engine-spec.md
+//   - Body-focus recipes (home / strength_tab / yoga_tab) — T2
+//   - State-focus recipe (settle → main → integrate) — T3
+// Out of scope (intentional throws): mobility, full_body (both T4),
+//   recency warnings (T5), swap-counter writes / exclusion endpoints (T6),
+//   HTTP routes (T7).
 //
 // Schema reality (verified by S12-T2 pre-flight, 2026-04-28):
 //   - exercises.target_muscles is TEXT (comma/semicolon/period-separated), NOT array.
@@ -78,6 +80,30 @@ const YOGA_TAB_PICKS = {
   45: { warmup: 2, main: 8, cooldown: 3 },
   60: { warmup: 3, main: 10, cooldown: 4 },
 };
+
+// State-focus phase minutes per total budget (spec §State Focus —
+// settle = MIN(3, budget × 0.10) clamped ≥1; integrate symmetric; main = budget − settle − integrate).
+const STATE_FOCUS_PHASE_MIN = {
+  3:  { settle: 1, main_target: 1,  integrate: 1 },
+  10: { settle: 1, main_target: 8,  integrate: 1 },
+  20: { settle: 2, main_target: 16, integrate: 2 },
+  30: { settle: 3, main_target: 24, integrate: 3 },
+  60: { settle: 3, main_target: 54, integrate: 3 },
+};
+
+// Valid (entry_point → budget) combinations. T3 expands beyond T2's body-only set.
+const VALID_BUDGETS_BY_ENTRY = {
+  home:           new Set([30, 60]),                  // body-focus 5-phase OR state-focus 3-phase
+  strength_tab:   new Set([30, 60]),
+  yoga_tab:       new Set([15, 30, 45, 60]),
+  breathwork_tab: new Set([3, 10, 20, 30]),           // state-focus only
+};
+
+// Tabs that only accept body focuses (state focuses are hidden from these pickers).
+const BODY_ONLY_ENTRY_POINTS = new Set(['strength_tab', 'yoga_tab']);
+
+// Retries for the state-focus main pick-and-fit loop before falling back.
+const STATE_MAIN_RETRY_LIMIT = 3;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -561,6 +587,226 @@ async function generateYogaOnly({ userId, focus, levels, timeBudget }) {
   };
 }
 
+// ── State-focus recipe (settle → main → integrate) ───────────────────────
+//
+// Three-phase shape per spec §State Focus:
+//   settle    — one breathwork technique from the curated `settle_eligible_for` pool
+//               for this focus (Diaphragmatic always eligible, plus 1 tonal alternative).
+//   main      — one breathwork technique from focus_content_compatibility (role='main',
+//               standalone_compatible=true, level-appropriate). Pick-and-fit loop tries
+//               up to N candidates whose [level_min, level_max] window contains the
+//               main_target; falls back to the lowest-min-duration eligible technique
+//               when no candidate fits.
+//   integrate — silent observed-breathing timer. No technique row (content_id = null).
+//
+// Duration semantics: settle/integrate are clamped to ≤3 min. The main phase scales
+// with budget (budget − settle − integrate). When the picked main's max < main_target,
+// the engine returns a SHORTER session honestly (estimated_total_min reflects reality,
+// not the requested budget). Settle pool is independent of focus_content_compatibility —
+// driven entirely by `breathwork_techniques.settle_eligible_for` from S12-T1.
+
+async function pickSettleTechnique({ focusSlug, breathworkLevel, userExcludedIds }) {
+  const userRank = levelRankOf(breathworkLevel);
+  const { rows } = await pool.query(
+    `SELECT bt.id, bt.name, bt.difficulty,
+            bt.beginner_duration_min, bt.beginner_duration_max,
+            bt.intermediate_duration_min, bt.intermediate_duration_max,
+            bt.advanced_duration_min, bt.advanced_duration_max
+       FROM breathwork_techniques bt
+      WHERE $1 = ANY(bt.settle_eligible_for)
+        AND CASE bt.difficulty
+              WHEN 'beginner' THEN 1
+              WHEN 'intermediate' THEN 2
+              WHEN 'advanced' THEN 3
+            END <= $2
+        AND NOT (bt.id = ANY($3::int[]))
+      ORDER BY random()
+      LIMIT 1`,
+    [focusSlug, userRank, userExcludedIds]
+  );
+  return rows[0] || null;
+}
+
+// Whole-pool fetch for main; engine shuffles in JS so we can iterate pick-and-fit.
+async function loadStateMainPool({ focusSlug, breathworkLevel, userExcludedIds }) {
+  const userRank = levelRankOf(breathworkLevel);
+  const { rows } = await pool.query(
+    `SELECT bt.id, bt.name, bt.difficulty,
+            bt.beginner_duration_min, bt.beginner_duration_max,
+            bt.intermediate_duration_min, bt.intermediate_duration_max,
+            bt.advanced_duration_min, bt.advanced_duration_max
+       FROM focus_content_compatibility fcc
+       JOIN focus_areas fa ON fa.id = fcc.focus_id
+       JOIN breathwork_techniques bt ON bt.id = fcc.content_id
+      WHERE fa.slug = $1
+        AND fcc.role = 'main'
+        AND fcc.content_type = 'breathwork'
+        AND bt.standalone_compatible = true
+        AND CASE bt.difficulty
+              WHEN 'beginner' THEN 1
+              WHEN 'intermediate' THEN 2
+              WHEN 'advanced' THEN 3
+            END <= $2
+        AND NOT (bt.id = ANY($3::int[]))
+      ORDER BY random()`,
+    [focusSlug, userRank, userExcludedIds]
+  );
+  return rows;
+}
+
+function durationsForLevel(row, level) {
+  return {
+    min: row[`${level}_duration_min`],
+    max: row[`${level}_duration_max`],
+  };
+}
+
+function fitMainCandidate(row, level, mainTarget) {
+  const { min, max } = durationsForLevel(row, level);
+  if (min == null || max == null) return { kind: 'skip' };
+  if (max < mainTarget) {
+    // Technique can't fill the budget. Take its max — session shortens honestly.
+    return { kind: 'short', mainDuration: max };
+  }
+  if (min > mainTarget) {
+    // Technique needs more time than budget allows. Retry.
+    return { kind: 'retry' };
+  }
+  return { kind: 'fit', mainDuration: mainTarget };
+}
+
+async function generateStateFocus({ userId, focus, entryPoint, timeBudget }) {
+  if (!STATE_FOCUS_PHASE_MIN[timeBudget]) {
+    throw new RangeError(
+      `time_budget_min ${timeBudget} not valid for state focus from '${entryPoint}'`
+    );
+  }
+  const { settle: settleMin, main_target: mainTarget, integrate: integrateMin } =
+    STATE_FOCUS_PHASE_MIN[timeBudget];
+
+  const levels = await resolveLevels(userId);
+  const breathworkLevel = levels.breathwork;
+  const excludedBreathwork = await loadExclusions(userId, 'breathwork');
+
+  // 1. Settle.
+  const settleRow = await pickSettleTechnique({
+    focusSlug: focus.slug,
+    breathworkLevel,
+    userExcludedIds: excludedBreathwork,
+  });
+  if (!settleRow) {
+    throw new Error(
+      `No eligible settle technique for focus=${focus.slug}; check seed integrity`
+    );
+  }
+  const settleItem = {
+    content_type: 'breathwork',
+    content_id: settleRow.id,
+    name: settleRow.name,
+    duration_minutes: settleMin,
+    sets: null,
+    reps: null,
+    tier_badge: tierBadge(settleRow.difficulty, breathworkLevel),
+  };
+
+  // 2. Main — pick-and-fit loop with bounded retries, then fallback.
+  const mainPool = await loadStateMainPool({
+    focusSlug: focus.slug,
+    breathworkLevel,
+    userExcludedIds: excludedBreathwork,
+  });
+  if (mainPool.length === 0) {
+    throw new Error(
+      `No eligible main technique for focus=${focus.slug}, level=${breathworkLevel}`
+    );
+  }
+
+  let mainRow = null;
+  let mainDuration = null;
+  let attempts = 0;
+  for (const candidate of mainPool) {
+    if (attempts >= STATE_MAIN_RETRY_LIMIT) break;
+    const result = fitMainCandidate(candidate, breathworkLevel, mainTarget);
+    // 'skip' is a data error (NULL durations) — don't burn a retry slot on it.
+    if (result.kind === 'skip') {
+      console.error(
+        `[suggestionEngine] state main candidate '${candidate.name}' has NULL ${breathworkLevel}_duration_min/max — skipping`
+      );
+      continue;
+    }
+    attempts++;
+    if (result.kind === 'fit' || result.kind === 'short') {
+      mainRow = candidate;
+      mainDuration = result.mainDuration;
+      break;
+    }
+    // 'retry' falls through to next iteration.
+  }
+
+  if (!mainRow) {
+    // Fallback: pick the lowest-min-duration technique with non-NULL bounds.
+    // Re-run fit semantics on the fallback so we honor the budget when possible.
+    // If even the fallback's min exceeds main_target (budget structurally too short
+    // for this focus's content), use its min — shortest honest duration. The
+    // session will run OVER budget; metadata reflects reality, smoke flags it.
+    const fallback = mainPool
+      .filter((r) => r[`${breathworkLevel}_duration_min`] != null
+                  && r[`${breathworkLevel}_duration_max`] != null)
+      .sort((a, b) => a[`${breathworkLevel}_duration_min`] - b[`${breathworkLevel}_duration_min`])[0];
+    if (!fallback) {
+      throw new Error(
+        `No fallback main technique with non-NULL duration for focus=${focus.slug}, level=${breathworkLevel}`
+      );
+    }
+    mainRow = fallback;
+    const fit = fitMainCandidate(fallback, breathworkLevel, mainTarget);
+    if (fit.kind === 'fit' || fit.kind === 'short') {
+      mainDuration = fit.mainDuration;
+    } else {
+      // 'retry' — tech's min > main_target. Use min (closest honest duration).
+      mainDuration = durationsForLevel(fallback, breathworkLevel).min;
+    }
+  }
+
+  const mainItem = {
+    content_type: 'breathwork',
+    content_id: mainRow.id,
+    name: mainRow.name,
+    duration_minutes: mainDuration,
+    sets: null,
+    reps: null,
+    tier_badge: tierBadge(mainRow.difficulty, breathworkLevel),
+  };
+
+  // 3. Integrate — silent timer, no technique.
+  const integrateItem = {
+    content_type: 'breathwork',
+    content_id: null,
+    name: 'Silent observation',
+    duration_minutes: integrateMin,
+    sets: null,
+    reps: null,
+    tier_badge: null,
+  };
+
+  const phases = [
+    { phase: 'settle',    items: [settleItem] },
+    { phase: 'main',      items: [mainItem] },
+    { phase: 'integrate', items: [integrateItem] },
+  ];
+
+  return {
+    session_shape: 'state_focus',
+    phases,
+    warnings: [],
+    metadata: {
+      estimated_total_min: computeEstimatedTotalMin(phases, 'state_focus', timeBudget),
+      requested_budget_min: timeBudget,
+      user_levels: levels,
+    },
+  };
+}
+
 // ── Public entry point ──────────────────────────────────────────────────
 
 /**
@@ -568,9 +814,9 @@ async function generateYogaOnly({ userId, focus, levels, timeBudget }) {
  *
  * @param {Object} input
  * @param {number} input.user_id
- * @param {string} input.focus_slug          - e.g. 'biceps'
- * @param {string} input.entry_point         - 'home' | 'strength_tab' | 'yoga_tab'
- * @param {number} input.time_budget_min     - 15 | 30 | 45 | 60
+ * @param {string} input.focus_slug          - e.g. 'biceps' or 'calm'
+ * @param {string} input.entry_point         - 'home' | 'strength_tab' | 'yoga_tab' | 'breathwork_tab'
+ * @param {number} input.time_budget_min     - per-entry-point set; see VALID_BUDGETS_BY_ENTRY
  * @returns {Promise<{session_shape, phases, warnings, metadata}>}
  */
 export async function generateSession({ user_id, focus_slug, entry_point, time_budget_min }) {
@@ -588,22 +834,41 @@ export async function generateSession({ user_id, focus_slug, entry_point, time_b
       `time_budget_min must be a positive integer; got ${typeof time_budget_min} ${time_budget_min}`
     );
   }
-  if (entry_point === 'breathwork_tab') {
-    throw new NotImplementedError(
-      'breathwork tab entry lands in S12-T3 (state focuses) and S12-T4 (full_body)'
+  if (!VALID_BUDGETS_BY_ENTRY[entry_point].has(time_budget_min)) {
+    throw new RangeError(
+      `time_budget_min ${time_budget_min} not valid for entry_point '${entry_point}'; ` +
+      `valid: ${[...VALID_BUDGETS_BY_ENTRY[entry_point]].join(', ')}`
     );
   }
 
   const focus = await resolveFocus(focus_slug);
 
-  if (focus.focus_type === 'state') {
-    throw new NotImplementedError('state-focus path lands in S12-T3');
-  }
+  // T4 holds these — body focuses with their own special-case shapes.
   if (focus.slug === 'mobility') {
     throw new NotImplementedError('mobility special-case lands in S12-T4');
   }
   if (focus.slug === 'full_body') {
     throw new NotImplementedError('full_body special-case lands in S12-T4');
+  }
+
+  // State focuses route to the state recipe regardless of entry point.
+  // Strength/yoga tabs hide state focuses in their pickers; defend anyway.
+  if (focus.focus_type === 'state') {
+    if (BODY_ONLY_ENTRY_POINTS.has(entry_point)) {
+      throw new RangeError(
+        `state focus '${focus.slug}' is not valid from '${entry_point}'; ` +
+        `state focuses are surfaced from 'home' and 'breathwork_tab' only`
+      );
+    }
+    return generateStateFocus({ userId: user_id, focus, entryPoint: entry_point, timeBudget: time_budget_min });
+  }
+
+  // Body focus from breathwork_tab is invalid — breathwork_tab is state-only.
+  if (entry_point === 'breathwork_tab') {
+    throw new RangeError(
+      `body focus '${focus.slug}' is not valid from 'breathwork_tab'; ` +
+      `breathwork_tab supports state focuses only`
+    );
   }
 
   const levels = await resolveLevels(user_id);
