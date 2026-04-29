@@ -17,6 +17,8 @@ import {
   NotImplementedError,
 } from '../src/services/suggestionEngine.js';
 import { incrementSwap, setPromptState } from '../src/services/swapCounter.js';
+import jwt from 'jsonwebtoken';
+import { createApp } from '../src/index.js';
 
 const IN_SCOPE_FOCUSES = [
   'chest', 'back', 'shoulders', 'biceps', 'triceps',
@@ -1559,6 +1561,653 @@ async function main() {
       check('T6 cleanup: user_excluded_exercises restored',
         t6SnapshotAfter.excluded === t6SnapshotBefore.excluded,
         `before=${t6SnapshotBefore.excluded} after=${t6SnapshotAfter.excluded}`);
+    }
+  }
+
+  // ── Phase 3f: T7 HTTP-LAYER BLOCK ────────────────────────────────────
+  // 19 sub-blocks exercising POST /api/sessions/suggest, GET /api/sessions/last,
+  // POST /api/sessions/save-as-routine via createApp() in-process Express
+  // listener (no real port collision risk — listen(0) binds an ephemeral port).
+  // Cleanup wraps the whole block; SIGINT/SIGTERM re-restore on abort.
+  {
+    console.log('\n=== T7 HTTP-LAYER BLOCK ===');
+    if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET not set — required for T7 block');
+    const t7App = createApp();
+    const t7Server = await new Promise((resolve) => {
+      const s = t7App.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const t7Port = t7Server.address().port;
+    const t7Base = `http://127.0.0.1:${t7Port}`;
+    const t7Token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '5m' });
+    const t7H = { 'Content-Type': 'application/json', Authorization: `Bearer ${t7Token}` };
+
+    // Track ids/rows we create so cleanup is precise.
+    const t7CreatedRoutineIds = [];
+    const t7CreatedSessionIds = [];
+    const t7CreatedBwSessionIds = [];
+    const t7ExcludedExIds = [];
+
+    // Insert two temporary focus_areas rows so /last can be tested against
+    // throwaway focus slugs without touching the live user's real focus history.
+    // Cleanup removes them at end-of-block.
+    const T7_TEMP_STATE_FOCUS = '__t_state_test';
+    const T7_TEMP_BODY_FOCUS  = '__t_body_test';
+    await pool.query(
+      `INSERT INTO focus_areas (slug, display_name, focus_type, sort_order, is_active)
+       VALUES ($1, 'T7 Test State Focus', 'state', 9999, true),
+              ($2, 'T7 Test Body Focus',  'body',  9999, true)
+       ON CONFLICT (slug) DO NOTHING`,
+      [T7_TEMP_STATE_FOCUS, T7_TEMP_BODY_FOCUS]);
+
+    // All T7 fixture inserts tag rows with notes='t7-smoke-fixture' (sessions)
+    // or use the createdBwSessionIds tracking list (breathwork_sessions has no
+    // notes column). Cleanup deletes by sentinel + by id to be belt-and-braces.
+    const T7_FIXTURE_NOTE = 't7-smoke-fixture';
+    async function t7Cleanup() {
+      if (t7CreatedRoutineIds.length > 0) {
+        await pool.query(`DELETE FROM user_routine_exercises WHERE routine_id = ANY($1::int[])`, [t7CreatedRoutineIds]);
+        await pool.query(`DELETE FROM user_routines WHERE id = ANY($1::int[])`, [t7CreatedRoutineIds]);
+      }
+      // Delete sessions by sentinel notes (catches anything we inserted).
+      await pool.query(
+        `DELETE FROM session_exercises WHERE session_id IN (
+           SELECT id FROM sessions WHERE user_id = $1 AND notes = $2
+         )`, [user.id, T7_FIXTURE_NOTE]);
+      await pool.query(
+        `DELETE FROM sessions WHERE user_id = $1 AND notes = $2`,
+        [user.id, T7_FIXTURE_NOTE]);
+      // Defensive: also delete by id tracking (in case anything skipped the sentinel).
+      if (t7CreatedSessionIds.length > 0) {
+        await pool.query(`DELETE FROM session_exercises WHERE session_id = ANY($1::int[])`, [t7CreatedSessionIds]);
+        await pool.query(`DELETE FROM sessions WHERE id = ANY($1::int[])`, [t7CreatedSessionIds]);
+      }
+      if (t7CreatedBwSessionIds.length > 0) {
+        await pool.query(`DELETE FROM breathwork_sessions WHERE id = ANY($1::int[])`, [t7CreatedBwSessionIds]);
+      }
+      if (t7ExcludedExIds.length > 0) {
+        await pool.query(
+          `DELETE FROM user_excluded_exercises WHERE user_id = $1 AND content_type = 'strength' AND content_id = ANY($2::int[])`,
+          [user.id, t7ExcludedExIds]);
+        await pool.query(
+          `DELETE FROM exercise_swap_counts WHERE user_id = $1 AND exercise_id = ANY($2::int[])`,
+          [user.id, t7ExcludedExIds]);
+      }
+      // Remove rows that may have been seeded against the temp focus slugs
+      // (defensive — the per-id tracking should already have caught them).
+      await pool.query(
+        `DELETE FROM session_exercises WHERE session_id IN (
+           SELECT id FROM sessions WHERE user_id = $1 AND focus_slug = ANY($2::text[])
+         )`, [user.id, [T7_TEMP_STATE_FOCUS, T7_TEMP_BODY_FOCUS]]);
+      await pool.query(
+        `DELETE FROM sessions WHERE user_id = $1 AND focus_slug = ANY($2::text[])`,
+        [user.id, [T7_TEMP_STATE_FOCUS, T7_TEMP_BODY_FOCUS]]);
+      await pool.query(
+        `DELETE FROM breathwork_sessions WHERE user_id = $1 AND focus_slug = ANY($2::text[])`,
+        [user.id, [T7_TEMP_STATE_FOCUS, T7_TEMP_BODY_FOCUS]]);
+      // Drop the temp focus_areas rows.
+      await pool.query(
+        `DELETE FROM focus_areas WHERE slug = ANY($1::text[])`,
+        [[T7_TEMP_STATE_FOCUS, T7_TEMP_BODY_FOCUS]]);
+    }
+    const t7AbortHandler = async () => {
+      try { await t7Cleanup(); } catch (e) { console.error('[T7 abort cleanup]', e); }
+      try { t7Server.close(); } catch {}
+      process.exit(130);
+    };
+    process.once('SIGINT', t7AbortHandler);
+    process.once('SIGTERM', t7AbortHandler);
+
+    try {
+      // Sub-block 1: /suggest body-focus happy path (criterion #2)
+      {
+        const r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'home', time_budget_min: 30 }) });
+        check('T7/1 suggest body home: status 200', r.status === 200, `got ${r.status}`);
+        const body = await r.json();
+        check('T7/1 suggest body home: session_shape=cross_pillar',
+          body.session_shape === 'cross_pillar', `got ${body.session_shape}`);
+        check('T7/1 suggest body home: phases is array', Array.isArray(body.phases));
+        check('T7/1 suggest body home: metadata.source=engine_v1',
+          body.metadata?.source === 'engine_v1', `got ${body.metadata?.source}`);
+        check('T7/1 suggest body home: warnings is array', Array.isArray(body.warnings));
+        const hasMain = (body.phases || []).some((p) => p.phase === 'main' && (p.items || []).length > 0);
+        check('T7/1 suggest body home: has main phase with items', hasMain);
+      }
+
+      // Sub-block 2: /suggest state-focus happy path (criterion #3)
+      {
+        const r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'calm', entry_point: 'breathwork_tab', bracket: '10-20' }) });
+        check('T7/2 suggest state breathwork_tab: status 200', r.status === 200, `got ${r.status}`);
+        const body = await r.json();
+        check('T7/2 suggest state: session_shape=state_focus',
+          body.session_shape === 'state_focus', `got ${body.session_shape}`);
+        check('T7/2 suggest state: 3 phases', Array.isArray(body.phases) && body.phases.length === 3,
+          `got ${body.phases?.length}`);
+        const phaseNames = (body.phases || []).map((p) => p.phase);
+        check('T7/2 suggest state: phase names = centering/practice/reflection',
+          JSON.stringify(phaseNames) === JSON.stringify(['centering', 'practice', 'reflection']),
+          `got ${JSON.stringify(phaseNames)}`);
+        check('T7/2 suggest state: metadata.source=engine_v1',
+          body.metadata?.source === 'engine_v1');
+      }
+
+      // Sub-block 3: /suggest validation matrix — 9 error cases (criteria #4–#12)
+      {
+        // 3a. body focus missing time_budget — criterion #4
+        let r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'home' }) });
+        let b = await r.json();
+        check('T7/3a body focus missing budget → 400',
+          r.status === 400 && b.error === 'body_focus_requires_time_budget', `got ${r.status} ${b.error}`);
+
+        // 3b. state focus missing bracket — criterion #5
+        r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'calm', entry_point: 'breathwork_tab' }) });
+        b = await r.json();
+        check('T7/3b state focus missing bracket → 400',
+          r.status === 400 && b.error === 'state_focus_requires_bracket', `got ${r.status} ${b.error}`);
+
+        // 3c. invalid time_budget (4) — criterion #6
+        r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'home', time_budget_min: 4 }) });
+        b = await r.json();
+        check('T7/3c invalid time_budget=4 → 400',
+          r.status === 400 && b.error === 'invalid_time_budget', `got ${r.status} ${b.error}`);
+
+        // 3d. invalid time_budget (241) — criterion #6
+        r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'home', time_budget_min: 241 }) });
+        b = await r.json();
+        check('T7/3d invalid time_budget=241 → 400',
+          r.status === 400 && b.error === 'invalid_time_budget');
+
+        // 3e. invalid bracket — criterion #7
+        r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'calm', entry_point: 'breathwork_tab', bracket: '0-15' }) });
+        b = await r.json();
+        check('T7/3e invalid bracket=0-15 → 400',
+          r.status === 400 && b.error === 'invalid_bracket', `got ${r.status} ${b.error}`);
+
+        // 3f. unknown focus — criterion #8
+        r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'xyz_unknown', entry_point: 'home', time_budget_min: 30 }) });
+        b = await r.json();
+        check('T7/3f unknown focus → 400 unknown_focus_slug',
+          r.status === 400 && b.error === 'unknown_focus_slug');
+
+        // 3g. invalid entry_point — criterion #9
+        r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'yoga_page', time_budget_min: 30 }) });
+        b = await r.json();
+        check('T7/3g invalid entry_point → 400',
+          r.status === 400 && b.error === 'invalid_entry_point');
+
+        // 3h. body focus from breathwork_tab — criterion #10
+        // Include time_budget_min so pre-engine body/state contract check passes;
+        // the engine then throws on entry-point/focus-type combo.
+        r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'breathwork_tab', time_budget_min: 30 }) });
+        b = await r.json();
+        check('T7/3h body focus from breathwork_tab → 400 invalid_focus_entry_combo',
+          r.status === 400 && b.error === 'invalid_focus_entry_combo', `got ${r.status} ${b.error}`);
+
+        // 3i. state focus from strength_tab — criterion #11
+        r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'calm', entry_point: 'strength_tab', bracket: '10-20' }) });
+        b = await r.json();
+        check('T7/3i state focus from strength_tab → 400 invalid_focus_entry_combo',
+          r.status === 400 && b.error === 'invalid_focus_entry_combo', `got ${r.status} ${b.error}`);
+
+        // 3j. mobility from strength_tab — criterion #12
+        r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'mobility', entry_point: 'strength_tab', time_budget_min: 30 }) });
+        b = await r.json();
+        check('T7/3j mobility from strength_tab → 400 invalid_focus_entry_combo',
+          r.status === 400 && b.error === 'invalid_focus_entry_combo', `got ${r.status} ${b.error}`);
+      }
+
+      // Sub-block 4: /suggest recency-warning round-trip (criterion #13)
+      {
+        // Insert a yesterday strength session for biceps for this user.
+        const ins = await pool.query(
+          `INSERT INTO sessions (user_id, type, focus_slug, completed, started_at, completed_at, date, notes)
+           VALUES ($1, 'strength', 'biceps', true, NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day', CURRENT_DATE - 1, $2)
+           RETURNING id`,
+          [user.id, T7_FIXTURE_NOTE]);
+        const recencySessionId = ins.rows[0].id;
+        t7CreatedSessionIds.push(recencySessionId);
+
+        const r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'home', time_budget_min: 30 }) });
+        const body = await r.json();
+        check('T7/4 recency: status 200', r.status === 200);
+        check('T7/4 recency: warnings has at least 1', Array.isArray(body.warnings) && body.warnings.length >= 1,
+          `got ${JSON.stringify(body.warnings)}`);
+        const hasRecency = (body.warnings || []).some((w) => w.type === 'recency_overlap');
+        check('T7/4 recency: warnings[].type includes recency_overlap', hasRecency,
+          `got ${JSON.stringify(body.warnings)}`);
+        // Delete this fixture immediately so subsequent sub-blocks don't see
+        // an unexpected recency warning leaking in.
+        await pool.query(`DELETE FROM sessions WHERE id = $1`, [recencySessionId]);
+        const idx = t7CreatedSessionIds.indexOf(recencySessionId);
+        if (idx >= 0) t7CreatedSessionIds.splice(idx, 1);
+      }
+
+      // Sub-block 5: /suggest exclusion round-trip (criterion #14)
+      {
+        // Suggest biceps once, capture a strength content_id, exclude it, loop 20×.
+        const r0 = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'strength_tab', time_budget_min: 30 }) });
+        const sample = await r0.json();
+        const allItems = (sample.phases || []).flatMap((p) => p.items || []);
+        const strengthItem = allItems.find((it) => it.content_type === 'strength');
+        if (!strengthItem) {
+          check('T7/5 exclusion: precondition (sample has strength item)', false, 'sample empty');
+        } else {
+          const targetId = strengthItem.content_id;
+          // Exclude via T6's endpoint
+          const exR = await fetch(`${t7Base}/api/exercises/${targetId}/exclude`, { method: 'POST', headers: t7H });
+          check('T7/5 exclusion: exclude endpoint 200', exR.status === 200);
+          t7ExcludedExIds.push(targetId);
+
+          let everSeen = false;
+          for (let i = 0; i < 20; i++) {
+            const r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+              body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'strength_tab', time_budget_min: 30 }) });
+            const b = await r.json();
+            const items = (b.phases || []).flatMap((p) => p.items || []);
+            if (items.some((it) => it.content_type === 'strength' && it.content_id === targetId)) {
+              everSeen = true;
+              break;
+            }
+          }
+          check('T7/5 exclusion: excluded id never appears across 20 calls', everSeen === false,
+            `target=${targetId}`);
+        }
+      }
+
+      // Sub-block 6: /suggest auth — missing/invalid JWT (criteria #15-#16)
+      {
+        let r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'home', time_budget_min: 30 }) });
+        check('T7/6a missing JWT → 401', r.status === 401, `got ${r.status}`);
+
+        r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer not-a-real-token' },
+          body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'home', time_budget_min: 30 }) });
+        check('T7/6b invalid JWT → 401', r.status === 401, `got ${r.status}`);
+      }
+
+      // Sub-block 7: /last 404 — no prior session (criterion #17)
+      // The temp focus slugs we created at the top of the block have NO
+      // session/breathwork rows for the live user yet (sub-blocks 9 & 10
+      // insert into them later). So /last returns 404 here. This is order-
+      // dependent — sub-block 7 must run before 9/10.
+      {
+        // 7a. Slug that doesn't pass the [a-z_] regex → 400.
+        const r = await fetch(`${t7Base}/api/sessions/last?focus=BAD_SLUG_99`,
+          { headers: t7H });
+        check('T7/7a /last for regex-invalid focus → 400',
+          r.status === 400, `got ${r.status}`);
+
+        // 7b. Valid slug, valid temp focus row exists, but user has no session
+        // for it yet → 404 last_session_not_found.
+        const r2 = await fetch(`${t7Base}/api/sessions/last?focus=${T7_TEMP_STATE_FOCUS}`,
+          { headers: t7H });
+        const b2 = await r2.json();
+        check('T7/7b /last for valid focus with no rows → 404 last_session_not_found',
+          r2.status === 404 && b2.error === 'last_session_not_found', `got ${r2.status} ${b2.error}`);
+      }
+
+      // Sub-block 8: /last 200 — strength session reconstruction (criterion #18)
+      {
+        // Insert strength session + 2 session_exercises rows for chest.
+        // First scrub any prior fixture row for this focus so the test is
+        // deterministic on rerun (sentinel-scoped, not a global delete).
+        await pool.query(
+          `DELETE FROM session_exercises WHERE session_id IN (
+             SELECT id FROM sessions WHERE user_id = $1 AND focus_slug = 'chest' AND notes = $2
+           )`, [user.id, T7_FIXTURE_NOTE]);
+        await pool.query(
+          `DELETE FROM sessions WHERE user_id = $1 AND focus_slug = 'chest' AND notes = $2`,
+          [user.id, T7_FIXTURE_NOTE]);
+
+        const ins = await pool.query(
+          `INSERT INTO sessions (user_id, type, focus_slug, completed, started_at, completed_at, date, notes)
+           VALUES ($1, 'strength', 'chest', true, NOW() - INTERVAL '2 hours', NOW() - INTERVAL '1 hour', CURRENT_DATE, $2)
+           RETURNING id`,
+          [user.id, T7_FIXTURE_NOTE]);
+        const sessionId = ins.rows[0].id;
+        t7CreatedSessionIds.push(sessionId);
+        // Pick any 2 strength exercises from the library to attach.
+        const exq = await pool.query(
+          `SELECT id FROM exercises WHERE type = 'strength' AND workout_id IS NULL LIMIT 2`);
+        let insertedExIds = [];
+        if (exq.rows.length >= 2) {
+          insertedExIds = [exq.rows[0].id, exq.rows[1].id];
+          await pool.query(
+            `INSERT INTO session_exercises (session_id, exercise_id, set_number, sets_completed, reps_completed, sort_order)
+             VALUES ($1, $2, 1, 3, 10, 0), ($1, $3, 1, 3, 12, 1)`,
+            [sessionId, insertedExIds[0], insertedExIds[1]]);
+        }
+
+        const r = await fetch(`${t7Base}/api/sessions/last?focus=chest`, { headers: t7H });
+        check('T7/8 /last strength: status 200', r.status === 200, `got ${r.status}`);
+        const body = await r.json();
+        check('T7/8 /last strength: session_shape=pillar_pure',
+          body.session_shape === 'pillar_pure', `got ${body.session_shape}`);
+        check('T7/8 /last strength: metadata.source=last_completed',
+          body.metadata?.source === 'last_completed');
+        check('T7/8 /last strength: metadata.completed_at is ISO',
+          typeof body.metadata?.completed_at === 'string' && /T.*Z$/.test(body.metadata.completed_at),
+          `got ${body.metadata?.completed_at}`);
+        check('T7/8 /last strength: phases has main', (body.phases || []).some((p) => p.phase === 'main'));
+        const mainPhase = (body.phases || []).find((p) => p.phase === 'main');
+        check('T7/8 /last strength: main has 2 items',
+          mainPhase?.items?.length === 2, `got ${mainPhase?.items?.length}`);
+        const surfacedIds = (mainPhase?.items || []).map((it) => it.content_id).sort();
+        check('T7/8 /last strength: items surface inserted exercise ids',
+          JSON.stringify(surfacedIds) === JSON.stringify([...insertedExIds].sort()),
+          `surfaced=${JSON.stringify(surfacedIds)} inserted=${JSON.stringify(insertedExIds)}`);
+        check('T7/8 /last strength: items have sets=3 (aggregate row)',
+          (mainPhase?.items || []).every((it) => it.sets === 3),
+          `got ${JSON.stringify((mainPhase?.items || []).map((it) => it.sets))}`);
+      }
+
+      // Sub-block 8.5: /last 200 — 5-phase reconstruction via phases_json
+      {
+        const phasesJsonFixture = [
+          { phase: 'bookend_open', items: [{ content_type: 'breathwork', content_id: 1, name: 'X', duration_minutes: 2 }] },
+          { phase: 'main', items: [{ content_type: 'strength', content_id: 1, name: 'Y', sets: 3, reps: 10 }] },
+        ];
+        // Use a unique focus_slug that doesn't collide with our other fixtures.
+        const focusFor5 = 'shoulders';
+        await pool.query(
+          `DELETE FROM sessions WHERE user_id = $1 AND focus_slug = $2 AND notes = $3`,
+          [user.id, focusFor5, T7_FIXTURE_NOTE]);
+
+        const ins = await pool.query(
+          `INSERT INTO sessions (user_id, type, focus_slug, completed, started_at, completed_at, date, phases_json, notes)
+           VALUES ($1, '5phase', $2, true, NOW() - INTERVAL '30 minutes', NOW(), CURRENT_DATE, $3::jsonb, $4)
+           RETURNING id`,
+          [user.id, focusFor5, JSON.stringify(phasesJsonFixture), T7_FIXTURE_NOTE]);
+        t7CreatedSessionIds.push(ins.rows[0].id);
+
+        const r = await fetch(`${t7Base}/api/sessions/last?focus=${focusFor5}`, { headers: t7H });
+        check('T7/8.5 /last 5phase: status 200', r.status === 200, `got ${r.status}`);
+        const body = await r.json();
+        check('T7/8.5 /last 5phase: session_shape=cross_pillar',
+          body.session_shape === 'cross_pillar', `got ${body.session_shape}`);
+        // JSONB doesn't preserve key order — assert structural facts instead of
+        // literal equality.
+        const ph = body.phases || [];
+        check('T7/8.5 /last 5phase: phases length matches fixture (2)',
+          ph.length === 2, `got ${ph.length}`);
+        const phNames = ph.map((p) => p.phase);
+        check('T7/8.5 /last 5phase: phase names = bookend_open, main',
+          JSON.stringify(phNames) === JSON.stringify(['bookend_open', 'main']),
+          `got ${JSON.stringify(phNames)}`);
+        check('T7/8.5 /last 5phase: bookend_open has breathwork item',
+          ph[0]?.items?.[0]?.content_type === 'breathwork');
+        check('T7/8.5 /last 5phase: main has strength item with sets=3',
+          ph[1]?.items?.[0]?.content_type === 'strength' && ph[1]?.items?.[0]?.sets === 3);
+        check('T7/8.5 /last 5phase: metadata.partial_reconstruction NOT set',
+          body.metadata?.partial_reconstruction !== true);
+      }
+
+      // Sub-block 9: /last 200 — breathwork session (criterion #19)
+      // Use the temp state focus_slug so we never touch the live user's real
+      // 'calm'/'energize' history.
+      {
+        const techq = await pool.query(`SELECT id FROM breathwork_techniques LIMIT 1`);
+        const techId = techq.rows[0].id;
+        const ins = await pool.query(
+          `INSERT INTO breathwork_sessions (user_id, technique_id, duration_seconds, rounds_completed, completed, focus_slug, created_at)
+           VALUES ($1, $2, 600, 10, true, $3, NOW() - INTERVAL '3 days')
+           RETURNING id`,
+          [user.id, techId, T7_TEMP_STATE_FOCUS]);
+        t7CreatedBwSessionIds.push(ins.rows[0].id);
+
+        const r = await fetch(`${t7Base}/api/sessions/last?focus=${T7_TEMP_STATE_FOCUS}`, { headers: t7H });
+        check('T7/9 /last breathwork: status 200', r.status === 200, `got ${r.status}`);
+        const body = await r.json();
+        check('T7/9 /last breathwork: session_shape=state_focus',
+          body.session_shape === 'state_focus', `got ${body.session_shape}`);
+        check('T7/9 /last breathwork: phases has practice',
+          (body.phases || []).some((p) => p.phase === 'practice'));
+        check('T7/9 /last breathwork: metadata.partial_reconstruction=true',
+          body.metadata?.partial_reconstruction === true);
+        check('T7/9 /last breathwork: metadata.source=last_completed',
+          body.metadata?.source === 'last_completed');
+      }
+
+      // Sub-block 10: /last UNION ordering (criterion #20)
+      // Use the temp body focus so we never touch real user history. Strength
+      // session yesterday + breathwork session 2 days ago → strength wins.
+      {
+        const sIns = await pool.query(
+          `INSERT INTO sessions (user_id, type, focus_slug, completed, started_at, completed_at, date, notes)
+           VALUES ($1, 'strength', $2, true, NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day', CURRENT_DATE - 1, $3)
+           RETURNING id`,
+          [user.id, T7_TEMP_BODY_FOCUS, T7_FIXTURE_NOTE]);
+        t7CreatedSessionIds.push(sIns.rows[0].id);
+        const techq = await pool.query(`SELECT id FROM breathwork_techniques LIMIT 1`);
+        const bIns = await pool.query(
+          `INSERT INTO breathwork_sessions (user_id, technique_id, duration_seconds, rounds_completed, completed, focus_slug, created_at)
+           VALUES ($1, $2, 300, 5, true, $3, NOW() - INTERVAL '2 days')
+           RETURNING id`,
+          [user.id, techq.rows[0].id, T7_TEMP_BODY_FOCUS]);
+        t7CreatedBwSessionIds.push(bIns.rows[0].id);
+
+        const r = await fetch(`${t7Base}/api/sessions/last?focus=${T7_TEMP_BODY_FOCUS}`, { headers: t7H });
+        const body = await r.json();
+        check('T7/10 /last UNION: returns the strength one (newer)',
+          body.session_shape === 'pillar_pure', `got shape=${body.session_shape}`);
+        check('T7/10 /last UNION: not partial_reconstruction (strength path)',
+          body.metadata?.partial_reconstruction !== true);
+        check('T7/10 /last UNION: status 200', r.status === 200);
+      }
+
+      // Sub-block 11: /last validation (criteria #21-#22)
+      {
+        let r = await fetch(`${t7Base}/api/sessions/last`, { headers: t7H });
+        let b = await r.json();
+        check('T7/11a /last missing focus → 400 focus_param_required',
+          r.status === 400 && b.error === 'focus_param_required', `got ${r.status} ${b.error}`);
+
+        r = await fetch(`${t7Base}/api/sessions/last?focus=xyz_unknown`, { headers: t7H });
+        b = await r.json();
+        check('T7/11b /last unknown focus → 400 unknown_focus_slug',
+          r.status === 400 && b.error === 'unknown_focus_slug', `got ${r.status} ${b.error}`);
+
+        r = await fetch(`${t7Base}/api/sessions/last?focus=BAD!`, { headers: t7H });
+        b = await r.json();
+        check('T7/11c /last malformed focus → 400 unknown_focus_slug',
+          r.status === 400 && b.error === 'unknown_focus_slug', `got ${r.status} ${b.error}`);
+      }
+
+      // Sub-block 12: /last auth (criterion #23)
+      {
+        const r = await fetch(`${t7Base}/api/sessions/last?focus=biceps`,
+          { headers: { 'Content-Type': 'application/json' } });
+        check('T7/12 /last no JWT → 401', r.status === 401);
+      }
+
+      // Sub-block 13: /save-as-routine cross_pillar success (criterion #24)
+      let t7SavedRoutineId = null;
+      let t7SavedExerciseCount = 0;
+      {
+        const sR = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'home', time_budget_min: 30 }) });
+        const session = await sR.json();
+        const r = await fetch(`${t7Base}/api/sessions/save-as-routine`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ name: 'T7 smoke routine', session }) });
+        check('T7/13 save cross_pillar: status 200', r.status === 200, `got ${r.status}`);
+        const body = await r.json();
+        check('T7/13 save cross_pillar: saved_phase=strength', body.saved_phase === 'strength');
+        check('T7/13 save cross_pillar: routine_id is integer', Number.isInteger(body.routine_id));
+        check('T7/13 save cross_pillar: dropped_phases is array', Array.isArray(body.dropped_phases));
+        check('T7/13 save cross_pillar: exercise_count > 0',
+          Number.isInteger(body.exercise_count) && body.exercise_count > 0);
+        if (Number.isInteger(body.routine_id)) {
+          t7CreatedRoutineIds.push(body.routine_id);
+          t7SavedRoutineId = body.routine_id;
+          t7SavedExerciseCount = body.exercise_count;
+          // Verify rows in DB
+          const dbR = await pool.query(`SELECT name FROM user_routines WHERE id = $1`, [body.routine_id]);
+          check('T7/13 save cross_pillar: user_routines row exists', dbR.rows.length === 1);
+          check('T7/13 save cross_pillar: name persisted',
+            dbR.rows[0]?.name === 'T7 smoke routine', `got ${dbR.rows[0]?.name}`);
+          const dbRe = await pool.query(
+            `SELECT COUNT(*)::int AS c FROM user_routine_exercises WHERE routine_id = $1`, [body.routine_id]);
+          check('T7/13 save cross_pillar: routine_exercises count matches exercise_count',
+            dbRe.rows[0].c === body.exercise_count, `db=${dbRe.rows[0].c} resp=${body.exercise_count}`);
+        }
+      }
+
+      // Sub-block 14: /save-as-routine state_focus rejected (criterion #25)
+      {
+        const sR = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'calm', entry_point: 'breathwork_tab', bracket: '10-20' }) });
+        const session = await sR.json();
+        const r = await fetch(`${t7Base}/api/sessions/save-as-routine`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ name: 'T7 state save', session }) });
+        const body = await r.json();
+        check('T7/14 save state_focus → 400 state_focus_not_saveable_v1',
+          r.status === 400 && body.error === 'state_focus_not_saveable_v1', `got ${r.status} ${body.error}`);
+        const post = await pool.query(
+          `SELECT 1 FROM user_routines WHERE user_id = $1 AND name = 'T7 state save'`, [user.id]);
+        check('T7/14 save state_focus: no user_routines row inserted', post.rows.length === 0);
+      }
+
+      // Sub-block 15: /save-as-routine pillar_pure rejected — yoga + breathwork (criteria #26-#27)
+      {
+        // pillar_pure yoga: suggest mobility from yoga_tab.
+        const yR = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ focus_slug: 'mobility', entry_point: 'yoga_tab', time_budget_min: 30 }) });
+        const yogaSession = await yR.json();
+        const r1 = await fetch(`${t7Base}/api/sessions/save-as-routine`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ name: 'T7 yoga save', session: yogaSession }) });
+        const b1 = await r1.json();
+        check('T7/15a save pillar_pure_yoga → 400 pillar_pure_yoga_not_saveable_v1',
+          r1.status === 400 && b1.error === 'pillar_pure_yoga_not_saveable_v1', `got ${r1.status} ${b1.error}`);
+
+        // pillar_pure breathwork: synthesize manually (no entry-point currently emits this).
+        const synthBw = {
+          session_shape: 'pillar_pure',
+          phases: [{ phase: 'main', items: [{ content_type: 'breathwork', content_id: 1, name: 'X', duration_minutes: 5 }] }],
+          warnings: [],
+          metadata: {},
+        };
+        const r2 = await fetch(`${t7Base}/api/sessions/save-as-routine`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ name: 'T7 bw save', session: synthBw }) });
+        const b2 = await r2.json();
+        check('T7/15b save pillar_pure_breathwork → 400 pillar_pure_breathwork_not_saveable_v1',
+          r2.status === 400 && b2.error === 'pillar_pure_breathwork_not_saveable_v1', `got ${r2.status} ${b2.error}`);
+      }
+
+      // Sub-block 16: /save-as-routine validation (criteria #28-#31)
+      {
+        const validSession = {
+          session_shape: 'cross_pillar',
+          phases: [{ phase: 'main', items: [{ content_type: 'strength', content_id: 1, name: 'X', sets: 3 }] }],
+          warnings: [],
+          metadata: {},
+        };
+        // 16a. missing name
+        let r = await fetch(`${t7Base}/api/sessions/save-as-routine`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ session: validSession }) });
+        let b = await r.json();
+        check('T7/16a missing name → 400 routine_name_required',
+          r.status === 400 && b.error === 'routine_name_required', `got ${r.status} ${b.error}`);
+
+        // 16b. name 101 chars
+        r = await fetch(`${t7Base}/api/sessions/save-as-routine`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ name: 'x'.repeat(101), session: validSession }) });
+        b = await r.json();
+        check('T7/16b name 101 chars → 400 routine_name_too_long',
+          r.status === 400 && b.error === 'routine_name_too_long');
+
+        // 16c. description 501 chars
+        r = await fetch(`${t7Base}/api/sessions/save-as-routine`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ name: 'ok', description: 'x'.repeat(501), session: validSession }) });
+        b = await r.json();
+        check('T7/16c description 501 chars → 400 routine_description_too_long',
+          r.status === 400 && b.error === 'routine_description_too_long');
+
+        // 16d. empty session phases
+        r = await fetch(`${t7Base}/api/sessions/save-as-routine`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ name: 'ok', session: { session_shape: 'cross_pillar', phases: [], warnings: [], metadata: {} } }) });
+        b = await r.json();
+        check('T7/16d empty phases → 400 no_strength_phase_in_session',
+          r.status === 400 && b.error === 'no_strength_phase_in_session', `got ${r.status} ${b.error}`);
+      }
+
+      // Sub-block 17: /save-as-routine atomicity (criterion #32)
+      // Force a DB error mid-INSERT via an invalid content_id (FK violation).
+      {
+        const badSession = {
+          session_shape: 'cross_pillar',
+          phases: [
+            { phase: 'main', items: [
+              { content_type: 'strength', content_id: 999_999_999, name: 'no-such', sets: 3 },
+            ]},
+          ],
+          warnings: [],
+          metadata: {},
+        };
+        const beforeCount = await pool.query(
+          `SELECT COUNT(*)::int AS c FROM user_routines WHERE user_id = $1 AND name = 'T7 atomicity test'`,
+          [user.id]);
+        const r = await fetch(`${t7Base}/api/sessions/save-as-routine`, { method: 'POST', headers: t7H,
+          body: JSON.stringify({ name: 'T7 atomicity test', session: badSession }) });
+        check('T7/17 atomicity: 500 (FK violation in routine_exercises insert)',
+          r.status === 500, `got ${r.status}`);
+        const afterCount = await pool.query(
+          `SELECT COUNT(*)::int AS c FROM user_routines WHERE user_id = $1 AND name = 'T7 atomicity test'`,
+          [user.id]);
+        check('T7/17 atomicity: user_routines NOT incremented (rollback worked)',
+          afterCount.rows[0].c === beforeCount.rows[0].c,
+          `before=${beforeCount.rows[0].c} after=${afterCount.rows[0].c}`);
+        const orphan = await pool.query(
+          `SELECT COUNT(*)::int AS c FROM user_routines WHERE user_id = $1 AND name = 'T7 atomicity test'`,
+          [user.id]);
+        check('T7/17 atomicity: zero orphan routines for this name',
+          orphan.rows[0].c === 0);
+      }
+
+      // Sub-block 18: /save-as-routine round-trip via existing API (criterion #33)
+      {
+        if (t7SavedRoutineId) {
+          const r = await fetch(`${t7Base}/api/routines`, { headers: t7H });
+          check('T7/18 GET /api/routines: status 200', r.status === 200);
+          const body = await r.json();
+          const found = (body.routines || []).find((rt) => rt.id === t7SavedRoutineId);
+          check('T7/18 saved routine appears in GET /api/routines', !!found,
+            `looking for id=${t7SavedRoutineId}`);
+          check('T7/18 exercise_count matches (round-trip read)',
+            found?.exercise_count === t7SavedExerciseCount,
+            `read=${found?.exercise_count} saved=${t7SavedExerciseCount}`);
+        } else {
+          check('T7/18 round-trip via existing API: skipped (sub-block 13 produced no routine_id)',
+            false, 'sub-block 13 must succeed first');
+        }
+      }
+
+      // Sub-block 19: /save-as-routine auth (criterion #34)
+      {
+        const r = await fetch(`${t7Base}/api/sessions/save-as-routine`, { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'noauth', session: { session_shape: 'cross_pillar', phases: [], warnings: [], metadata: {} } }) });
+        check('T7/19 save no JWT → 401', r.status === 401);
+      }
+    } finally {
+      await t7Cleanup();
+      try { t7Server.close(); } catch {}
+      process.removeListener('SIGINT', t7AbortHandler);
+      process.removeListener('SIGTERM', t7AbortHandler);
     }
   }
 
