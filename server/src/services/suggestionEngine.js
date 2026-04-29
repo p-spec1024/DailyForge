@@ -1,23 +1,33 @@
-// S12-T2 + S12-T3 + S12-T3.5: Suggestion engine v1.
+// S12-T2 + S12-T3 + S12-T3.5 + S12-T4: Suggestion engine v1.
 // Spec: Trackers/S12-suggestion-engine-spec.md (v2 on `main`)
 //       Trackers/S12-T3.5-state-focus-refactor-spec.md (refactor scope)
 //       Trackers/S12-T3.5-AMENDMENT-1-appendix-a-correction.md (matrix truth)
-//   - Body-focus recipes (home / strength_tab / yoga_tab) — T2 [unchanged]
+//       Trackers/S12-T4-mobility-fullbody-special-cases-spec.md (T4 scope)
+//       Trackers/S12-T4-AMENDMENT-1-practice-type-remap.md (T4 SQL truth)
+//   - Body-focus recipes (home / strength_tab / yoga_tab) for the 10 keyworded
+//     focuses — T2 [unchanged]
 //   - State-focus recipe with range-bracket picker — T3 → refactored in T3.5
 //     (centering → practice → reflection; bracket-driven duration allocation;
 //      getAvailableDurations helper for content-aware UX)
-// Out of scope (intentional throws): mobility, full_body (both T4),
-//   recency warnings (T5), swap-counter writes / exclusion endpoints (T6),
-//   HTTP routes (T7).
+//   - mobility + full_body branches in body-focus recipes — T4
+//     (mobility: yoga-dominant; full_body: compound predicate ARRAY_LENGTH>=3)
+// Out of scope (intentional throws): recency warnings (T5),
+//   swap-counter writes / exclusion endpoints (T6), HTTP routes (T7).
 //
-// Schema reality (verified by S12-T2 pre-flight, 2026-04-28):
+// Schema reality (verified by S12-T2 pre-flight, re-verified by S12-T4 pre-flight):
 //   - exercises.target_muscles is TEXT (comma/semicolon/period-separated), NOT array.
-//     Engine matches focus_muscle_keywords via case-insensitive substring (ILIKE).
+//     Keyword path matches focus_muscle_keywords via case-insensitive substring (ILIKE).
+//     Compound path uses ARRAY_LENGTH(STRING_TO_ARRAY(target_muscles, ','), 1) >= 3
+//     via compoundFilter() helper (single source of truth for any future TEXT[] migration).
 //   - exercises.practice_types is TEXT[] of yoga STYLE labels: hatha, vinyasa, yin,
-//     restorative, sun_salutation. The spec's 'mobility'/'flexibility' tokens don't
-//     exist in the data. Engine remaps:
-//       warmup  → vinyasa | sun_salutation | hatha (active prep)
-//       cooldown → restorative | yin | hatha       (held/restorative)
+//     restorative, sun_salutation. Movement-quality tokens ('mobility', 'flexibility')
+//     do NOT exist in the data. The spec's mobility/full_body queries that called
+//     for them are remapped per S12-T4-AMENDMENT-1 to live style tokens. Retired
+//     when FUTURE_SCOPE movement-quality tagging lands (Sprint 13+).
+//   - Engine style sets (single source of truth for recipe queries):
+//       WARMUP_PRACTICE_STYLES   = vinyasa | sun_salutation | hatha (active prep)
+//       MOBILITY_MAIN_STYLES     = hatha | yin | vinyasa             (broad mobility/flex; T4)
+//       COOLDOWN_PRACTICE_STYLES = restorative | yin | hatha          (held/restorative)
 
 import { pool } from '../db/pool.js';
 
@@ -34,8 +44,14 @@ const LEVEL_RANK = { beginner: 1, intermediate: 2, advanced: 3 };
 const VALID_PILLARS = new Set(['strength', 'yoga', 'breathwork']);
 const VALID_LEVELS  = new Set(['beginner', 'intermediate', 'advanced']);
 
-const WARMUP_PRACTICE_STYLES   = ['vinyasa', 'sun_salutation', 'hatha'];
-const COOLDOWN_PRACTICE_STYLES = ['restorative', 'yin', 'hatha'];
+// Style-token sets used by recipe queries. Per S12-T4-AMENDMENT-1
+// (`Trackers/S12-T4-AMENDMENT-1-practice-type-remap.md`), these are the canonical
+// remap of the master spec's movement-quality intent (mobility / flexibility /
+// restorative) onto the live style data. Retire when movement-quality tagging
+// lands (Sprint 13+ tagging ticket — FUTURE_SCOPE entry post-Sprint-12).
+const WARMUP_PRACTICE_STYLES   = ['vinyasa', 'sun_salutation', 'hatha']; // active prep
+const MOBILITY_MAIN_STYLES     = ['hatha', 'yin', 'vinyasa'];            // broad mobility/flex; T4
+const COOLDOWN_PRACTICE_STYLES = ['restorative', 'yin', 'hatha'];        // held/restorative
 
 const VALID_ENTRY_POINTS = new Set(['home', 'strength_tab', 'yoga_tab', 'breathwork_tab']);
 
@@ -267,6 +283,103 @@ async function pickStrength({ keywords, strengthLevel, userExcludedIds, sessionE
   return rows;
 }
 
+// Compound-detection SQL fragment (T4). Single source of truth for the
+// "exercise hits 3+ muscle groups" predicate. Wraps the text-vs-array storage
+// detail of exercises.target_muscles — if a future migration moves it to
+// TEXT[], only this helper changes. Returns a literal SQL fragment (no params).
+function compoundFilter() {
+  return "ARRAY_LENGTH(STRING_TO_ARRAY(target_muscles, ','), 1) >= 3";
+}
+
+// Strength-compound pick (T4). Used by full_body across home / strength_tab.
+// No keyword filter — the compound predicate IS the muscle filter.
+async function pickStrengthCompound({ strengthLevel, userExcludedIds, sessionExcludedIds = [], limit }) {
+  const userRank = levelRankOf(strengthLevel);
+  const { rows } = await pool.query(
+    `SELECT id, name, difficulty, target_muscles
+       FROM exercises
+      WHERE type = 'strength'
+        AND CASE difficulty
+              WHEN 'beginner' THEN 1
+              WHEN 'intermediate' THEN 2
+              WHEN 'advanced' THEN 3
+            END <= $1
+        AND NOT (id = ANY($2::int[]))
+        AND NOT (id = ANY($3::int[]))
+        AND ${compoundFilter()}
+      ORDER BY random()
+      LIMIT $4`,
+    [userRank, userExcludedIds, sessionExcludedIds, limit]
+  );
+  return rows;
+}
+
+// Yoga-compound pick (T4). Used by full_body across home / yoga_tab. Optional
+// practiceStyles filter narrows further (e.g. full_body yoga_tab warmup wants
+// compound AND warmup styles; full_body home warmup wants compound only).
+async function pickYogaCompound({
+  yogaLevel, userExcludedIds, sessionExcludedIds = [],
+  limit, practiceStyles = null,
+}) {
+  const userRank = levelRankOf(yogaLevel);
+  const params = [userRank, userExcludedIds, sessionExcludedIds, limit];
+  let practiceClause = '';
+  if (practiceStyles && practiceStyles.length > 0) {
+    params.push(practiceStyles);
+    practiceClause = `AND practice_types && $${params.length}::text[]`;
+  }
+  const { rows } = await pool.query(
+    `SELECT id, name, difficulty, target_muscles
+       FROM exercises
+      WHERE type = 'yoga'
+        AND CASE difficulty
+              WHEN 'beginner' THEN 1
+              WHEN 'intermediate' THEN 2
+              WHEN 'advanced' THEN 3
+            END <= $1
+        AND NOT (id = ANY($2::int[]))
+        AND NOT (id = ANY($3::int[]))
+        AND ${compoundFilter()}
+        ${practiceClause}
+      ORDER BY random()
+      LIMIT $4`,
+    params
+  );
+  return rows;
+}
+
+// Yoga-by-styles pick (T4). Used by mobility across home / yoga_tab. No muscle
+// filter (mobility doesn't have keywords or a compound predicate); just style
+// filter + level + dedup. The spec's master-line-668 "yoga fills strength-main
+// slot for mobility-home" is realized here — mobility-home calls this three
+// times with three different style sets.
+async function pickYogaByStyles({
+  yogaLevel, userExcludedIds, sessionExcludedIds = [],
+  limit, practiceStyles,
+}) {
+  if (!practiceStyles || practiceStyles.length === 0) {
+    throw new Error('pickYogaByStyles requires non-empty practiceStyles');
+  }
+  const userRank = levelRankOf(yogaLevel);
+  const { rows } = await pool.query(
+    `SELECT id, name, difficulty, target_muscles
+       FROM exercises
+      WHERE type = 'yoga'
+        AND CASE difficulty
+              WHEN 'beginner' THEN 1
+              WHEN 'intermediate' THEN 2
+              WHEN 'advanced' THEN 3
+            END <= $1
+        AND NOT (id = ANY($2::int[]))
+        AND NOT (id = ANY($3::int[]))
+        AND practice_types && $4::text[]
+      ORDER BY random()
+      LIMIT $5`,
+    [userRank, userExcludedIds, sessionExcludedIds, practiceStyles, limit]
+  );
+  return rows;
+}
+
 // Yoga pick: N yoga rows matching focus muscle keywords + practice_type filter.
 //   userExcludedIds    = user's hard exclusions.
 //   sessionExcludedIds = in-session de-dup.
@@ -357,6 +470,14 @@ async function generateCrossPillar({ userId, focus, levels, timeBudget }) {
   if (![30, 60].includes(timeBudget)) {
     throw new RangeError(`time_budget_min must be 30 or 60 for home entry; got ${timeBudget}`);
   }
+  // T4 special-case branches: see below the keyworded path.
+  if (focus.slug === 'mobility') {
+    return generateCrossPillarMobility({ userId, focus, levels, timeBudget });
+  }
+  if (focus.slug === 'full_body') {
+    return generateCrossPillarFullBody({ userId, focus, levels, timeBudget });
+  }
+
   const phaseMin = CROSS_PILLAR_PHASE_MIN[timeBudget];
   const picks    = CROSS_PILLAR_PICKS[timeBudget];
 
@@ -475,6 +596,20 @@ async function generateStrengthOnly({ userId, focus, levels, timeBudget }) {
   if (![30, 60].includes(timeBudget)) {
     throw new RangeError(`time_budget_min must be 30 or 60 for strength_tab entry; got ${timeBudget}`);
   }
+  // T4 S3 defensive: dispatch already throws RangeError for mobility/strength_tab,
+  // but mirror the throw here in case a future refactor reorders dispatch — without
+  // this guard, mobility would fall through to the keyworded path below and emit a
+  // misleading "No muscle keywords" error.
+  if (focus.slug === 'mobility') {
+    throw new RangeError(
+      'mobility is not available from strength_tab — use yoga_tab or home'
+    );
+  }
+  // T4: full_body uses compound predicate.
+  if (focus.slug === 'full_body') {
+    return generateStrengthOnlyFullBody({ userId, focus, levels, timeBudget });
+  }
+
   const limit = STRENGTH_TAB_PICKS[timeBudget];
 
   const keywords = await loadMuscleKeywords(focus.id);
@@ -514,6 +649,14 @@ async function generateYogaOnly({ userId, focus, levels, timeBudget }) {
   if (![15, 30, 45, 60].includes(timeBudget)) {
     throw new RangeError(`time_budget_min must be 15/30/45/60 for yoga_tab entry; got ${timeBudget}`);
   }
+  // T4 special-case branches.
+  if (focus.slug === 'mobility') {
+    return generateYogaOnlyMobility({ userId, focus, levels, timeBudget });
+  }
+  if (focus.slug === 'full_body') {
+    return generateYogaOnlyFullBody({ userId, focus, levels, timeBudget });
+  }
+
   const picks = YOGA_TAB_PICKS[timeBudget];
 
   const keywords = await loadMuscleKeywords(focus.id);
@@ -579,6 +722,443 @@ async function generateYogaOnly({ userId, focus, levels, timeBudget }) {
     phases.push({
       phase: 'cooldown',
       items: cooldownRows.map((r) => yogaItem(r, perItem, levels.yoga)),
+    });
+  }
+
+  return {
+    session_shape: 'pillar_pure',
+    phases,
+    warnings: [],
+    metadata: {
+      estimated_total_min: computeEstimatedTotalMin(phases, 'pillar_pure_yoga', timeBudget),
+      requested_budget_min: timeBudget,
+      user_levels: levels,
+    },
+  };
+}
+
+// ── T4: mobility + full_body sub-recipes ─────────────────────────────────
+//
+// Per S12-T4 spec + Amendment 1: mobility/full_body don't have muscle keywords,
+// so the recipes can't share the keyworded path. Each entry-point handler
+// detects mobility/full_body up-front and delegates to the corresponding
+// sub-recipe. The sub-recipes share scaffolding (level resolution, exclusion
+// fetch, bookend pick/build, metadata) — only the warmup/main/cooldown picker
+// calls differ.
+//
+// Key shapes:
+//   mobility-home:    bookend / yoga-warmup / yoga-main / yoga-cooldown / bookend
+//                     (yoga REPLACES strength-main per Amendment §Mobility
+//                     strength-main pool — strength practice_types is empty;
+//                     structural always-skip; phases.length === 5 always)
+//   mobility-yoga:    yoga-warmup / yoga-main / yoga-cooldown
+//                     (3 phases, style-token-driven per Amendment Remap Table)
+//   full_body-home:   bookend / yoga-warmup-compound / strength-main-compound /
+//                     yoga-cooldown-compound / bookend
+//   full_body-stren:  strength-main-compound (1 phase)
+//   full_body-yoga:   yoga-warmup-compound+styles / yoga-main-compound /
+//                     yoga-cooldown-compound+styles
+//
+// Picked counts: carry forward from T2 / spec §Mobility / §Full Body.
+
+async function generateCrossPillarMobility({ userId, focus, levels, timeBudget }) {
+  const phaseMin = CROSS_PILLAR_PHASE_MIN[timeBudget];
+  const picks    = CROSS_PILLAR_PICKS[timeBudget];
+
+  // mobility-home is yoga-only by Amendment §Mobility strength-main pool
+  // (strength practice_types is structurally empty, so no strength-mobility
+  // exists). If FUTURE_SCOPE #1 lands (authored mobility-tagged strength
+  // content), also load excludedStrength here and feed the strength-main
+  // path back into the recipe.
+  const [excludedYoga, excludedBreathwork] = await Promise.all([
+    loadExclusions(userId, 'yoga'),
+    loadExclusions(userId, 'breathwork'),
+  ]);
+
+  const phases = [];
+
+  // bookend_open. T4 W1(a): mobility-home is "always 5 phases" per Amendment v1.1.
+  // Pre-flight asserts bookend rows exist; runtime empty here means user excluded
+  // the single eligible row → throw rather than silently degrade to 4 phases.
+  const openTech = await pickBookend({
+    role: 'bookend_open',
+    focusSlug: focus.slug,
+    breathworkLevel: levels.breathwork,
+    userExcludedIds: excludedBreathwork,
+  });
+  if (!openTech) {
+    console.error(
+      `[suggestionEngine] empty bookend_open pool for focus=${focus.slug}, level=${levels.breathwork}`
+    );
+    throw new Error(
+      `No eligible bookend_open for focus=${focus.slug}, level=${levels.breathwork} — ` +
+      `user exclusions left this pool empty`
+    );
+  }
+  phases.push({
+    phase: 'bookend_open',
+    items: [bookendItem(openTech, phaseMin.bookend_open, levels.breathwork)],
+  });
+
+  // warmup (yoga, warmup styles, no muscle filter)
+  const warmupRows = await pickYogaByStyles({
+    yogaLevel: levels.yoga,
+    userExcludedIds: excludedYoga,
+    limit: picks.warmup,
+    practiceStyles: WARMUP_PRACTICE_STYLES,
+  });
+  if (warmupRows.length > 0) {
+    const perItem = phaseMin.warmup / warmupRows.length;
+    phases.push({
+      phase: 'warmup',
+      items: warmupRows.map((r) => yogaItem(r, perItem, levels.yoga)),
+    });
+  }
+
+  // main (yoga REPLACES strength-main; mobility-home is structural always-skip-strength).
+  // Picked count absorbs strength-main's count per spec §Mobility home shape.
+  const warmupIds = warmupRows.map((r) => r.id);
+  const mainRows = await pickYogaByStyles({
+    yogaLevel: levels.yoga,
+    userExcludedIds: excludedYoga,
+    sessionExcludedIds: warmupIds,
+    limit: picks.main,
+    practiceStyles: MOBILITY_MAIN_STYLES,
+  });
+  if (mainRows.length === 0) {
+    throw new Error(
+      `No eligible mobility yoga main for level=${levels.yoga}, after exclusions`
+    );
+  }
+  // Yoga-main runs in the strength-main minute slot; per-item duration sized accordingly.
+  const mainPerItem = phaseMin.main / mainRows.length;
+  phases.push({
+    phase: 'main',
+    items: mainRows.map((r) => yogaItem(r, mainPerItem, levels.yoga)),
+  });
+
+  // cooldown (yoga, cooldown styles, dedup warmup AND main)
+  const mainIds = mainRows.map((r) => r.id);
+  const cooldownRows = await pickYogaByStyles({
+    yogaLevel: levels.yoga,
+    userExcludedIds: excludedYoga,
+    sessionExcludedIds: [...warmupIds, ...mainIds],
+    limit: picks.cooldown,
+    practiceStyles: COOLDOWN_PRACTICE_STYLES,
+  });
+  if (cooldownRows.length > 0) {
+    const perItem = phaseMin.cooldown / cooldownRows.length;
+    phases.push({
+      phase: 'cooldown',
+      items: cooldownRows.map((r) => yogaItem(r, perItem, levels.yoga)),
+    });
+  }
+
+  // bookend_close. T4 W1(a): same "always 5 phases" invariant as bookend_open.
+  const closeTech = await pickBookend({
+    role: 'bookend_close',
+    focusSlug: focus.slug,
+    breathworkLevel: levels.breathwork,
+    userExcludedIds: excludedBreathwork,
+  });
+  if (!closeTech) {
+    console.error(
+      `[suggestionEngine] empty bookend_close pool for focus=${focus.slug}, level=${levels.breathwork}`
+    );
+    throw new Error(
+      `No eligible bookend_close for focus=${focus.slug}, level=${levels.breathwork} — ` +
+      `user exclusions left this pool empty`
+    );
+  }
+  phases.push({
+    phase: 'bookend_close',
+    items: [bookendItem(closeTech, phaseMin.bookend_close, levels.breathwork)],
+  });
+
+  return {
+    session_shape: 'cross_pillar',
+    phases,
+    warnings: [],
+    metadata: {
+      // Mobility-home has no strength items, so the strength-spec table doesn't
+      // contribute. Pass 'cross_pillar' anyway — computeEstimatedTotalMin's
+      // strength branch is skipped when no strength items are present.
+      estimated_total_min: computeEstimatedTotalMin(phases, 'cross_pillar', timeBudget),
+      requested_budget_min: timeBudget,
+      user_levels: levels,
+    },
+  };
+}
+
+async function generateCrossPillarFullBody({ userId, focus, levels, timeBudget }) {
+  const phaseMin = CROSS_PILLAR_PHASE_MIN[timeBudget];
+  const picks    = CROSS_PILLAR_PICKS[timeBudget];
+
+  const [excludedStrength, excludedYoga, excludedBreathwork] = await Promise.all([
+    loadExclusions(userId, 'strength'),
+    loadExclusions(userId, 'yoga'),
+    loadExclusions(userId, 'breathwork'),
+  ]);
+
+  const phases = [];
+
+  // bookend_open. T4 W1(a): full_body-home is "always 5 phases" — throw on empty
+  // bookend pool (caller-side exclusions exhausted the single eligible row).
+  const openTech = await pickBookend({
+    role: 'bookend_open',
+    focusSlug: focus.slug,
+    breathworkLevel: levels.breathwork,
+    userExcludedIds: excludedBreathwork,
+  });
+  if (!openTech) {
+    console.error(
+      `[suggestionEngine] empty bookend_open pool for focus=${focus.slug}, level=${levels.breathwork}`
+    );
+    throw new Error(
+      `No eligible bookend_open for focus=${focus.slug}, level=${levels.breathwork} — ` +
+      `user exclusions left this pool empty`
+    );
+  }
+  phases.push({
+    phase: 'bookend_open',
+    items: [bookendItem(openTech, phaseMin.bookend_open, levels.breathwork)],
+  });
+
+  // warmup (yoga, compound, NO style filter — spec line 290)
+  const warmupRows = await pickYogaCompound({
+    yogaLevel: levels.yoga,
+    userExcludedIds: excludedYoga,
+    limit: picks.warmup,
+  });
+  if (warmupRows.length > 0) {
+    const perItem = phaseMin.warmup / warmupRows.length;
+    phases.push({
+      phase: 'warmup',
+      items: warmupRows.map((r) => yogaItem(r, perItem, levels.yoga)),
+    });
+  }
+
+  // main (strength, compound)
+  const mainRows = await pickStrengthCompound({
+    strengthLevel: levels.strength,
+    userExcludedIds: excludedStrength,
+    limit: picks.main,
+  });
+  if (mainRows.length === 0) {
+    throw new Error(
+      `No eligible compound strength for full_body, level=${levels.strength}, after exclusions`
+    );
+  }
+  phases.push({
+    phase: 'main',
+    items: mainRows.map((r) => strengthItem(r, levels.strength)),
+  });
+
+  // cooldown (yoga, compound + cooldown styles, dedup warmup)
+  const warmupIds = warmupRows.map((r) => r.id);
+  const cooldownRows = await pickYogaCompound({
+    yogaLevel: levels.yoga,
+    userExcludedIds: excludedYoga,
+    sessionExcludedIds: warmupIds,
+    limit: picks.cooldown,
+    practiceStyles: COOLDOWN_PRACTICE_STYLES,
+  });
+  if (cooldownRows.length > 0) {
+    const perItem = phaseMin.cooldown / cooldownRows.length;
+    phases.push({
+      phase: 'cooldown',
+      items: cooldownRows.map((r) => yogaItem(r, perItem, levels.yoga)),
+    });
+  }
+
+  // bookend_close. T4 W1(a): same invariant as bookend_open.
+  const closeTech = await pickBookend({
+    role: 'bookend_close',
+    focusSlug: focus.slug,
+    breathworkLevel: levels.breathwork,
+    userExcludedIds: excludedBreathwork,
+  });
+  if (!closeTech) {
+    console.error(
+      `[suggestionEngine] empty bookend_close pool for focus=${focus.slug}, level=${levels.breathwork}`
+    );
+    throw new Error(
+      `No eligible bookend_close for focus=${focus.slug}, level=${levels.breathwork} — ` +
+      `user exclusions left this pool empty`
+    );
+  }
+  phases.push({
+    phase: 'bookend_close',
+    items: [bookendItem(closeTech, phaseMin.bookend_close, levels.breathwork)],
+  });
+
+  return {
+    session_shape: 'cross_pillar',
+    phases,
+    warnings: [],
+    metadata: {
+      estimated_total_min: computeEstimatedTotalMin(phases, 'cross_pillar', timeBudget),
+      requested_budget_min: timeBudget,
+      user_levels: levels,
+    },
+  };
+}
+
+async function generateStrengthOnlyFullBody({ userId, focus, levels, timeBudget }) {
+  const limit = STRENGTH_TAB_PICKS[timeBudget];
+  const excludedStrength = await loadExclusions(userId, 'strength');
+
+  const rows = await pickStrengthCompound({
+    strengthLevel: levels.strength,
+    userExcludedIds: excludedStrength,
+    limit,
+  });
+  if (rows.length === 0) {
+    throw new Error(
+      `No eligible compound strength for full_body, level=${levels.strength}, after exclusions`
+    );
+  }
+
+  const phases = [
+    { phase: 'main', items: rows.map((r) => strengthItem(r, levels.strength)) },
+  ];
+  return {
+    session_shape: 'pillar_pure',
+    phases,
+    warnings: [],
+    metadata: {
+      estimated_total_min: computeEstimatedTotalMin(phases, 'pillar_pure_strength', timeBudget),
+      requested_budget_min: timeBudget,
+      user_levels: levels,
+    },
+  };
+}
+
+async function generateYogaOnlyMobility({ userId, focus, levels, timeBudget }) {
+  const picks = YOGA_TAB_PICKS[timeBudget];
+  const excludedYoga = await loadExclusions(userId, 'yoga');
+
+  // T2's yoga-tab phase-time split: 15/70/15 % of budget per phase.
+  const warmupMin   = Math.max(1, Math.round(timeBudget * 0.15));
+  const mainMin     = Math.max(1, Math.round(timeBudget * 0.70));
+  const cooldownMin = Math.max(1, timeBudget - warmupMin - mainMin);
+
+  const phases = [];
+
+  const warmupRows = await pickYogaByStyles({
+    yogaLevel: levels.yoga,
+    userExcludedIds: excludedYoga,
+    limit: picks.warmup,
+    practiceStyles: WARMUP_PRACTICE_STYLES,
+  });
+  if (warmupRows.length > 0) {
+    phases.push({
+      phase: 'warmup',
+      items: warmupRows.map((r) => yogaItem(r, warmupMin / warmupRows.length, levels.yoga)),
+    });
+  }
+
+  // Main: per amendment, mobility yoga-tab main is style-driven (no muscle filter).
+  // De-dup with warmup is NOT enforced (T2 convention: cooldown excludes warmup,
+  // main can repeat warmup poses for tiny pools).
+  const warmupIds = warmupRows.map((r) => r.id);
+  const mainRows = await pickYogaByStyles({
+    yogaLevel: levels.yoga,
+    userExcludedIds: excludedYoga,
+    limit: picks.main,
+    practiceStyles: MOBILITY_MAIN_STYLES,
+  });
+  if (mainRows.length === 0) {
+    throw new Error(
+      `No eligible mobility yoga main for level=${levels.yoga}, after exclusions`
+    );
+  }
+  phases.push({
+    phase: 'main',
+    items: mainRows.map((r) => yogaItem(r, mainMin / mainRows.length, levels.yoga)),
+  });
+
+  const mainIds = mainRows.map((r) => r.id);
+  const cooldownRows = await pickYogaByStyles({
+    yogaLevel: levels.yoga,
+    userExcludedIds: excludedYoga,
+    sessionExcludedIds: [...warmupIds, ...mainIds],
+    limit: picks.cooldown,
+    practiceStyles: COOLDOWN_PRACTICE_STYLES,
+  });
+  if (cooldownRows.length > 0) {
+    phases.push({
+      phase: 'cooldown',
+      items: cooldownRows.map((r) => yogaItem(r, cooldownMin / cooldownRows.length, levels.yoga)),
+    });
+  }
+
+  return {
+    session_shape: 'pillar_pure',
+    phases,
+    warnings: [],
+    metadata: {
+      estimated_total_min: computeEstimatedTotalMin(phases, 'pillar_pure_yoga', timeBudget),
+      requested_budget_min: timeBudget,
+      user_levels: levels,
+    },
+  };
+}
+
+async function generateYogaOnlyFullBody({ userId, focus, levels, timeBudget }) {
+  const picks = YOGA_TAB_PICKS[timeBudget];
+  const excludedYoga = await loadExclusions(userId, 'yoga');
+
+  const warmupMin   = Math.max(1, Math.round(timeBudget * 0.15));
+  const mainMin     = Math.max(1, Math.round(timeBudget * 0.70));
+  const cooldownMin = Math.max(1, timeBudget - warmupMin - mainMin);
+
+  const phases = [];
+
+  // Warmup: compound + warmup styles (asymmetric vs home full_body — see spec
+  // §Full Body home/yoga-tab asymmetry table; preserved per Decision #5).
+  const warmupRows = await pickYogaCompound({
+    yogaLevel: levels.yoga,
+    userExcludedIds: excludedYoga,
+    limit: picks.warmup,
+    practiceStyles: WARMUP_PRACTICE_STYLES,
+  });
+  if (warmupRows.length > 0) {
+    phases.push({
+      phase: 'warmup',
+      items: warmupRows.map((r) => yogaItem(r, warmupMin / warmupRows.length, levels.yoga)),
+    });
+  }
+
+  // Main: compound only.
+  const mainRows = await pickYogaCompound({
+    yogaLevel: levels.yoga,
+    userExcludedIds: excludedYoga,
+    limit: picks.main,
+  });
+  if (mainRows.length === 0) {
+    throw new Error(
+      `No eligible compound yoga for full_body main, level=${levels.yoga}, after exclusions`
+    );
+  }
+  phases.push({
+    phase: 'main',
+    items: mainRows.map((r) => yogaItem(r, mainMin / mainRows.length, levels.yoga)),
+  });
+
+  // Cooldown: compound + cooldown styles, dedup warmup (T2 convention).
+  const warmupIds = warmupRows.map((r) => r.id);
+  const cooldownRows = await pickYogaCompound({
+    yogaLevel: levels.yoga,
+    userExcludedIds: excludedYoga,
+    sessionExcludedIds: warmupIds,
+    limit: picks.cooldown,
+    practiceStyles: COOLDOWN_PRACTICE_STYLES,
+  });
+  if (cooldownRows.length > 0) {
+    phases.push({
+      phase: 'cooldown',
+      items: cooldownRows.map((r) => yogaItem(r, cooldownMin / cooldownRows.length, levels.yoga)),
     });
   }
 
@@ -938,12 +1518,12 @@ export async function generateSession({ user_id, focus_slug, entry_point, time_b
 
   const focus = await resolveFocus(focus_slug);
 
-  // T4 holds these — body focuses with their own special-case shapes.
-  if (focus.slug === 'mobility') {
-    throw new NotImplementedError('mobility special-case lands in S12-T4');
-  }
-  if (focus.slug === 'full_body') {
-    throw new NotImplementedError('full_body special-case lands in S12-T4');
+  // T4: mobility from strength_tab is locked out at dispatch (Sprint 13+ picker
+  // UX hides this; engine asserts the contract as second line of defense).
+  if (focus.slug === 'mobility' && entry_point === 'strength_tab') {
+    throw new RangeError(
+      'mobility is not available from strength_tab — use yoga_tab or home'
+    );
   }
 
   // ── State-focus path (T3.5: bracket-driven) ───────────────────────────

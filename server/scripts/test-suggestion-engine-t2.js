@@ -342,6 +342,81 @@ async function main() {
   console.log(`  levels: ${JSON.stringify(levels)}`);
   console.log(`  exclusions: ${exclusions.size}\n`);
 
+  // ── T4 pre-flight gate (Amendment 1 §Updated Pre-Flight Assertions) ──
+  // Stops the smoke if mobility/full_body data layer isn't ready.
+  console.log('=== T4 pre-flight ===');
+  {
+    const bookends = await pool.query(`
+      SELECT fa.slug, fcc.role, COUNT(*)::int AS row_count
+        FROM focus_content_compatibility fcc
+        JOIN focus_areas fa ON fa.id = fcc.focus_id
+       WHERE fa.slug IN ('mobility', 'full_body')
+         AND fcc.role IN ('bookend_open', 'bookend_close')
+       GROUP BY fa.slug, fcc.role
+    `);
+    check(`pre-flight: 4 bookend rows for mobility+full_body × open/close`,
+      bookends.rows.length === 4, `got ${bookends.rows.length}`);
+    for (const r of bookends.rows) {
+      check(`pre-flight: bookend ${r.slug}/${r.role} count >= 1`, r.row_count >= 1,
+        `got ${r.row_count}`);
+    }
+
+    const tokens = await pool.query(`
+      SELECT
+        SUM(CASE WHEN type='yoga' AND 'vinyasa'        = ANY(practice_types) THEN 1 ELSE 0 END)::int AS y_vinyasa,
+        SUM(CASE WHEN type='yoga' AND 'sun_salutation' = ANY(practice_types) THEN 1 ELSE 0 END)::int AS y_sun_salutation,
+        SUM(CASE WHEN type='yoga' AND 'hatha'          = ANY(practice_types) THEN 1 ELSE 0 END)::int AS y_hatha,
+        SUM(CASE WHEN type='yoga' AND 'yin'            = ANY(practice_types) THEN 1 ELSE 0 END)::int AS y_yin,
+        SUM(CASE WHEN type='yoga' AND 'restorative'    = ANY(practice_types) THEN 1 ELSE 0 END)::int AS y_restorative
+      FROM exercises
+    `);
+    const t = tokens.rows[0];
+    for (const k of ['y_vinyasa', 'y_sun_salutation', 'y_hatha', 'y_yin', 'y_restorative']) {
+      check(`pre-flight: yoga style token '${k}' >= 1`, t[k] >= 1, `got ${t[k]}`);
+    }
+
+    const compounds = await pool.query(`
+      SELECT
+        SUM(CASE WHEN type='yoga'     AND ARRAY_LENGTH(STRING_TO_ARRAY(target_muscles, ','), 1) >= 3 THEN 1 ELSE 0 END)::int AS yoga_compound,
+        SUM(CASE WHEN type='strength' AND ARRAY_LENGTH(STRING_TO_ARRAY(target_muscles, ','), 1) >= 3 THEN 1 ELSE 0 END)::int AS strength_compound
+      FROM exercises
+    `);
+    const c = compounds.rows[0];
+    check(`pre-flight: yoga compound count >= 5`, c.yoga_compound >= 5, `got ${c.yoga_compound}`);
+    check(`pre-flight: strength compound count >= 5`, c.strength_compound >= 5, `got ${c.strength_compound}`);
+
+    const pools = await pool.query(`
+      SELECT 'mobility_warmup_beginner' AS pool, COUNT(*)::int AS n
+      FROM exercises
+      WHERE type='yoga' AND practice_types && ARRAY['vinyasa','sun_salutation','hatha']::text[]
+        AND difficulty='beginner'
+      UNION ALL
+      SELECT 'mobility_main_beginner', COUNT(*)::int FROM exercises
+      WHERE type='yoga' AND practice_types && ARRAY['hatha','yin','vinyasa']::text[]
+        AND difficulty='beginner'
+      UNION ALL
+      SELECT 'mobility_cooldown_beginner', COUNT(*)::int FROM exercises
+      WHERE type='yoga' AND practice_types && ARRAY['restorative','yin','hatha']::text[]
+        AND difficulty='beginner'
+      UNION ALL
+      SELECT 'fb_yogatab_warmup_beginner', COUNT(*)::int FROM exercises
+      WHERE type='yoga'
+        AND ARRAY_LENGTH(STRING_TO_ARRAY(target_muscles, ','), 1) >= 3
+        AND practice_types && ARRAY['vinyasa','sun_salutation','hatha']::text[]
+        AND difficulty='beginner'
+    `);
+    for (const r of pools.rows) {
+      check(`pre-flight: pool '${r.pool}' >= 1`, r.n >= 1, `got ${r.n}`);
+    }
+
+    // Informational only (Amendment §Mobility strength-main pool).
+    const strPT = await pool.query(`
+      SELECT COUNT(*)::int AS n FROM exercises
+      WHERE type='strength' AND practice_types IS NOT NULL AND array_length(practice_types, 1) > 0
+    `);
+    console.log(`  INFO: strength rows with practice_types = ${strPT.rows[0].n} (Amendment confirms structurally 0)`);
+  }
+
   // ── Phase 1: full matrix at budget 30 ────────────────────────────────
   console.log('=== Matrix: 10 focuses × 3 entry points × budget 30 ===');
   for (const focus_slug of IN_SCOPE_FOCUSES) {
@@ -408,6 +483,139 @@ async function main() {
     // For biceps the yoga pool is small, so warmup/cooldown may degrade. Just check main exists.
     const main = s.phases.find((p) => p.phase === 'main');
     check(`${label}: main has >= 1 item`, main && main.items.length >= 1);
+  }
+
+  // ── Phase 2.5: T4 mobility + full_body generation cases (14 cases) ────
+  // Per spec §Smoke Test Plan + Amendment 1 sub-assertion adjustments.
+  console.log('\n=== T4 mobility + full_body generation (14 cases) ===');
+
+  const T4_CASES = [
+    { focus: 'mobility',  entry: 'home',         budget: 30, expectShape: 'cross_pillar', expectPhases: 5 },
+    { focus: 'mobility',  entry: 'home',         budget: 60, expectShape: 'cross_pillar', expectPhases: 5 },
+    { focus: 'mobility',  entry: 'yoga_tab',     budget: 15, expectShape: 'pillar_pure',  expectPhases: 3 },
+    { focus: 'mobility',  entry: 'yoga_tab',     budget: 30, expectShape: 'pillar_pure',  expectPhases: 3 },
+    { focus: 'mobility',  entry: 'yoga_tab',     budget: 45, expectShape: 'pillar_pure',  expectPhases: 3 },
+    { focus: 'mobility',  entry: 'yoga_tab',     budget: 60, expectShape: 'pillar_pure',  expectPhases: 3 },
+    { focus: 'full_body', entry: 'home',         budget: 30, expectShape: 'cross_pillar', expectPhases: 5 },
+    { focus: 'full_body', entry: 'home',         budget: 60, expectShape: 'cross_pillar', expectPhases: 5 },
+    { focus: 'full_body', entry: 'strength_tab', budget: 30, expectShape: 'pillar_pure',  expectPhases: 1 },
+    { focus: 'full_body', entry: 'strength_tab', budget: 60, expectShape: 'pillar_pure',  expectPhases: 1 },
+    { focus: 'full_body', entry: 'yoga_tab',     budget: 15, expectShape: 'pillar_pure',  expectPhases: 3 },
+    { focus: 'full_body', entry: 'yoga_tab',     budget: 30, expectShape: 'pillar_pure',  expectPhases: 3 },
+    { focus: 'full_body', entry: 'yoga_tab',     budget: 45, expectShape: 'pillar_pure',  expectPhases: 3 },
+    { focus: 'full_body', entry: 'yoga_tab',     budget: 60, expectShape: 'pillar_pure',  expectPhases: 3 },
+  ];
+
+  for (const tc of T4_CASES) {
+    const label = `T4: ${tc.focus}/${tc.entry}/${tc.budget}`;
+    let session;
+    try {
+      session = await generateSession({
+        user_id: user.id, focus_slug: tc.focus, entry_point: tc.entry, time_budget_min: tc.budget,
+      });
+    } catch (err) {
+      fail++;
+      console.log(`  FAIL  ${label}: threw ${err.name}: ${err.message}`);
+      continue;
+    }
+
+    // Sub-assertion 1: shape
+    check(`${label}: session_shape == ${tc.expectShape}`,
+      session.session_shape === tc.expectShape, `got ${session.session_shape}`);
+
+    // Sub-assertion 2: phases.length matches (Amendment v1.1 — mobility-home is
+    // structural always-skip-strength → phases.length === 5 always; no
+    // skip-strength-main branch)
+    check(`${label}: phases.length == ${tc.expectPhases}`,
+      session.phases.length === tc.expectPhases,
+      `got ${session.phases.length} (${session.phases.map((p) => p.phase).join('/')})`);
+
+    // Per-item walk for sub-assertions 3–9
+    for (const ph of session.phases) {
+      for (const it of ph.items) {
+        // Sub-assertion 3: difficulty <= user level for the matching pillar
+        const userLevel = levels[it.content_type];
+        const userRank  = LEVEL_RANK[userLevel];
+        const diff = it.content_type === 'breathwork'
+          ? await fetchBreathworkDifficulty(it.content_id)
+          : await fetchExerciseDifficulty(it.content_id);
+        check(`${label}/${ph.phase}: ${it.content_type}#${it.content_id} difficulty=${diff} <= ${userLevel}`,
+          LEVEL_RANK[diff] <= userRank, `got rank ${LEVEL_RANK[diff]} > ${userRank}`);
+
+        // Sub-assertion 4: not in user_excluded_exercises
+        check(`${label}/${ph.phase}: ${it.content_type}#${it.content_id} not excluded`,
+          !exclusions.has(`${it.content_type}:${it.content_id}`));
+      }
+    }
+
+    // Sub-assertion 5: home-case bookends (cross_pillar shape)
+    if (tc.expectShape === 'cross_pillar') {
+      check(`${label}: phases[0] is bookend_open`,
+        session.phases[0]?.phase === 'bookend_open');
+      check(`${label}: phases[4] is bookend_close`,
+        session.phases[session.phases.length - 1]?.phase === 'bookend_close');
+      check(`${label}: bookend_open is breathwork`,
+        session.phases[0]?.items[0]?.content_type === 'breathwork');
+      check(`${label}: bookend_close is breathwork`,
+        session.phases[session.phases.length - 1]?.items[0]?.content_type === 'breathwork');
+    }
+
+    // Sub-assertion 6 (Amendment v1.1): mobility-home → warmup/main/cooldown all yoga.
+    if (tc.focus === 'mobility' && tc.entry === 'home') {
+      for (const phaseName of ['warmup', 'main', 'cooldown']) {
+        const ph = session.phases.find((p) => p.phase === phaseName);
+        check(`${label}/${phaseName}: present (mobility-home structural always-5)`,
+          ph != null && ph.items.length > 0);
+        if (ph) {
+          for (const it of ph.items) {
+            check(`${label}/${phaseName}: ${it.content_id} is yoga (mobility replaces strength-main)`,
+              it.content_type === 'yoga', `got ${it.content_type}`);
+          }
+        }
+      }
+    }
+
+    // Sub-assertion 7: full_body strength_tab → main items have target_muscles 3+ tokens.
+    if (tc.focus === 'full_body' && tc.entry === 'strength_tab') {
+      const mainPh = session.phases[0];
+      check(`${label}: phases[0] is main`, mainPh?.phase === 'main');
+      for (const it of mainPh?.items || []) {
+        const ex = await pool.query(
+          `SELECT target_muscles FROM exercises WHERE id = $1`,
+          [it.content_id]
+        );
+        const tm = ex.rows[0]?.target_muscles || '';
+        const tokenCount = tm.split(',').map((s) => s.trim()).filter(Boolean).length;
+        check(`${label}/main: bt#${it.content_id} target_muscles has 3+ tokens (compound)`,
+          tokenCount >= 3, `got ${tokenCount} tokens in "${tm}"`);
+      }
+    }
+
+    // Sub-assertion 8 (Amendment v1.1): full_body yoga_tab warmup → at least one of
+    // {vinyasa, sun_salutation, hatha} in practice_types.
+    if (tc.focus === 'full_body' && tc.entry === 'yoga_tab') {
+      const warmupPh = session.phases.find((p) => p.phase === 'warmup');
+      for (const it of warmupPh?.items || []) {
+        const ex = await pool.query(
+          `SELECT practice_types FROM exercises WHERE id = $1`,
+          [it.content_id]
+        );
+        const styles = ex.rows[0]?.practice_types || [];
+        const hasWarmupStyle = styles.some((s) =>
+          ['vinyasa', 'sun_salutation', 'hatha'].includes(s));
+        check(`${label}/warmup: bt#${it.content_id} practice_types contains a warmup style`,
+          hasWarmupStyle, `got ${JSON.stringify(styles)}`);
+      }
+    }
+
+    // Sub-assertion 9: estimated_total_min present, positive integer
+    check(`${label}: metadata.estimated_total_min is positive integer`,
+      Number.isInteger(session.metadata?.estimated_total_min) &&
+        session.metadata.estimated_total_min > 0,
+      `got ${session.metadata?.estimated_total_min}`);
+
+    // Sub-assertion 10: warnings is an array (empty fine)
+    check(`${label}: warnings is array`, Array.isArray(session.warnings));
   }
 
   // ── Phase 3a: T3.5 state-focus bracket-availability matrix (75 cells) ──
@@ -696,18 +904,33 @@ async function main() {
   }
 
   // ── Phase 3c: throw assertions ───────────────────────────────────────
-  console.log('\n=== T2 + T3 + T3.5 invalid-input throws ===');
-  // Still NotImplementedError (T4 — body-focus special cases)
-  await assertThrows(
-    'mobility/yoga_tab/30',
-    () => generateSession({ user_id: user.id, focus_slug: 'mobility', entry_point: 'yoga_tab', time_budget_min: 30 }),
-    'NotImplementedError'
+  console.log('\n=== T2 + T3 + T3.5 + T4 invalid-input throws ===');
+  // T4: mobility from strength_tab → RangeError (dispatch-level lock per Decision #3).
+  await assertThrowsMatching(
+    'T4: mobility/strength_tab/30',
+    () => generateSession({ user_id: user.id, focus_slug: 'mobility', entry_point: 'strength_tab', time_budget_min: 30 }),
+    'RangeError', 'mobility is not available from strength_tab',
   );
-  await assertThrows(
-    'full_body/home/30',
-    () => generateSession({ user_id: user.id, focus_slug: 'full_body', entry_point: 'home', time_budget_min: 30 }),
-    'NotImplementedError'
+  // T4: mobility from breathwork_tab → RangeError (T2 carry-forward, body-from-breathwork-tab).
+  await assertThrowsMatching(
+    'T4: mobility/breathwork_tab',
+    () => generateSession({ user_id: user.id, focus_slug: 'mobility', entry_point: 'breathwork_tab', bracket: '0-10' }),
+    'RangeError', 'breathwork_tab',
   );
+  // T4: full_body from breathwork_tab → RangeError (T2 carry-forward).
+  await assertThrowsMatching(
+    'T4: full_body/breathwork_tab',
+    () => generateSession({ user_id: user.id, focus_slug: 'full_body', entry_point: 'breathwork_tab', bracket: '0-10' }),
+    'RangeError', 'breathwork_tab',
+  );
+  // T4: full_body from home WITHOUT time_budget_min → TypeError (T2 carry-forward).
+  // Note: error class is TypeError, not RangeError — engine validates type before range.
+  await assertThrowsMatching(
+    'T4: full_body/home (no time_budget_min)',
+    () => generateSession({ user_id: user.id, focus_slug: 'full_body', entry_point: 'home' }),
+    'TypeError', 'time_budget_min',
+  );
+
   // Body focus from breathwork_tab → RangeError (T3 contract, unchanged).
   await assertThrows(
     'biceps/breathwork_tab/10',
