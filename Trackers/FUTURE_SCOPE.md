@@ -1,14 +1,14 @@
 # DailyForge — Future Scope
 
 **Triage completed: April 13, 2026**
-**Updated: April 29, 2026 — #151–#160 added from S12-T4 ship (7 spec followups + 2 amendment followups + 1 sprint-close architecture extraction)**
+**Updated: April 29, 2026 — #161 + #162 added from S12-T5 ship (personalized alternative_focus_slug; recency UNION refactor when unified-session lands)**
 
 Features categorized for Android v1.0 launch vs future updates.
 
 | Category | Count |
 |----------|-------|
 | 🚀 Before Android Launch | 45 |
-| 🔄 Future Updates | 63 |
+| 🔄 Future Updates | 65 |
 | ❌ Cut | 2 |
 | ✅ Already Done | 7 |
 
@@ -94,7 +94,7 @@ A strategic planning session on Apr 26, 2026 redirected the app's home-page mode
 
 ---
 
-## 🔄 Future Updates (63 items)
+## 🔄 Future Updates (65 items)
 
 | # | Feature | Category | Notes |
 |---|---------|----------|-------|
@@ -186,6 +186,8 @@ A strategic planning session on Apr 26, 2026 redirected the app's home-page mode
 | 158 | Deprecate practice-type style remap (Amendment 1 retirement) | Algorithm / Approach 5 | When FUTURE_SCOPE #153 (movement-quality tagging) lands, the engine's `WARMUP_PRACTICE_STYLES`, `MOBILITY_MAIN_STYLES`, and `COOLDOWN_PRACTICE_STYLES` constants — codified per `Trackers/S12-T4-AMENDMENT-1-practice-type-remap.md` — should be replaced with direct queries against the new movement-quality tags (`mobility`, `flexibility`, `restorative`, etc.). The amendment doc itself can be archived at that point. The engine header comment block + the constants point back to this entry as the closing-of-the-loop trigger. Sprint 13+ when #153 ships. Surfaced from S12-T4 Amendment 1 (Apr 29, 2026). |
 | 159 | Strength `practice_types` is empty for the entire pillar — drop or author? | Schema | Confirmed in S12-T4 pre-flight: 0 strength rows have any `practice_types` data. Either drop the column for strength rows (and adjust any read sites), or author the data (mobility / olympic / hypertrophy / etc.). Decide based on whether the engine ever wants strength-side practice-type filtering. Currently nothing reads it for strength. Sprint 13+ schema decision. Surfaced from S12-T4 Amendment 1 (Apr 29, 2026). |
 | 160 | Suggestion engine architecture extraction (sprint-close housekeeping) | Refactor / DevOps | Engine file `server/src/services/suggestionEngine.js` is now ~1140 lines after T2/T3.5/T4 layered work. T2 / T3.5 / T4 `/review` all flagged sprint-close extraction as the right time to consolidate. Proposed structure: `server/src/services/suggestion-engine/` directory with `index.js` (dispatch + exports), `constants.js` (BRACKET_TABLE, style sets, picks tables), `helpers.js` (compoundFilter, durationsForLevel, level rank), `pickers.js` (5 picker functions), `recipes/cross-pillar.js`, `recipes/strength-only.js`, `recipes/yoga-only.js`, `recipes/state-focus.js`, `recipes/available-durations.js`, `item-formatters.js`. Net effect: same logic, surface area easier to navigate; per-recipe tests can target individual files; T7's HTTP layer imports from the index without pulling in the whole module graph at once. **Trigger:** Sprint 12 close, after T7 ships. Pure refactor — zero behavior change. Surfaced from S12-T2 / S12-T3.5 / S12-T4 reviews (cumulative recommendation). Added Apr 29, 2026 from S12-T4 build. |
+| 161 | Personalized `alternative_focus_slug` in recency warnings | Engine / Approach 5 | T5 hardcodes `alternative_focus_slug = 'recover'` in every `recency_overlap` warning per spec Decision 7 — `recover` is always-safe and requires no recommendation model. Personalized alternatives (e.g. "you did chest yesterday → try `mobility` today" based on the user's least-recently-trained focus + opposite-bias from yesterday) need the broader personalization-algorithm planning that gates the suggestion ranker. Sprint 14+ once that planning lands. Surfaced from S12-T5 spec (Apr 29, 2026). |
+| 162 | Recency UNION refactor when unified-session model lands or any path writes body-focus slugs to `breathwork_sessions` | Engine / Schema | T5 collapsed the spec's 3-arm UNION (`sessions` ∪ `yoga_sessions` ∪ `breathwork_sessions`) to a single-table `SELECT` against `sessions` — the reasons are (a) `yoga_sessions` doesn't exist in this codebase (yoga writes to `sessions` with `type='yoga'`, so the yoga arm is structurally redundant), (b) `breathwork_sessions` has no `date` column to fit the recency window shape AND state-focus rows are excluded by the overlap rule AND no v1 path writes body-focus slugs there. The `breathwork_sessions.focus_slug` column was added anyway for forward-compat analytics. **Trigger:** if any future surface starts writing body-focus slugs to `breathwork_sessions` (e.g. a "breathwork-as-warmup" body-focus pattern), the recency query needs the breathwork arm restored — keyed off `created_at::date` since the table has no `date` column. Alternatively, the unified-session refactor (FUTURE_SCOPE #114) would consolidate all session writes into a single table and the UNION question dissolves entirely. Surfaced from S12-T5 build (Apr 29, 2026). |
 
 ---
 
