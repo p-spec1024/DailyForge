@@ -1,14 +1,14 @@
 # DailyForge — Future Scope
 
 **Triage completed: April 13, 2026**
-**Updated: April 30, 2026 — #165–#168 added from S12-T7 ship (breathwork full reconstruction; engine typed-error refactor; cross-endpoint exercise-id validation on save paths; centralize test-fixture sentinel pattern)**
+**Updated: April 30, 2026 — #169 added from S13-T2 ship (focus_areas column rename to drop client-name aliases)**
 
 Features categorized for Android v1.0 launch vs future updates.
 
 | Category | Count |
 |----------|-------|
 | 🚀 Before Android Launch | 45 |
-| 🔄 Future Updates | 65 |
+| 🔄 Future Updates | 66 |
 | ❌ Cut | 2 |
 | ✅ Already Done | 7 |
 
@@ -94,7 +94,7 @@ A strategic planning session on Apr 26, 2026 redirected the app's home-page mode
 
 ---
 
-## 🔄 Future Updates (65 items)
+## 🔄 Future Updates (66 items)
 
 | # | Feature | Category | Notes |
 |---|---------|----------|-------|
@@ -194,6 +194,7 @@ A strategic planning session on Apr 26, 2026 redirected the app's home-page mode
 | 166 | Typed-error refactor in `suggestionEngine.js` | Engine / Refactor | T7's HTTP error mapper (`mapRangeErrorToCode` in `routes/sessions.js`) string-matches against `RangeError` message text emitted at 10 throw sites in `server/src/services/suggestionEngine.js`. Pre-flight (`scripts/preflight-s12-t7-shape.mjs` check (c4)) inventories the exact throw messages and halts on drift, but the substring approach accumulates fragility — a future engine refactor that rephrases a throw message would silently bucket into `unmapped_engine_error` without /review noticing until Flutter starts seeing it. Fix: replace the 10 `throw new RangeError(...)` sites with `throw new EngineContractError({ code: 'invalid_focus_entry_combo', detail: ... })` typed-error class. T7's mapper becomes a pass-through `err.code` read. ~30-line refactor across the 10 throw sites; the pre-flight check (c4) becomes a class-existence check rather than a substring inventory. Pairs naturally with FUTURE_SCOPE #160 (engine architecture extraction at sprint close) — best done as part of the same refactor pass. **Trigger:** Sprint 12 close housekeeping or first time a new engine throw is added that doesn't fit existing substrings. Surfaced from S12-T7 build (Apr 30, 2026). |
 | 167 | Validate `exercises[].id` existence + `type='strength'` on save endpoints | Hardening / Server | Cross-endpoint hardening: BOTH T7's `POST /api/sessions/save-as-routine` AND the existing `POST /api/routines` accept caller-supplied `exercise_id` values without verifying that (a) the row actually exists in `exercises` (DB FK catches this on insert, but the error surfaces as a 500 instead of a clean 400 with `invalid_strength_exercise_ids`), and (b) the exercise has `type = 'strength'`. A misuser could save a routine containing yoga rows or breathwork rows by manipulating the request body — the rest of the app presumes `user_routines` are strength workouts and would render garbage when run through the routine player. T7 mirrors this gap rather than introducing a new one (existing `POST /api/routines` from Sprint 8 has the same shape since day 1). Fix on both endpoints: pre-INSERT bulk SELECT against `exercises WHERE id = ANY($1::int[]) AND type = 'strength'`, reject 400 with `invalid_strength_exercise_ids` if the count diverges from the request size. **Trigger:** Sprint 13/14 endpoint-hygiene pass alongside FUTURE_SCOPE #163 rate-limiting work, OR first time a UI bug or API client surfaces a non-strength routine in the player. Surfaced from S12-T7 build (Apr 30, 2026). |
 | 168 | Centralize test-fixture sentinel pattern (`smoke-fixtures.mjs` helper) | Tooling / Tech debt | T7 introduces two parallel sentinel patterns in `server/scripts/test-suggestion-engine-t2.js`: `notes='t7-smoke-fixture'` for `sessions` rows (cleanup deletes by sentinel) and throwaway `__t_state_test` / `__t_body_test` slugs in `focus_areas` (cleanup deletes the focus rows + cascading session/breathwork rows). T6 had a different snapshot/restore variant for `exercise_swap_counts` + `user_excluded_exercises`. T5 had its own tagged-row pattern for the recency block. Three different conventions across three sub-blocks of the same rolling smoke harness. A `server/scripts/lib/smoke-fixtures.mjs` helper (or similar) would centralize: (i) sentinel-tagged INSERT, (ii) bulk DELETE-by-sentinel cleanup, (iii) snapshot/restore for tables without a sentinel column, (iv) try/finally + SIGINT/SIGTERM lifecycle wiring. Drives consistency across future smoke blocks and lowers the cost of the next ticket's HTTP-layer testing. **Trigger:** Sprint 13 or first new smoke block that needs the same lifecycle plumbing — at that point the marginal value of extracting matches the cost. Surfaced from S12-T7 build (Apr 30, 2026). |
+| 169 | Rename `focus_areas.focus_type → type` + `focus_areas.sort_order → display_order` | Schema / Tech debt | Surfaced from S13-T2 build (Apr 30, 2026). Pre-flight diagnostic caught spec-vs-reality drift: spec referenced `type` and `display_order` as DB columns; live DB columns are `focus_type` and `sort_order` from S11-T3 seed. Resolved at the route layer with `SELECT focus_type AS type, sort_order AS display_order` aliases — client contract uses the cleaner names; one-line route comment notes the legacy aliases. Future cleanup: rename DB columns in a clean migration, drop the aliases, drop the comment. ~15-line migration in `server/src/db/migrate.js` + same-line edits to `server/src/services/suggestionEngine.js:202` (where `is_active` filter sits) and `server/src/routes/focus-areas.js`. Idempotent. **Trigger:** any future sprint that touches `focus_areas` schema for another reason — fold the rename into that migration to avoid a standalone schema-touch sprint. Don't pull off the shelf as a standalone ticket; the alias is durable until a triggering reason arrives. Added Apr 30, 2026. |
 
 ---
 
