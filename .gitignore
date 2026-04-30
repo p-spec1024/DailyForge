@@ -3,3 +3,4 @@ node_modules
 dist
 media/
 .claude/settings.local.json
+Trackers/.claude/ 
