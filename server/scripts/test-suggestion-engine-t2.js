@@ -19,6 +19,14 @@ import {
 import { incrementSwap, setPromptState } from '../src/services/swapCounter.js';
 import jwt from 'jsonwebtoken';
 import { createApp } from '../src/index.js';
+import {
+  insertSentinelRow,
+  deleteBySentinel,
+  snapshotRows,
+  restoreSnapshot,
+  withFixtureLifecycle,
+  sentinelFor,
+} from './lib/smoke-fixtures.mjs';
 
 const IN_SCOPE_FOCUSES = [
   'chest', 'back', 'shoulders', 'biceps', 'triceps',
@@ -967,13 +975,16 @@ async function main() {
 
   // ── Phase 3d: T5 RECENCY BLOCK ───────────────────────────────────────
   // Spec: Trackers/S12-T5-recency-warnings-spec.md.
-  // Tags every inserted row with notes='T5_RECENCY_SMOKE' (sessions) or marks
-  // breathwork inserts with a recognizable focus_slug (verified by test only).
-  // Cleanup deletes by tag in finally + on SIGINT/SIGTERM. Snapshots row
-  // counts before and asserts equality after cleanup.
+  // S13-T7 refactor: lifecycle, sentinel insert, and sentinel cleanup all
+  // delegated to scripts/lib/smoke-fixtures.mjs. Sentinel value follows the
+  // standard `<ticket>-fixture` convention; breathwork sub-rows still use
+  // their own focus_slug values so T5/22's literal-value assertion is preserved.
   console.log('\n=== T5 RECENCY BLOCK (recency_overlap warning + persistence) ===');
 
-  const T5_TAG = 'T5_RECENCY_SMOKE';
+  const T5_TAG = sentinelFor('s12-t5');  // → 's12-t5-fixture'
+  // Breathwork has no notes column; T5 sub-blocks 14 + 22 each insert one row
+  // with a known focus_slug. List them so cleanup is exhaustive.
+  const T5_BW_FOCUS_SLUGS = ['T5_chest_yesterday', 'T5_calm_persisted'];
 
   async function snapshotCounts() {
     const s = await pool.query(
@@ -983,17 +994,17 @@ async function main() {
     return { sessions: s.rows[0].n, breathwork: b.rows[0].n };
   }
   async function deleteT5Rows() {
-    await pool.query(
-      `DELETE FROM sessions WHERE user_id = $1 AND notes = $2`,
-      [user.id, T5_TAG]
-    );
-    await pool.query(
-      `DELETE FROM breathwork_sessions WHERE user_id = $1 AND focus_slug LIKE 'T5_%'`,
-      [user.id]
-    );
+    await deleteBySentinel('sessions', 'notes', T5_TAG);
+    for (const slug of T5_BW_FOCUS_SLUGS) {
+      await deleteBySentinel('breathwork_sessions', 'focus_slug', slug);
+    }
   }
 
   // Helper: insert a tagged sessions row at a specific date and return id.
+  // Date arithmetic stays server-side (CURRENT_DATE) so the row's date column
+  // matches the DB session's timezone — JS-side computation would risk an
+  // off-by-one near midnight. The helper's column-value INSERT can't express
+  // CURRENT_DATE expressions, so this stays a raw query but tags via T5_TAG.
   async function insertSession({ focus_slug, daysAgo, completed = true, type = 'strength', startedAtOffset = '0 hours' }) {
     const r = await pool.query(
       `INSERT INTO sessions (user_id, type, date, started_at, completed_at, completed, focus_slug, notes)
@@ -1009,26 +1020,7 @@ async function main() {
   const t5SnapshotBefore = await snapshotCounts();
   console.log(`  pre-insert counts: sessions=${t5SnapshotBefore.sessions}, breathwork=${t5SnapshotBefore.breathwork}`);
 
-  // Signal handlers — restore cleanup before pool.js's shutdown closes the pool.
-  let t5CleanupRan = false;
-  const t5OnSignal = async (signal) => {
-    if (t5CleanupRan) return;
-    t5CleanupRan = true;
-    console.error(`\n[smoke] caught ${signal} mid T5 block — deleting tagged rows`);
-    try {
-      await deleteT5Rows();
-      console.error('[smoke] T5 cleanup OK');
-      process.exit(1);
-    } catch (err) {
-      console.error('[smoke] FAILED T5 cleanup:', err.message);
-      console.error(`[smoke] manual: DELETE FROM sessions WHERE user_id=${user.id} AND notes='${T5_TAG}'`);
-      process.exit(2);
-    }
-  };
-  process.prependOnceListener('SIGINT',  () => t5OnSignal('SIGINT'));
-  process.prependOnceListener('SIGTERM', () => t5OnSignal('SIGTERM'));
-
-  try {
+  await withFixtureLifecycle(async () => {
     // Sub-block 1: empty history baseline (criterion #2)
     await deleteT5Rows();  // ensure clean slate for the user
     {
@@ -1285,8 +1277,20 @@ async function main() {
         r.rows[0]?.focus_slug === 'T5_calm_persisted', `got ${r.rows[0]?.focus_slug}`);
       await deleteT5Rows();
     }
-  } finally {
+  }, async () => {
     await deleteT5Rows();
+    // Defensive: catch any T5_-prefixed breathwork stragglers the hardcoded
+    // T5_BW_FOCUS_SLUGS list missed (e.g. if a future sub-block inserts a
+    // new prefixed slug without extending the list). The original cleanup
+    // used LIKE 'T5_%'; this assertion preserves that net.
+    const stragglers = await pool.query(
+      `SELECT focus_slug FROM breathwork_sessions
+        WHERE user_id = $1 AND focus_slug LIKE 'T5\\_%' ESCAPE '\\'`,
+      [user.id]
+    );
+    check('T5 cleanup: no T5_-prefixed breathwork stragglers',
+      stragglers.rows.length === 0,
+      `leaked: ${stragglers.rows.map((r) => r.focus_slug).join(', ')}`);
     const t5SnapshotAfter = await snapshotCounts();
     check('T5 cleanup: sessions count restored',
       t5SnapshotAfter.sessions === t5SnapshotBefore.sessions,
@@ -1294,7 +1298,7 @@ async function main() {
     check('T5 cleanup: breathwork_sessions count restored',
       t5SnapshotAfter.breathwork === t5SnapshotBefore.breathwork,
       `before=${t5SnapshotBefore.breathwork} after=${t5SnapshotAfter.breathwork}`);
-  }
+  });
 
   // ── Phase 3e: T6 SWAP-EXCLUSION BLOCK ────────────────────────────────
   // Spec: Trackers/S12-T6-swap-counter-exclusion-spec.md.
@@ -1321,14 +1325,21 @@ async function main() {
     const T6_EX_B = t6Picks.rows[1].id;
     const T6_TEST_IDS = [T6_EX_A, T6_EX_B];
 
-    async function snapshotT6() {
-      const sc = await pool.query(
-        `SELECT COUNT(*)::int AS n FROM exercise_swap_counts WHERE user_id = $1`, [user.id]);
-      const ux = await pool.query(
-        `SELECT COUNT(*)::int AS n FROM user_excluded_exercises
-          WHERE user_id = $1 AND content_type = 'strength'`, [user.id]);
-      return { swap_counts: sc.rows[0].n, excluded: ux.rows[0].n };
-    }
+    // S13-T7 refactor: snapshot the user's full pre-test state in both
+    // mutated tables, run the sub-blocks, then restore via DELETE+reinsert.
+    // Restore makes the cleanup-count assertions trivially true (count
+    // before == count after), and the lifecycle wrapper guarantees restore
+    // runs on signal/exception too.
+    const t6SwapCountSnap = await snapshotRows('exercise_swap_counts', { user_id: user.id });
+    const t6ExcludedSnap  = await snapshotRows('user_excluded_exercises', {
+      user_id: user.id, content_type: 'strength',
+    });
+    console.log(`  pre-T6 snapshot: swap_counts=${t6SwapCountSnap.rows.length}, excluded=${t6ExcludedSnap.rows.length}`);
+
+    // Mid-block reset helper used by sub-blocks 12, 17, 18 to start a fresh
+    // (user, exercise) state before re-asserting. Targeted to T6_TEST_IDS so
+    // it never touches the user's other rows; end-of-block restore covers the
+    // global cleanup.
     async function deleteT6Rows() {
       await pool.query(
         `DELETE FROM exercise_swap_counts WHERE user_id = $1 AND exercise_id = ANY($2)`,
@@ -1341,29 +1352,7 @@ async function main() {
       );
     }
 
-    const t6SnapshotBefore = await snapshotT6();
-    console.log(`  pre-T6 counts: swap_counts=${t6SnapshotBefore.swap_counts}, excluded=${t6SnapshotBefore.excluded}`);
-
-    // Signal handlers for graceful cleanup if the harness is killed mid-block.
-    let t6CleanupRan = false;
-    const t6OnSignal = async (signal) => {
-      if (t6CleanupRan) return;
-      t6CleanupRan = true;
-      console.error(`\n[smoke] caught ${signal} mid T6 block — deleting test rows`);
-      try {
-        await deleteT6Rows();
-        console.error('[smoke] T6 cleanup OK');
-        process.exit(1);
-      } catch (err) {
-        console.error('[smoke] FAILED T6 cleanup:', err.message);
-        console.error(`[smoke] manual: DELETE FROM exercise_swap_counts WHERE user_id=${user.id} AND exercise_id IN (${T6_TEST_IDS.join(',')})`);
-        process.exit(2);
-      }
-    };
-    process.prependOnceListener('SIGINT',  () => t6OnSignal('SIGINT'));
-    process.prependOnceListener('SIGTERM', () => t6OnSignal('SIGTERM'));
-
-    try {
+    await withFixtureLifecycle(async () => {
       // Sub-block 1: first swap → swap_count=1, never_prompted, no prompt
       {
         const r = await incrementSwap(user.id, T6_EX_A);
@@ -1552,16 +1541,21 @@ async function main() {
           JSON.stringify(promptCounts) === JSON.stringify([3, 6]),
           `got ${JSON.stringify(promptCounts)}`);
       }
-    } finally {
-      await deleteT6Rows();
-      const t6SnapshotAfter = await snapshotT6();
+    }, async () => {
+      await restoreSnapshot(t6SwapCountSnap);
+      await restoreSnapshot(t6ExcludedSnap);
+      const sc = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM exercise_swap_counts WHERE user_id = $1`, [user.id]);
+      const ux = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM user_excluded_exercises
+          WHERE user_id = $1 AND content_type = 'strength'`, [user.id]);
       check('T6 cleanup: exercise_swap_counts restored',
-        t6SnapshotAfter.swap_counts === t6SnapshotBefore.swap_counts,
-        `before=${t6SnapshotBefore.swap_counts} after=${t6SnapshotAfter.swap_counts}`);
+        sc.rows[0].n === t6SwapCountSnap.rows.length,
+        `before=${t6SwapCountSnap.rows.length} after=${sc.rows[0].n}`);
       check('T6 cleanup: user_excluded_exercises restored',
-        t6SnapshotAfter.excluded === t6SnapshotBefore.excluded,
-        `before=${t6SnapshotBefore.excluded} after=${t6SnapshotAfter.excluded}`);
-    }
+        ux.rows[0].n === t6ExcludedSnap.rows.length,
+        `before=${t6ExcludedSnap.rows.length} after=${ux.rows[0].n}`);
+    });
   }
 
   // ── Phase 3f: T7 HTTP-LAYER BLOCK ────────────────────────────────────
@@ -1590,32 +1584,39 @@ async function main() {
     // Insert two temporary focus_areas rows so /last can be tested against
     // throwaway focus slugs without touching the live user's real focus history.
     // Cleanup removes them at end-of-block.
+    //
+    // S13-T7 refactor: insertSentinelRow + deleteBySentinel route both setup
+    // and teardown for the focus_areas rows through the shared helper.
+    // Pre-deleting before insert makes the setup idempotent (safe rerun even
+    // if a previous run died after insert but before cleanup).
     const T7_TEMP_STATE_FOCUS = '__t_state_test';
     const T7_TEMP_BODY_FOCUS  = '__t_body_test';
-    await pool.query(
-      `INSERT INTO focus_areas (slug, display_name, focus_type, sort_order, is_active)
-       VALUES ($1, 'T7 Test State Focus', 'state', 9999, true),
-              ($2, 'T7 Test Body Focus',  'body',  9999, true)
-       ON CONFLICT (slug) DO NOTHING`,
-      [T7_TEMP_STATE_FOCUS, T7_TEMP_BODY_FOCUS]);
+    await deleteBySentinel('focus_areas', 'slug', T7_TEMP_STATE_FOCUS);
+    await deleteBySentinel('focus_areas', 'slug', T7_TEMP_BODY_FOCUS);
+    await insertSentinelRow('focus_areas',
+      { display_name: 'T7 Test State Focus', focus_type: 'state', sort_order: 9999, is_active: true },
+      'slug', T7_TEMP_STATE_FOCUS);
+    await insertSentinelRow('focus_areas',
+      { display_name: 'T7 Test Body Focus',  focus_type: 'body',  sort_order: 9999, is_active: true },
+      'slug', T7_TEMP_BODY_FOCUS);
 
-    // All T7 fixture inserts tag rows with notes='t7-smoke-fixture' (sessions)
-    // or use the createdBwSessionIds tracking list (breathwork_sessions has no
-    // notes column). Cleanup deletes by sentinel + by id to be belt-and-braces.
-    const T7_FIXTURE_NOTE = 't7-smoke-fixture';
+    // All T7 fixture inserts tag sessions rows with the standard sentinel
+    // (notes column). Cleanup deletes by sentinel + by tracked id for the
+    // tables that lack a sentinel column (breathwork_sessions, user_routines,
+    // exercise_swap_counts, user_excluded_exercises).
+    const T7_FIXTURE_NOTE = sentinelFor('s12-t7');  // → 's12-t7-fixture'
     async function t7Cleanup() {
       if (t7CreatedRoutineIds.length > 0) {
         await pool.query(`DELETE FROM user_routine_exercises WHERE routine_id = ANY($1::int[])`, [t7CreatedRoutineIds]);
         await pool.query(`DELETE FROM user_routines WHERE id = ANY($1::int[])`, [t7CreatedRoutineIds]);
       }
-      // Delete sessions by sentinel notes (catches anything we inserted).
+      // Cascade-clean child session_exercises before deleting sentinel-tagged
+      // sessions (FK requires it).
       await pool.query(
         `DELETE FROM session_exercises WHERE session_id IN (
-           SELECT id FROM sessions WHERE user_id = $1 AND notes = $2
-         )`, [user.id, T7_FIXTURE_NOTE]);
-      await pool.query(
-        `DELETE FROM sessions WHERE user_id = $1 AND notes = $2`,
-        [user.id, T7_FIXTURE_NOTE]);
+           SELECT id FROM sessions WHERE notes = $1
+         )`, [T7_FIXTURE_NOTE]);
+      await deleteBySentinel('sessions', 'notes', T7_FIXTURE_NOTE);
       // Defensive: also delete by id tracking (in case anything skipped the sentinel).
       if (t7CreatedSessionIds.length > 0) {
         await pool.query(`DELETE FROM session_exercises WHERE session_id = ANY($1::int[])`, [t7CreatedSessionIds]);
@@ -1644,20 +1645,12 @@ async function main() {
       await pool.query(
         `DELETE FROM breathwork_sessions WHERE user_id = $1 AND focus_slug = ANY($2::text[])`,
         [user.id, [T7_TEMP_STATE_FOCUS, T7_TEMP_BODY_FOCUS]]);
-      // Drop the temp focus_areas rows.
-      await pool.query(
-        `DELETE FROM focus_areas WHERE slug = ANY($1::text[])`,
-        [[T7_TEMP_STATE_FOCUS, T7_TEMP_BODY_FOCUS]]);
+      // Drop the temp focus_areas rows via the helper.
+      await deleteBySentinel('focus_areas', 'slug', T7_TEMP_STATE_FOCUS);
+      await deleteBySentinel('focus_areas', 'slug', T7_TEMP_BODY_FOCUS);
     }
-    const t7AbortHandler = async () => {
-      try { await t7Cleanup(); } catch (e) { console.error('[T7 abort cleanup]', e); }
-      try { t7Server.close(); } catch {}
-      process.exit(130);
-    };
-    process.once('SIGINT', t7AbortHandler);
-    process.once('SIGTERM', t7AbortHandler);
 
-    try {
+    await withFixtureLifecycle(async () => {
       // Sub-block 1: /suggest body-focus happy path (criterion #2)
       {
         const r = await fetch(`${t7Base}/api/sessions/suggest`, { method: 'POST', headers: t7H,
@@ -2203,12 +2196,11 @@ async function main() {
           body: JSON.stringify({ name: 'noauth', session: { session_shape: 'cross_pillar', phases: [], warnings: [], metadata: {} } }) });
         check('T7/19 save no JWT → 401', r.status === 401);
       }
-    } finally {
-      await t7Cleanup();
-      try { t7Server.close(); } catch {}
-      process.removeListener('SIGINT', t7AbortHandler);
-      process.removeListener('SIGTERM', t7AbortHandler);
-    }
+    }, async () => {
+      try { await t7Cleanup(); } finally {
+        try { t7Server.close(); } catch { /* idempotent close */ }
+      }
+    });
   }
 
   // ── Phase 4: pretty-print sample sessions ────────────────────────────
