@@ -22,6 +22,7 @@ import routinesRoutes from './routes/routines.js';
 import bodyMapRoutes from './routes/bodyMap.js';
 import homeRoutes from './routes/home.js';
 import sessionsRoutes from './routes/sessions.js';
+import focusAreasRoutes from './routes/focus-areas.js';
 
 // S12-T7 prep: factor app construction so test harnesses can spawn an
 // in-process Express instance via createApp() instead of running a real
@@ -55,6 +56,7 @@ export function createApp() {
   app.use('/api/body-map', bodyMapRoutes);
   app.use('/api/home', homeRoutes);
   app.use('/api/sessions', sessionsRoutes);
+  app.use('/api/focus-areas', focusAreasRoutes);
 
   app.use(errorHandler);
 

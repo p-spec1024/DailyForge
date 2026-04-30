@@ -2211,6 +2211,116 @@ async function main() {
     }
   }
 
+  // ── Phase 3g: T2 FOCUS-AREAS-API BLOCK (S13-T2) ──────────────────────
+  // 9 sub-blocks exercising GET /api/focus-areas via createApp() in-process
+  // Express listener. No DB fixtures needed — endpoint is a pure read against
+  // the live focus_areas table (17 rows seeded by seed-focus-areas.js).
+  {
+    console.log('\n=== T2 FOCUS-AREAS-API BLOCK ===');
+    if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET not set — required for T2 block');
+    const t2App = createApp();
+    const t2Server = await new Promise((resolve) => {
+      const s = t2App.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const t2Port = t2Server.address().port;
+    const t2Base = `http://127.0.0.1:${t2Port}`;
+    const t2Token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '5m' });
+    const t2H = { Authorization: `Bearer ${t2Token}` };
+
+    const t2AbortHandler = () => {
+      try { t2Server.close(); } catch {}
+      process.exit(130);
+    };
+    process.once('SIGINT', t2AbortHandler);
+    process.once('SIGTERM', t2AbortHandler);
+
+    try {
+      // Sub-block 1: no auth → 401
+      {
+        const r = await fetch(`${t2Base}/api/focus-areas`);
+        check('T2/1 GET /api/focus-areas no auth → 401', r.status === 401, `got ${r.status}`);
+      }
+
+      // Sub-block 2: valid auth → 200
+      let body;
+      {
+        const r = await fetch(`${t2Base}/api/focus-areas`, { headers: t2H });
+        check('T2/2 GET /api/focus-areas with auth → 200', r.status === 200, `got ${r.status}`);
+        body = await r.json();
+      }
+
+      // Sub-block 3: response shape { focus_areas: [...] }
+      check('T2/3 response has focus_areas array',
+        body && Array.isArray(body.focus_areas),
+        `got keys=${body ? Object.keys(body).join(',') : 'null'}`);
+
+      const items = (body && Array.isArray(body.focus_areas)) ? body.focus_areas : [];
+
+      // Sub-block 4: length === 17
+      check('T2/4 focus_areas length === 17', items.length === 17, `got ${items.length}`);
+
+      // Sub-block 5: 12 rows have type === 'body'
+      const bodyCount = items.filter((r) => r.type === 'body').length;
+      check('T2/5 12 rows have type=body', bodyCount === 12, `got ${bodyCount}`);
+
+      // Sub-block 6: 5 rows have type === 'state'
+      const stateCount = items.filter((r) => r.type === 'state').length;
+      check('T2/6 5 rows have type=state', stateCount === 5, `got ${stateCount}`);
+
+      // Sub-block 7: every row has all 4 required fields with correct types
+      {
+        const allShaped = items.every((r) =>
+          typeof r.slug === 'string' && r.slug.length > 0 &&
+          typeof r.display_name === 'string' && r.display_name.length > 0 &&
+          (r.type === 'body' || r.type === 'state') &&
+          Number.isInteger(r.display_order)
+        );
+        check('T2/7 every row has slug/display_name/type/display_order', allShaped,
+          `first bad row: ${JSON.stringify(items.find((r) =>
+            !(typeof r.slug === 'string' && r.slug.length > 0 &&
+              typeof r.display_name === 'string' && r.display_name.length > 0 &&
+              (r.type === 'body' || r.type === 'state') &&
+              Number.isInteger(r.display_order))) || 'none')}`);
+      }
+
+      // Sub-block 8: rows sorted by type ASC, display_order ASC
+      {
+        let sorted = true;
+        let badAt = -1;
+        for (let i = 1; i < items.length; i++) {
+          const prev = items[i - 1];
+          const cur = items[i];
+          if (prev.type > cur.type) { sorted = false; badAt = i; break; }
+          if (prev.type === cur.type && prev.display_order > cur.display_order) {
+            sorted = false; badAt = i; break;
+          }
+        }
+        check('T2/8 rows sorted by type ASC, display_order ASC', sorted,
+          badAt >= 0
+            ? `out-of-order at index ${badAt}: ${items[badAt - 1].slug}(${items[badAt - 1].type}/${items[badAt - 1].display_order}) → ${items[badAt].slug}(${items[badAt].type}/${items[badAt].display_order})`
+            : '');
+      }
+
+      // Sub-block 9: state focuses in display_order are exactly
+      // [energize, calm, focus, sleep, recover].
+      // (PM ruling: DB wins over original prompt's [energize, focus, calm, sleep, recover].)
+      {
+        const stateOrder = items
+          .filter((r) => r.type === 'state')
+          .sort((a, b) => a.display_order - b.display_order)
+          .map((r) => r.slug);
+        const expected = ['energize', 'calm', 'focus', 'sleep', 'recover'];
+        const ok = stateOrder.length === expected.length && stateOrder.every((s, i) => s === expected[i]);
+        check('T2/9 state focuses in order [energize, calm, focus, sleep, recover]', ok,
+          `got [${stateOrder.join(', ')}]`);
+      }
+    } finally {
+      try { t2Server.close(); } catch {}
+      process.removeListener('SIGINT', t2AbortHandler);
+      process.removeListener('SIGTERM', t2AbortHandler);
+    }
+  }
+
   // ── Phase 4: pretty-print sample sessions ────────────────────────────
   console.log('\n=== Sample: biceps / home / 30 ===');
   const sample = await generateSession({
