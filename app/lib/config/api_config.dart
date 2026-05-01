@@ -74,6 +74,7 @@ class ApiConfig {
 
   // Sessions
   static const String sessions = '/sessions';
+  static const String sessionsSuggest = '/sessions/suggest';
   static const String sessionStart = '/session/start';
   static const String sessionActive = '/session/active';
   static const String sessionPreviousPerformance = '/session/previous-performance';

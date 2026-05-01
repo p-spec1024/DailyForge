@@ -53,6 +53,11 @@ class StorageService {
     return prefs.get(key);
   }
 
+  Future<void> removePreference(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(key);
+  }
+
   // Clear auth data on logout (preserves app preferences)
   Future<void> clearAuth() async {
     await deleteToken();
