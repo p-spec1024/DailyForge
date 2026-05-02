@@ -2,13 +2,14 @@
 
 **Triage completed: April 13, 2026**
 **Updated: April 30, 2026 — #169 through #178 added from S13-T1, T7 ships and recovery story (column rename, polish refactors, body-focus matrix flake, sentinel hygiene, helper-module enhancements)**
+**Updated: May 3, 2026 — #180 added from S13-T4 + AMENDMENT-1 (custom focus-area icon set + body-map icon)**
 
 Features categorized for Android v1.0 launch vs future updates.
 
 | Category | Count |
 |----------|-------|
 | 🚀 Before Android Launch | 45 |
-| 🔄 Future Updates | 75 |
+| 🔄 Future Updates | 76 |
 | ❌ Cut | 2 |
 | ✅ Already Done | 7 |
 
@@ -205,6 +206,7 @@ A strategic planning session on Apr 26, 2026 redirected the app's home-page mode
 | 177 | `smoke-fixtures` helper supports LIKE/IN matching variants | Backend / Smoke tooling | Surfaced from S13-T7 `/review` (Apr 30, 2026, suggestion 5). Current helper exposes only equality matching for sentinel deletes (`WHERE col = value`). Some smoke patterns might benefit from `LIKE 'prefix%'` (e.g. all `s13-*-fixture` rows) or `IN (val1, val2, ...)` (multi-sentinel cleanup). Future: add `deleteBySentinelLike` and `deleteBySentinelIn` helper variants. ~15-line API extension. **Trigger:** when a smoke ticket needs cross-sprint cleanup or multi-sentinel cleanup patterns. Added Apr 30, 2026. |
 | 178 | `restoreSnapshot` insertion ordering for FK self-references | Backend / Smoke tooling | Surfaced from S13-T7 `/review` (Apr 30, 2026, suggestion 6). Current `restoreSnapshot` doesn't impose row insertion order. Could matter for tables with foreign-key self-references (e.g. `parent_id` columns where rows reference other rows in the same table) — restore order matters to avoid FK violations. Today: none of the snapshotted tables have FK self-references, so this is theoretical. Future: accept an optional `orderBy` argument or topologically sort rows by FK dependency. **Trigger:** if a future smoke block ever snapshots a self-referencing table. Added Apr 30, 2026. |
 | 179 | `SuggestServiceException.code` — enum vs free-form String | Flutter / Type safety | Surfaced from S13-T3 `/review` (Apr 30, 2026, architecture recommendation #2). Currently `SuggestServiceException` carries `code` as `String?` populated from T7's stable error code dictionary (`invalid_focus_slug`, `unknown_focus_slug`, `invalid_entry_point`, `body_focus_requires_time_budget`, `state_focus_requires_bracket`, `invalid_time_budget`, `invalid_bracket`, `invalid_focus_entry_combo`, `engine_error`, `network_error`). An enum (`SuggestErrorCode`) would give compile-time exhaustiveness checking when downstream surfaces map codes to user-facing copy via `switch(code)`. Not worth doing in T3 because no downstream `switch` exists yet — the cost is real (10 enum cases + factory + JSON deserialization round-trip + extension method for `userFacingMessage`) while the win is deferred until a caller needs exhaustiveness. **Trigger:** when T4 (or any downstream surface) writes the first `switch(code)` that maps codes to UI copy. At that point the enum's exhaustiveness catches "you forgot a case" at compile time, and the upgrade path is mechanical — service-layer factories convert from String to enum, exception field type changes, downstream switch becomes exhaustive. Until then, free-form String is honest about "this is a stable code we map at the call site, not a domain model with closed semantics." Added Apr 30, 2026. |
+| 180 | Custom focus-area icon set + body-map icon | Flutter / Polish | Surfaced from S13-T4 + AMENDMENT-1 (May 3, 2026). Two related deferrals best handled as a single design + commission ticket: (a) the 17 focus-area chips in the home pie picker render with Unicode emoji placeholders today (`💪` for both biceps and triceps, `🦵` for both quads and hamstrings — duplicate-emoji collisions are intentional and documented in `kFocusEmoji` at `app/lib/pages/home/widgets_v2/_tokens_v2.dart`); (b) the body-map navigation icon at the home page top-right currently uses `LucideIcons.scan` as a stand-in (AMENDMENT-1 §2.5 swapped from a body-silhouette spec because a generic person icon collided visually with the bottom-nav Profile tab). Single ticket: design + commission custom SVGs for the 17 focus areas plus a body-silhouette icon for the body-map action; replace emoji map with asset references; replace `LucideIcons.scan` with the new SVG. **Priority:** mid — emoji is functional, this is design polish only. **Trigger:** Sprint 14/15 polish pass that touches the home page, OR when a designer becomes available. Added May 3, 2026. |
 
 ---
 
