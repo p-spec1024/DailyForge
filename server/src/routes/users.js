@@ -49,4 +49,72 @@ router.put('/profile', async (req, res, next) => {
   }
 });
 
+const PILLARS = ['strength', 'yoga', 'breathwork'];
+const VALID_LEVELS = ['beginner', 'intermediate', 'advanced'];
+
+// POST /api/users/pillar-levels — upsert all 3 pillar levels for the
+// authenticated user in a single transaction. Source is hardcoded to
+// 'declared' (this endpoint is the onboarding-stub entry point).
+//
+// Body: { strength, yoga, breathwork } — each one of beginner/intermediate/advanced.
+// 200 { ok, levels } on success. 400 with stable error codes on missing/invalid:
+//   <pillar>_level_required, invalid_<pillar>_level (pillars checked in fixed order).
+router.post('/pillar-levels', async (req, res, next) => {
+  const body = req.body || {};
+  for (const pillar of PILLARS) {
+    if (!body[pillar]) {
+      return res.status(400).json({ error: `${pillar}_level_required` });
+    }
+    if (!VALID_LEVELS.includes(body[pillar])) {
+      return res.status(400).json({ error: `invalid_${pillar}_level` });
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const pillar of PILLARS) {
+      await client.query(
+        `INSERT INTO user_pillar_levels (user_id, pillar, level, source)
+         VALUES ($1, $2, $3, 'declared')
+         ON CONFLICT (user_id, pillar)
+         DO UPDATE SET level = EXCLUDED.level, source = 'declared', updated_at = NOW()`,
+        [req.user.id, pillar, body[pillar]]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({
+      ok: true,
+      levels: {
+        strength: body.strength,
+        yoga: body.yoga,
+        breathwork: body.breathwork,
+      },
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* swallow — original err is the real story */ }
+    next(err);
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/users/me/pillar-levels — return the authenticated user's
+// declared/inferred levels (empty array for fresh users; that signal
+// drives the onboarding-stub redirect on app launch).
+router.get('/me/pillar-levels', async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `SELECT pillar, level, source
+         FROM user_pillar_levels
+        WHERE user_id = $1
+        ORDER BY pillar ASC`,
+      [req.user.id]
+    );
+    res.json({ levels: result.rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

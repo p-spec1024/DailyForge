@@ -23,6 +23,10 @@ class ApiConfig {
   static const String register = '/auth/register';
   static const String profile = '/auth/profile';
 
+  // Onboarding (S13-T1) — pillar-level capture for new users.
+  static const String pillarLevels = '/users/pillar-levels';
+  static const String myPillarLevels = '/users/me/pillar-levels';
+
   // Workouts
   static const String workouts = '/workouts';
   static const String activeWorkout = '/workouts/active';

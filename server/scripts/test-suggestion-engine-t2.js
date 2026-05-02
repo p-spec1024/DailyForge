@@ -2211,6 +2211,191 @@ async function main() {
     }
   }
 
+  // ── Phase 3g: T1 ONBOARDING-API BLOCK ────────────────────────────────
+  // 9 sub-blocks exercising POST /api/users/pillar-levels and
+  // GET /api/users/me/pillar-levels via createApp() in-process listener.
+  // Uses a fresh sentinel-tagged user (email t1-smoke-fixture@test.local)
+  // so we can validate the "fresh user / zero rows" path without touching
+  // the live test user's pillar levels. Cleanup at end deletes the user's
+  // pillar_levels rows then the user; SIGINT/SIGTERM handlers fire the same
+  // cleanup before pool.js's shutdown closes the connection pool.
+  //
+  // Raw try/finally pattern matches existing T5/T6/T7 blocks. A future S13-T7
+  // refactor can route this through scripts/lib/smoke-fixtures.mjs as part of
+  // its own scope.
+  {
+    console.log('\n=== T1 ONBOARDING-API BLOCK ===');
+    if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET not set — required for T1 block');
+
+    const T1_FIXTURE_EMAIL = 't1-smoke-fixture@test.local';
+
+    // Idempotent pre-clean (covers a previous run that died before its own
+    // cleanup ran). The users table has no marker column, so we scope by email.
+    await pool.query(
+      `DELETE FROM user_pillar_levels
+        WHERE user_id IN (SELECT id FROM users WHERE email = $1)`,
+      [T1_FIXTURE_EMAIL]
+    );
+    await pool.query(`DELETE FROM users WHERE email = $1`, [T1_FIXTURE_EMAIL]);
+
+    // Fresh fixture user with zero pillar_levels rows.
+    const t1UserIns = await pool.query(
+      `INSERT INTO users (email, password_hash, name)
+       VALUES ($1, $2, $3)
+       RETURNING id, email`,
+      [T1_FIXTURE_EMAIL, 'no-login-fixture', 'T1 Smoke Fixture']
+    );
+    const t1User = t1UserIns.rows[0];
+
+    const t1App = createApp();
+    const t1Server = await new Promise((resolve) => {
+      const s = t1App.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const t1Port = t1Server.address().port;
+    const t1Base = `http://127.0.0.1:${t1Port}`;
+    const t1Token = jwt.sign(
+      { id: t1User.id, email: t1User.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '5m' }
+    );
+    const t1H = { 'Content-Type': 'application/json', Authorization: `Bearer ${t1Token}` };
+    const t1NoAuthH = { 'Content-Type': 'application/json' };
+
+    async function t1Cleanup() {
+      await pool.query(`DELETE FROM user_pillar_levels WHERE user_id = $1`, [t1User.id]);
+      await pool.query(`DELETE FROM users WHERE id = $1`, [t1User.id]);
+    }
+    const t1AbortHandler = async () => {
+      try { await t1Cleanup(); } catch (e) { console.error('[T1 abort cleanup]', e); }
+      try { t1Server.close(); } catch {}
+      process.exit(130);
+    };
+    process.once('SIGINT', t1AbortHandler);
+    process.once('SIGTERM', t1AbortHandler);
+
+    try {
+      // Sub-block 1: GET /me/pillar-levels with no auth → 401
+      {
+        const r = await fetch(`${t1Base}/api/users/me/pillar-levels`, { headers: t1NoAuthH });
+        check('T1/1 GET /me/pillar-levels no auth → 401', r.status === 401, `got ${r.status}`);
+      }
+
+      // Sub-block 2: GET /me/pillar-levels for fresh user → 200 { levels: [] }
+      {
+        const r = await fetch(`${t1Base}/api/users/me/pillar-levels`, { headers: t1H });
+        check('T1/2 GET fresh user: status 200', r.status === 200, `got ${r.status}`);
+        const body = await r.json();
+        check('T1/2 GET fresh user: levels is array', Array.isArray(body.levels));
+        check('T1/2 GET fresh user: levels is empty',
+          (body.levels || []).length === 0, `got ${(body.levels || []).length} rows`);
+      }
+
+      // Sub-block 3: POST /pillar-levels with all 3 valid → 200 + body shape
+      {
+        const r = await fetch(`${t1Base}/api/users/pillar-levels`, {
+          method: 'POST', headers: t1H,
+          body: JSON.stringify({ strength: 'beginner', yoga: 'intermediate', breathwork: 'advanced' }),
+        });
+        check('T1/3 POST 3 valid: status 200', r.status === 200, `got ${r.status}`);
+        const body = await r.json();
+        check('T1/3 POST 3 valid: ok=true', body.ok === true);
+        check('T1/3 POST 3 valid: strength echoed',
+          body.levels?.strength === 'beginner', `got ${body.levels?.strength}`);
+        check('T1/3 POST 3 valid: yoga echoed',
+          body.levels?.yoga === 'intermediate', `got ${body.levels?.yoga}`);
+        check('T1/3 POST 3 valid: breathwork echoed',
+          body.levels?.breathwork === 'advanced', `got ${body.levels?.breathwork}`);
+      }
+
+      // Sub-block 4: GET returns 3 rows, all source='declared'
+      {
+        const r = await fetch(`${t1Base}/api/users/me/pillar-levels`, { headers: t1H });
+        check('T1/4 GET after POST: status 200', r.status === 200, `got ${r.status}`);
+        const body = await r.json();
+        check('T1/4 GET after POST: 3 rows',
+          (body.levels || []).length === 3, `got ${(body.levels || []).length}`);
+        const byPillar = Object.fromEntries((body.levels || []).map((row) => [row.pillar, row]));
+        check('T1/4 strength row: level=beginner source=declared',
+          byPillar.strength?.level === 'beginner' && byPillar.strength?.source === 'declared',
+          `got level=${byPillar.strength?.level} source=${byPillar.strength?.source}`);
+        check('T1/4 yoga row: level=intermediate source=declared',
+          byPillar.yoga?.level === 'intermediate' && byPillar.yoga?.source === 'declared',
+          `got level=${byPillar.yoga?.level} source=${byPillar.yoga?.source}`);
+        check('T1/4 breathwork row: level=advanced source=declared',
+          byPillar.breathwork?.level === 'advanced' && byPillar.breathwork?.source === 'declared',
+          `got level=${byPillar.breathwork?.level} source=${byPillar.breathwork?.source}`);
+      }
+
+      // Sub-block 5: POST same endpoint with different levels → 200 (upsert path)
+      {
+        const r = await fetch(`${t1Base}/api/users/pillar-levels`, {
+          method: 'POST', headers: t1H,
+          body: JSON.stringify({ strength: 'advanced', yoga: 'beginner', breathwork: 'intermediate' }),
+        });
+        check('T1/5 POST upsert: status 200', r.status === 200, `got ${r.status}`);
+        const body = await r.json();
+        check('T1/5 POST upsert: ok=true', body.ok === true);
+      }
+
+      // Sub-block 6: GET returns updated levels (verifies upsert path, not duplicate insert)
+      {
+        const r = await fetch(`${t1Base}/api/users/me/pillar-levels`, { headers: t1H });
+        check('T1/6 GET after upsert: status 200', r.status === 200);
+        const body = await r.json();
+        check('T1/6 GET after upsert: still 3 rows (no duplicates)',
+          (body.levels || []).length === 3, `got ${(body.levels || []).length}`);
+        const byPillar = Object.fromEntries((body.levels || []).map((row) => [row.pillar, row]));
+        check('T1/6 strength updated to advanced',
+          byPillar.strength?.level === 'advanced' && byPillar.strength?.source === 'declared',
+          `got level=${byPillar.strength?.level}`);
+        check('T1/6 yoga updated to beginner',
+          byPillar.yoga?.level === 'beginner' && byPillar.yoga?.source === 'declared',
+          `got level=${byPillar.yoga?.level}`);
+        check('T1/6 breathwork updated to intermediate',
+          byPillar.breathwork?.level === 'intermediate' && byPillar.breathwork?.source === 'declared',
+          `got level=${byPillar.breathwork?.level}`);
+      }
+
+      // Sub-block 7: POST missing 'yoga' key → 400 yoga_level_required
+      {
+        const r = await fetch(`${t1Base}/api/users/pillar-levels`, {
+          method: 'POST', headers: t1H,
+          body: JSON.stringify({ strength: 'beginner', breathwork: 'beginner' }),
+        });
+        const body = await r.json();
+        check('T1/7 POST missing yoga → 400 yoga_level_required',
+          r.status === 400 && body.error === 'yoga_level_required',
+          `got ${r.status} ${body.error}`);
+      }
+
+      // Sub-block 8: POST invalid level value ('expert') → 400 invalid_strength_level
+      {
+        const r = await fetch(`${t1Base}/api/users/pillar-levels`, {
+          method: 'POST', headers: t1H,
+          body: JSON.stringify({ strength: 'expert', yoga: 'beginner', breathwork: 'beginner' }),
+        });
+        const body = await r.json();
+        check('T1/8 POST invalid strength=expert → 400 invalid_strength_level',
+          r.status === 400 && body.error === 'invalid_strength_level',
+          `got ${r.status} ${body.error}`);
+      }
+
+      // Sub-block 9: POST with no auth → 401
+      {
+        const r = await fetch(`${t1Base}/api/users/pillar-levels`, {
+          method: 'POST', headers: t1NoAuthH,
+          body: JSON.stringify({ strength: 'beginner', yoga: 'beginner', breathwork: 'beginner' }),
+        });
+        check('T1/9 POST no auth → 401', r.status === 401, `got ${r.status}`);
+      }
+    } finally {
+      await t1Cleanup();
+      try { t1Server.close(); } catch {}
+      process.removeListener('SIGINT', t1AbortHandler);
+      process.removeListener('SIGTERM', t1AbortHandler);
+    }
+  }
+
   // ── Phase 4: pretty-print sample sessions ────────────────────────────
   console.log('\n=== Sample: biceps / home / 30 ===');
   const sample = await generateSession({

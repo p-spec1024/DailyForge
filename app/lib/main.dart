@@ -18,8 +18,10 @@ import 'providers/calendar_provider.dart';
 import 'providers/progress_provider.dart';
 import 'providers/yoga_session_provider.dart';
 import 'providers/body_measurements_provider.dart';
+import 'providers/onboarding_provider.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart';
+import 'services/onboarding_service.dart';
 import 'services/storage_service.dart';
 
 void main() {
@@ -51,6 +53,7 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
   late final BodyMapProvider _bodyMapProvider;
   late final HomeProvider _homeProvider;
   late final SuggestProvider _suggestProvider;
+  late final OnboardingProvider _onboardingProvider;
   late final GoRouter _router;
 
   @override
@@ -63,7 +66,7 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
 
     _authProvider = AuthProvider(authService, api);
     _authProvider.initialize();
-    
+
     _dashboardProvider = DashboardProvider(api);
     _strengthProvider = StrengthProvider(api);
     _workoutSessionProvider = WorkoutSessionProvider(api);
@@ -78,6 +81,7 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
     _bodyMapProvider = BodyMapProvider(api);
     _homeProvider = HomeProvider(api);
     _suggestProvider = SuggestProvider(api, storage);
+    _onboardingProvider = OnboardingProvider(OnboardingService(api));
 
     // Reset user-scoped caches when auth is invalidated.
     _authProvider.addListener(_handleAuthChanged);
@@ -96,6 +100,7 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
       _bodyMapProvider.clear();
       _homeProvider.clear();
       _suggestProvider.clear();
+      _onboardingProvider.reset();
     }
     _wasAuthenticated = isAuth;
   }
@@ -119,6 +124,7 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
     _bodyMapProvider.dispose();
     _homeProvider.dispose();
     _suggestProvider.dispose();
+    _onboardingProvider.dispose();
     super.dispose();
   }
 
@@ -145,6 +151,7 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
         ChangeNotifierProvider<BodyMapProvider>.value(value: _bodyMapProvider),
         ChangeNotifierProvider<HomeProvider>.value(value: _homeProvider),
         ChangeNotifierProvider<SuggestProvider>.value(value: _suggestProvider),
+        ChangeNotifierProvider<OnboardingProvider>.value(value: _onboardingProvider),
       ],
       child: MaterialApp.router(
         title: 'DailyForge',
