@@ -1,20 +1,16 @@
-import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
-
 class ApiConfig {
   // Override with: flutter run --dart-define=API_HOST=192.168.1.42
   static const String _overrideHost =
       String.fromEnvironment('API_HOST', defaultValue: '');
   static const int _port = 3001;
 
-  // Android emulator: 10.0.2.2 maps to host's localhost.
-  // Everywhere else (web/Windows/iOS sim/physical device on same network): localhost.
-  // For a real device, pass your machine's LAN IP via --dart-define=API_HOST=...
+  // For a real device on the same network, pass your machine's LAN IP via
+  // --dart-define=API_HOST=... ; otherwise the hardcoded fallback is used.
   static String get baseUrl {
     if (_overrideHost.isNotEmpty) {
       return 'http://$_overrideHost:$_port/api';
     }
-    final host = '192.168.0.204';  // Your PC IP for physical device testing
+    const host = '192.168.0.204';
     return 'http://$host:$_port/api';
   }
 
@@ -26,6 +22,15 @@ class ApiConfig {
   // Onboarding (S13-T1) — pillar-level capture for new users.
   static const String pillarLevels = '/users/pillar-levels';
   static const String myPillarLevels = '/users/me/pillar-levels';
+
+  // Focus areas (S13-T2) — orbit-picker reference list on the home page.
+  static const String focusAreas = '/focus-areas';
+
+  // Home page extensions (S13-T4)
+  static const String homeStats = '/home/stats';
+  static const String homeWeeklyActivity = '/home/weekly-activity';
+  static const String homeDailyLoad = '/home/daily-load';
+  static const String homeDailyCounts = '/home/daily-counts';
 
   // Workouts
   static const String workouts = '/workouts';

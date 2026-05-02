@@ -20,6 +20,7 @@ import '../pages/body_measurements/full_month_page.dart';
 import '../pages/onboarding/level_capture_strength_page.dart';
 import '../pages/onboarding/level_capture_yoga_page.dart';
 import '../pages/onboarding/level_capture_breathwork_page.dart';
+import '../pages/body/body_page.dart';
 import '../spike/body_map_spike.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -129,6 +130,10 @@ GoRouter createRouter(AuthProvider authProvider) {
       GoRoute(
         path: '/onboarding/level-capture/breathwork',
         builder: (context, state) => const LevelCaptureBreathworkPage(),
+      ),
+      GoRoute(
+        path: '/body',
+        builder: (context, state) => const BodyPage(),
       ),
       GoRoute(
         path: '/exercise-progress/:id',

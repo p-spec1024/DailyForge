@@ -84,7 +84,9 @@ class SessionItem {
   final String contentType;
   final int? contentId;
   final String name;
-  final int durationMinutes;
+  /// Engine returns `null` for strength items (the renderer shows sets×reps
+  /// instead of a duration). Yoga and breathwork items always carry a value.
+  final int? durationMinutes;
   final String? tierBadge;
   final int? sets;
   final int? reps;
@@ -113,9 +115,9 @@ class SessionItem {
       );
     }
     final duration = json['duration_minutes'];
-    if (duration is! num) {
+    if (duration != null && duration is! num) {
       throw FormatException(
-        'SessionItem: expected `duration_minutes` to be a number, got ${duration.runtimeType}',
+        'SessionItem: expected `duration_minutes` to be a number or null, got ${duration.runtimeType}',
       );
     }
     final rawId = json['content_id'];
@@ -146,7 +148,7 @@ class SessionItem {
       contentType: contentType,
       contentId: rawId == null ? null : (rawId as num).toInt(),
       name: name,
-      durationMinutes: duration.toInt(),
+      durationMinutes: duration == null ? null : (duration as num).toInt(),
       tierBadge: tier as String?,
       sets: sets == null ? null : (sets as num).toInt(),
       reps: reps == null ? null : (reps as num).toInt(),

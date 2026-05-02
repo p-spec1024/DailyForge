@@ -1,5 +1,6 @@
-// Home-page stats + weekly activity models (S10-T5c-b).
-// Decoded from `/api/home/stats` and `/api/home/weekly-activity`.
+// Home-page stats, weekly activity, daily load, and daily counts models.
+// Decoded from `/api/home/stats`, `/api/home/weekly-activity` (S10-T5c-b),
+// `/api/home/daily-load`, `/api/home/daily-counts` (S13-T4).
 
 class PillarDurations {
   final int strength;
@@ -78,6 +79,63 @@ class WeeklyActivity {
       strength: (json['strength'] as num?)?.toInt() ?? 0,
       yoga: (json['yoga'] as num?)?.toInt() ?? 0,
       breath: (json['breath'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// One day of training-load minutes from `/api/home/daily-load`.
+/// Window is always 30 contiguous days (oldest → newest); empty days
+/// emit `loadMinutes: 0` so the chart renders without gap-handling.
+class DailyLoadPoint {
+  final String date; // YYYY-MM-DD
+  final int loadMinutes;
+
+  const DailyLoadPoint({required this.date, required this.loadMinutes});
+
+  factory DailyLoadPoint.fromJson(Map<String, dynamic> json) {
+    return DailyLoadPoint(
+      date: json['date'] as String? ?? '',
+      loadMinutes: (json['load_minutes'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class DailyLoad {
+  final List<DailyLoadPoint> points;
+  /// `(last-14-day avg / prior-14-day avg - 1) × 100`. Null when either
+  /// window has zero load (fresh user / inactivity).
+  final double? deltaPct;
+
+  const DailyLoad({required this.points, required this.deltaPct});
+
+  factory DailyLoad.fromJson(Map<String, dynamic> json) {
+    final raw = json['points'];
+    final points = raw is List
+        ? raw
+            .whereType<Map<String, dynamic>>()
+            .map(DailyLoadPoint.fromJson)
+            .toList(growable: false)
+        : const <DailyLoadPoint>[];
+    final delta = json['delta_pct'];
+    return DailyLoad(
+      points: points,
+      deltaPct: delta is num ? delta.toDouble() : null,
+    );
+  }
+}
+
+/// One day of completed-session count from `/api/home/daily-counts`.
+/// Window is always 14 contiguous days (oldest → newest).
+class DailyCount {
+  final String date;
+  final int sessions;
+
+  const DailyCount({required this.date, required this.sessions});
+
+  factory DailyCount.fromJson(Map<String, dynamic> json) {
+    return DailyCount(
+      date: json['date'] as String? ?? '',
+      sessions: (json['sessions'] as num?)?.toInt() ?? 0,
     );
   }
 }

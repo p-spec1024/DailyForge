@@ -1,7 +1,7 @@
-// Home-page endpoints (S10-T5c-b). Backs the stats row + weekly-activity
-// chart on the new home page. Streak logic deliberately mirrors
-// /api/dashboard via the shared `calculateStreak` helper so the two
-// surfaces stay in sync.
+// Home-page endpoints (S10-T5c-b + S13-T4). Backs the stats row, weekly
+// chart, training-load chart, and daily-counts bar chart on the home page.
+// Streak logic mirrors /api/dashboard via the shared `calculateStreak`
+// helper so the two surfaces stay in sync.
 //
 // Contract:
 //   GET /api/home/stats
@@ -11,6 +11,16 @@
 //   GET /api/home/weekly-activity
 //     → { weeks: [{ weekStart: 'YYYY-MM-DD', strength, yoga, breath } × 4] }
 //       Oldest → newest. Week anchored to Monday (startOfWeekMonday).
+//
+//   GET /api/home/daily-load                                   (S13-T4)
+//     → { points: [{ date: 'YYYY-MM-DD', load_minutes: int } × 30],
+//         delta_pct: number | null }
+//       Oldest → newest. `delta_pct` = (last-14-day avg / prior-14-day avg - 1) × 100,
+//       null if either window has zero load (avoids div-by-zero noise on fresh users).
+//
+//   GET /api/home/daily-counts                                 (S13-T4)
+//     → { points: [{ date: 'YYYY-MM-DD', sessions: int } × 14] }
+//       Oldest → newest. Counts completed sessions across all pillars.
 
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
@@ -268,6 +278,137 @@ router.get('/weekly-activity', async (req, res, next) => {
         breath,
       })),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── S13-T4: GET /api/home/daily-load ────────────────────────────────────
+//
+// 30 daily totals of session minutes (sessions.duration + breathwork
+// duration_seconds, both / 60). Filled forward — every day in the window
+// gets a row even if the user did nothing, so the chart can render a flat
+// line without gap-handling. delta_pct compares last-14d avg vs prior-14d
+// avg; null when either window's sum is zero (fresh-user / inactivity).
+router.get('/daily-load', async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const today = new Date();
+    const oldest = new Date(today);
+    oldest.setDate(oldest.getDate() - 29); // 30-day window inclusive
+    const oldestStr = fmtDate(oldest);
+
+    const [sessionRows, breathRows] = await Promise.all([
+      pool.query(
+        `SELECT date, COALESCE(SUM(duration), 0)::bigint AS secs
+           FROM sessions
+          WHERE user_id = $1 AND completed = true
+            AND date IS NOT NULL AND duration IS NOT NULL
+            AND date >= $2::date
+          GROUP BY date`,
+        [userId, oldestStr]
+      ),
+      pool.query(
+        `SELECT (created_at AT TIME ZONE 'UTC')::date AS date,
+                COALESCE(SUM(duration_seconds), 0)::bigint AS secs
+           FROM breathwork_sessions
+          WHERE user_id = $1 AND completed = true
+            AND duration_seconds IS NOT NULL
+            AND created_at >= $2::date
+          GROUP BY (created_at AT TIME ZONE 'UTC')::date`,
+        [userId, oldestStr]
+      ),
+    ]);
+
+    // Build a date → minutes map, then walk every day in the window so
+    // empty days emit `load_minutes: 0` (clients should never see gaps).
+    const byDate = new Map();
+    const addSecs = (dateRaw, secs) => {
+      const ds = dateRaw instanceof Date
+        ? fmtDate(dateRaw)
+        : String(dateRaw).slice(0, 10);
+      byDate.set(ds, (byDate.get(ds) || 0) + Number(secs || 0));
+    };
+    for (const r of sessionRows.rows) addSecs(r.date, r.secs);
+    for (const r of breathRows.rows) addSecs(r.date, r.secs);
+
+    const points = [];
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(oldest);
+      d.setDate(oldest.getDate() + i);
+      const ds = fmtDate(d);
+      const secs = byDate.get(ds) || 0;
+      points.push({ date: ds, load_minutes: Math.round(secs / 60) });
+    }
+
+    // delta_pct: avg(last 14) vs avg(prior 14). Null on either-side zero.
+    const prior14 = points.slice(2, 16); // days 3..16 from oldest
+    const last14 = points.slice(16, 30); // days 17..30
+    const sum = (arr) => arr.reduce((a, p) => a + p.load_minutes, 0);
+    const priorSum = sum(prior14);
+    const lastSum = sum(last14);
+    const deltaPct = (priorSum > 0 && lastSum > 0)
+      ? Math.round(((lastSum / priorSum) - 1) * 1000) / 10
+      : null;
+
+    res.json({ points, delta_pct: deltaPct });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── S13-T4: GET /api/home/daily-counts ──────────────────────────────────
+//
+// 14 daily counts of completed sessions across all pillars. Used by the
+// 14-bar chart on the home page. Empty days emit `sessions: 0` so the
+// chart renderer never has to backfill gaps.
+router.get('/daily-counts', async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const today = new Date();
+    const oldest = new Date(today);
+    oldest.setDate(oldest.getDate() - 13); // 14-day window inclusive
+    const oldestStr = fmtDate(oldest);
+
+    const [sessionRows, breathRows] = await Promise.all([
+      pool.query(
+        `SELECT date, COUNT(*)::int AS n
+           FROM sessions
+          WHERE user_id = $1 AND completed = true AND date IS NOT NULL
+            AND date >= $2::date
+          GROUP BY date`,
+        [userId, oldestStr]
+      ),
+      pool.query(
+        `SELECT (created_at AT TIME ZONE 'UTC')::date AS date,
+                COUNT(*)::int AS n
+           FROM breathwork_sessions
+          WHERE user_id = $1 AND completed = true
+            AND created_at >= $2::date
+          GROUP BY (created_at AT TIME ZONE 'UTC')::date`,
+        [userId, oldestStr]
+      ),
+    ]);
+
+    const byDate = new Map();
+    const add = (dateRaw, n) => {
+      const ds = dateRaw instanceof Date
+        ? fmtDate(dateRaw)
+        : String(dateRaw).slice(0, 10);
+      byDate.set(ds, (byDate.get(ds) || 0) + Number(n || 0));
+    };
+    for (const r of sessionRows.rows) add(r.date, r.n);
+    for (const r of breathRows.rows) add(r.date, r.n);
+
+    const points = [];
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(oldest);
+      d.setDate(oldest.getDate() + i);
+      const ds = fmtDate(d);
+      points.push({ date: ds, sessions: byDate.get(ds) || 0 });
+    }
+
+    res.json({ points });
   } catch (err) {
     next(err);
   }
