@@ -142,6 +142,21 @@ class SuggestProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// S13-T5: visual-state-only seam for the picker flow. Updates
+  /// `currentFocusSlug` so the pie + downstream `selectedFocus` derivation
+  /// reflect the user's tap, WITHOUT firing /suggest. Used when a tap opens
+  /// the picker sheet (visual update on open) and when the sheet is dismissed
+  /// without confirmation (revert to previous slug).
+  ///
+  /// On a confirmed pick, `selectBodyFocus` / `selectStateFocus` overwrite
+  /// `_currentFocusSlug` again — this method only matters during the time
+  /// window the sheet is open.
+  void previewFocus(String slug) {
+    if (_currentFocusSlug == slug) return;
+    _currentFocusSlug = slug;
+    notifyListeners();
+  }
+
   /// Reset on logout so the next user doesn't see prior state.
   /// Also purges per-user persistence so the next account that signs in
   /// on the same device doesn't inherit this user's last focus / budget.

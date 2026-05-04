@@ -2506,6 +2506,306 @@ async function main() {
     }
   }
 
+  // ── T5 PICKER-API BLOCK ──────────────────────────────────────────────
+  // Exercises the two new picker-support endpoints under
+  // /api/focus-areas/:slug/...:
+  //   - /available-durations: matrix of 5 state focuses × 3 breathwork
+  //     levels + 4 negative tests
+  //   - /suggested-default: state and body history-mode round-trips +
+  //     negative tests
+  //
+  // Pattern matches the T2/T7 in-process Express + sentinel-fixture
+  // approach. Uses the existing test user; mutates the user's breathwork
+  // level via setBreathworkLevel between matrix cells (saved/restored at
+  // end-of-block). All inserted rows tagged with notes='t5-smoke-fixture'
+  // for cleanup; breathwork_sessions has no notes column so we track ids.
+  {
+    console.log('\n=== T5 PICKER-API BLOCK ===');
+    if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET not set — required for T5 block');
+    const t5App = createApp();
+    const t5Server = await new Promise((resolve) => {
+      const s = t5App.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const t5Port = t5Server.address().port;
+    const t5Base = `http://127.0.0.1:${t5Port}`;
+    const t5Token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '5m' });
+    const t5H = { 'Content-Type': 'application/json', Authorization: `Bearer ${t5Token}` };
+
+    const T5_FIXTURE_NOTE = 't5-smoke-fixture';
+    const T5_TEMP_STATE_FOCUS = '__t5_state_test';
+    const T5_TEMP_BODY_FOCUS  = '__t5_body_test';
+    const t5CreatedSessionIds = [];
+    const t5CreatedBwSessionIds = [];
+    const savedLevelRow = await captureBreathworkLevelRow(user.id);
+    // breathwork_sessions.technique_id is NOT NULL — pull any technique
+    // for fixture inserts. The actual technique doesn't matter for these
+    // tests (we only assert on duration_seconds bracketing math).
+    const bwTechRow = await pool.query(`SELECT id FROM breathwork_techniques LIMIT 1`);
+    if (bwTechRow.rows.length === 0) {
+      throw new Error('breathwork_techniques empty — T5 fixtures need at least one row');
+    }
+    const t5BwTechId = bwTechRow.rows[0].id;
+
+    // Temp focus_areas rows so suggested-default history tests work against
+    // a clean slate (the live user likely has real history on the real
+    // focuses — would make tie-break assertions non-deterministic).
+    await pool.query(
+      `INSERT INTO focus_areas (slug, display_name, focus_type, sort_order, is_active)
+       VALUES ($1, 'T5 Test State Focus', 'state', 9999, true),
+              ($2, 'T5 Test Body Focus',  'body',  9999, true)
+       ON CONFLICT (slug) DO NOTHING`,
+      [T5_TEMP_STATE_FOCUS, T5_TEMP_BODY_FOCUS]);
+
+    async function t5Cleanup() {
+      // Sessions tagged by sentinel.
+      await pool.query(
+        `DELETE FROM sessions WHERE user_id = $1 AND notes = $2`,
+        [user.id, T5_FIXTURE_NOTE]);
+      // Belt-and-braces by id.
+      if (t5CreatedSessionIds.length > 0) {
+        await pool.query(`DELETE FROM sessions WHERE id = ANY($1::int[])`, [t5CreatedSessionIds]);
+      }
+      // Sessions against the temp focuses (defensive).
+      await pool.query(
+        `DELETE FROM sessions WHERE user_id = $1 AND focus_slug = ANY($2::text[])`,
+        [user.id, [T5_TEMP_STATE_FOCUS, T5_TEMP_BODY_FOCUS]]);
+      // Breathwork sessions (no notes column — track by id and by temp focus).
+      if (t5CreatedBwSessionIds.length > 0) {
+        await pool.query(`DELETE FROM breathwork_sessions WHERE id = ANY($1::int[])`, [t5CreatedBwSessionIds]);
+      }
+      await pool.query(
+        `DELETE FROM breathwork_sessions WHERE user_id = $1 AND focus_slug = ANY($2::text[])`,
+        [user.id, [T5_TEMP_STATE_FOCUS, T5_TEMP_BODY_FOCUS]]);
+      await pool.query(
+        `DELETE FROM focus_areas WHERE slug = ANY($1::text[])`,
+        [[T5_TEMP_STATE_FOCUS, T5_TEMP_BODY_FOCUS]]);
+      await restoreBreathworkLevelRow(user.id, savedLevelRow);
+    }
+    const t5AbortHandler = async () => {
+      try { await t5Cleanup(); } catch (e) { console.error('[T5 abort cleanup]', e); }
+      try { t5Server.close(); } catch {}
+      process.exit(130);
+    };
+    process.once('SIGINT', t5AbortHandler);
+    process.once('SIGTERM', t5AbortHandler);
+
+    try {
+      // Sub-block 1: available-durations matrix (5 focuses × 3 levels = 15 cells)
+      // Each cell asserts: status 200, response shape, all ranges
+      // state==='available', suggested_default valid (null or in ranges).
+      {
+        for (const focusSlug of STATE_FOCUSES) {
+          for (const lvl of ALL_LEVELS) {
+            await setBreathworkLevel(user.id, lvl);
+            const r = await fetch(
+              `${t5Base}/api/focus-areas/${focusSlug}/available-durations`,
+              { headers: t5H });
+            const cellLabel = `T5/1 available-durations ${focusSlug}/${lvl}`;
+            check(`${cellLabel}: status 200`, r.status === 200, `got ${r.status}`);
+            const body = await r.json();
+            const shapeOk = body &&
+              typeof body.focus_slug === 'string' && body.focus_slug === focusSlug &&
+              typeof body.breathwork_level === 'string' && body.breathwork_level === lvl &&
+              Array.isArray(body.ranges) &&
+              ('suggested_default' in body);
+            check(`${cellLabel}: response shape valid`, shapeOk,
+              `got ${JSON.stringify(body).slice(0, 200)}`);
+            const allAvailable = (body.ranges || []).every((rg) =>
+              rg.state === 'available' &&
+              typeof rg.label === 'string' && rg.label.length > 0 &&
+              typeof rg.display === 'string' && rg.display.length > 0);
+            check(`${cellLabel}: all ranges state=available + label/display present`,
+              allAvailable);
+            const labels = new Set((body.ranges || []).map((rg) => rg.label));
+            const defaultOk = body.suggested_default === null ||
+              labels.has(body.suggested_default);
+            check(`${cellLabel}: suggested_default null or in ranges`, defaultOk,
+              `got ${body.suggested_default}, ranges=[${[...labels].join(',')}]`);
+          }
+        }
+      }
+
+      // Sub-block 2: available-durations negative tests (4 cases)
+      {
+        // 2a. unknown slug → 404 unknown_focus_slug.
+        await setBreathworkLevel(user.id, 'beginner');
+        let r = await fetch(`${t5Base}/api/focus-areas/__never_existed/available-durations`, { headers: t5H });
+        let b = await r.json();
+        check('T5/2a unknown slug → 404 unknown_focus_slug',
+          r.status === 404 && b.error === 'unknown_focus_slug', `got ${r.status} ${b.error}`);
+
+        // 2b. body-focus slug → 400 invalid_focus_type_for_durations.
+        r = await fetch(`${t5Base}/api/focus-areas/biceps/available-durations`, { headers: t5H });
+        b = await r.json();
+        check('T5/2b body slug → 400 invalid_focus_type_for_durations',
+          r.status === 400 && b.error === 'invalid_focus_type_for_durations',
+          `got ${r.status} ${b.error}`);
+
+        // 2c. missing breathwork level → 400 breathwork_level_not_set.
+        await pool.query(
+          `DELETE FROM user_pillar_levels WHERE user_id = $1 AND pillar = 'breathwork'`,
+          [user.id]);
+        r = await fetch(`${t5Base}/api/focus-areas/calm/available-durations`, { headers: t5H });
+        b = await r.json();
+        check('T5/2c missing breathwork level → 400 breathwork_level_not_set',
+          r.status === 400 && b.error === 'breathwork_level_not_set',
+          `got ${r.status} ${b.error}`);
+        // Restore for subsequent sub-blocks (cleanup will overwrite at end).
+        await setBreathworkLevel(user.id, 'beginner');
+
+        // 2d. no auth → 401.
+        r = await fetch(`${t5Base}/api/focus-areas/calm/available-durations`);
+        check('T5/2d no auth → 401', r.status === 401, `got ${r.status}`);
+      }
+
+      // Sub-block 3: suggested-default state-focus history round-trip
+      // Insert breathwork_sessions against the temp state focus, query the
+      // endpoint, assert mode + tie-break behavior.
+      {
+        // 3a. Empty history → null.
+        let r = await fetch(
+          `${t5Base}/api/focus-areas/${T5_TEMP_STATE_FOCUS}/suggested-default`,
+          { headers: t5H });
+        let b = await r.json();
+        check('T5/3a state empty history: status 200', r.status === 200, `got ${r.status}`);
+        check('T5/3a state empty history: focus_type=state', b.focus_type === 'state',
+          `got ${b.focus_type}`);
+        check('T5/3a state empty history: suggested_default null',
+          b.suggested_default === null, `got ${b.suggested_default}`);
+
+        // 3b. Single 5-min completed session → '0-10'.
+        let ins = await pool.query(
+          `INSERT INTO breathwork_sessions (user_id, technique_id, duration_seconds, rounds_completed, completed, focus_slug, created_at)
+           VALUES ($1, $3, 300, 0, true, $2, NOW())
+           RETURNING id`,
+          [user.id, T5_TEMP_STATE_FOCUS, t5BwTechId]);
+        t5CreatedBwSessionIds.push(ins.rows[0].id);
+        r = await fetch(
+          `${t5Base}/api/focus-areas/${T5_TEMP_STATE_FOCUS}/suggested-default`,
+          { headers: t5H });
+        b = await r.json();
+        check('T5/3b state single 5-min: suggested_default = 0-10',
+          b.suggested_default === '0-10', `got ${b.suggested_default}`);
+
+        // 3c. Add two more 5-min and one 15-min → mode is '0-10' (3 vs 1).
+        ins = await pool.query(
+          `INSERT INTO breathwork_sessions (user_id, technique_id, duration_seconds, rounds_completed, completed, focus_slug, created_at)
+           VALUES ($1, $3, 300, 0, true, $2, NOW() - INTERVAL '1 hour'),
+                  ($1, $3, 300, 0, true, $2, NOW() - INTERVAL '2 hours'),
+                  ($1, $3, 900, 0, true, $2, NOW() - INTERVAL '3 hours')
+           RETURNING id`,
+          [user.id, T5_TEMP_STATE_FOCUS, t5BwTechId]);
+        for (const row of ins.rows) t5CreatedBwSessionIds.push(row.id);
+        r = await fetch(
+          `${t5Base}/api/focus-areas/${T5_TEMP_STATE_FOCUS}/suggested-default`,
+          { headers: t5H });
+        b = await r.json();
+        check('T5/3c state mode count: suggested_default = 0-10 (3 vs 1)',
+          b.suggested_default === '0-10', `got ${b.suggested_default}`);
+
+        // 3d. Tie-break — wipe and reinsert one '0-10' (older) and one
+        // '10-20' (newer) → equal counts, recency picks '10-20'.
+        await pool.query(
+          `DELETE FROM breathwork_sessions WHERE user_id = $1 AND focus_slug = $2`,
+          [user.id, T5_TEMP_STATE_FOCUS]);
+        t5CreatedBwSessionIds.length = 0;
+        ins = await pool.query(
+          `INSERT INTO breathwork_sessions (user_id, technique_id, duration_seconds, rounds_completed, completed, focus_slug, created_at)
+           VALUES ($1, $3, 300, 0, true, $2, NOW() - INTERVAL '5 days'),
+                  ($1, $3, 900, 0, true, $2, NOW() - INTERVAL '1 day')
+           RETURNING id`,
+          [user.id, T5_TEMP_STATE_FOCUS, t5BwTechId]);
+        for (const row of ins.rows) t5CreatedBwSessionIds.push(row.id);
+        r = await fetch(
+          `${t5Base}/api/focus-areas/${T5_TEMP_STATE_FOCUS}/suggested-default`,
+          { headers: t5H });
+        b = await r.json();
+        check('T5/3d state tie-break: suggested_default = 10-20 (most recent)',
+          b.suggested_default === '10-20', `got ${b.suggested_default}`);
+      }
+
+      // Sub-block 4: suggested-default body-focus history round-trip
+      {
+        // 4a. Empty history → null.
+        let r = await fetch(
+          `${t5Base}/api/focus-areas/${T5_TEMP_BODY_FOCUS}/suggested-default`,
+          { headers: t5H });
+        let b = await r.json();
+        check('T5/4a body empty history: focus_type=body', b.focus_type === 'body',
+          `got ${b.focus_type}`);
+        check('T5/4a body empty history: suggested_default null',
+          b.suggested_default === null, `got ${b.suggested_default}`);
+
+        // 4b. Single 30-min (1800s) session → 30.
+        let ins = await pool.query(
+          `INSERT INTO sessions (user_id, type, focus_slug, completed, started_at, completed_at, date, duration, notes)
+           VALUES ($1, 'strength', $2, true, NOW() - INTERVAL '1 hour', NOW(), CURRENT_DATE, 1800, $3)
+           RETURNING id`,
+          [user.id, T5_TEMP_BODY_FOCUS, T5_FIXTURE_NOTE]);
+        t5CreatedSessionIds.push(ins.rows[0].id);
+        r = await fetch(
+          `${t5Base}/api/focus-areas/${T5_TEMP_BODY_FOCUS}/suggested-default`,
+          { headers: t5H });
+        b = await r.json();
+        check('T5/4b body single 30-min: suggested_default = 30',
+          b.suggested_default === 30, `got ${b.suggested_default}`);
+
+        // 4c. Mode test — add two 45-min sessions → mode flips to 45.
+        ins = await pool.query(
+          `INSERT INTO sessions (user_id, type, focus_slug, completed, started_at, completed_at, date, duration, notes)
+           VALUES ($1, 'strength', $2, true, NOW() - INTERVAL '2 hours', NOW(), CURRENT_DATE - 1, 2700, $3),
+                  ($1, 'strength', $2, true, NOW() - INTERVAL '3 hours', NOW(), CURRENT_DATE - 2, 2700, $3)
+           RETURNING id`,
+          [user.id, T5_TEMP_BODY_FOCUS, T5_FIXTURE_NOTE]);
+        for (const row of ins.rows) t5CreatedSessionIds.push(row.id);
+        r = await fetch(
+          `${t5Base}/api/focus-areas/${T5_TEMP_BODY_FOCUS}/suggested-default`,
+          { headers: t5H });
+        b = await r.json();
+        check('T5/4c body mode count: suggested_default = 45 (2 vs 1)',
+          b.suggested_default === 45, `got ${b.suggested_default}`);
+
+        // 4d. Clamp test — wipe and insert one 75-min (4500s) session →
+        // snapped to 60 (the upper clamp).
+        await pool.query(
+          `DELETE FROM sessions WHERE user_id = $1 AND focus_slug = $2`,
+          [user.id, T5_TEMP_BODY_FOCUS]);
+        t5CreatedSessionIds.length = 0;
+        ins = await pool.query(
+          `INSERT INTO sessions (user_id, type, focus_slug, completed, started_at, completed_at, date, duration, notes)
+           VALUES ($1, 'strength', $2, true, NOW() - INTERVAL '1 hour', NOW(), CURRENT_DATE, 4500, $3)
+           RETURNING id`,
+          [user.id, T5_TEMP_BODY_FOCUS, T5_FIXTURE_NOTE]);
+        t5CreatedSessionIds.push(ins.rows[0].id);
+        r = await fetch(
+          `${t5Base}/api/focus-areas/${T5_TEMP_BODY_FOCUS}/suggested-default`,
+          { headers: t5H });
+        b = await r.json();
+        check('T5/4d body clamp: suggested_default = 60 (75-min clamped)',
+          b.suggested_default === 60, `got ${b.suggested_default}`);
+      }
+
+      // Sub-block 5: suggested-default negatives.
+      {
+        // 5a. unknown slug → 404 unknown_focus_slug.
+        let r = await fetch(`${t5Base}/api/focus-areas/__never_existed/suggested-default`, { headers: t5H });
+        const b = await r.json();
+        check('T5/5a suggested-default unknown slug → 404 unknown_focus_slug',
+          r.status === 404 && b.error === 'unknown_focus_slug',
+          `got ${r.status} ${b.error}`);
+
+        // 5b. no auth → 401.
+        r = await fetch(`${t5Base}/api/focus-areas/calm/suggested-default`);
+        check('T5/5b suggested-default no auth → 401', r.status === 401, `got ${r.status}`);
+      }
+    } finally {
+      await t5Cleanup();
+      try { t5Server.close(); } catch {}
+      process.removeListener('SIGINT', t5AbortHandler);
+      process.removeListener('SIGTERM', t5AbortHandler);
+    }
+  }
+
   // ── Phase 4: pretty-print sample sessions ────────────────────────────
   console.log('\n=== Sample: biceps / home / 30 ===');
   const sample = await generateSession({

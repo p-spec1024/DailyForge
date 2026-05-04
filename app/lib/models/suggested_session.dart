@@ -161,10 +161,23 @@ class SessionMetadata {
   final Map<String, String> userLevels;
   final String source;
 
+  /// State-focus only (S13-T5): true when the engine generated an
+  /// open-ended practice (no upper duration bound). null on body-focus
+  /// responses, which never carry this field. Source: engine writes
+  /// `metadata.is_endless` only for `session_shape: 'state_focus'`.
+  final bool? isEndless;
+
+  /// State-focus only (S13-T5): the bracket label the engine resolved
+  /// the request to (one of '0-10', '10-20', '21-30', '30-45', 'endless').
+  /// null on body-focus responses.
+  final String? bracket;
+
   const SessionMetadata({
     required this.estimatedTotalMin,
     required this.userLevels,
     required this.source,
+    required this.isEndless,
+    required this.bracket,
   });
 
   factory SessionMetadata.fromJson(Map<String, dynamic> json) {
@@ -195,10 +208,24 @@ class SessionMetadata {
       }
       levels[k] = v;
     });
+    final endlessRaw = json['is_endless'];
+    if (endlessRaw != null && endlessRaw is! bool) {
+      throw FormatException(
+        'SessionMetadata: expected `is_endless` to be a bool or absent, got ${endlessRaw.runtimeType}',
+      );
+    }
+    final bracketRaw = json['bracket'];
+    if (bracketRaw != null && bracketRaw is! String) {
+      throw FormatException(
+        'SessionMetadata: expected `bracket` to be a string or absent, got ${bracketRaw.runtimeType}',
+      );
+    }
     return SessionMetadata(
       estimatedTotalMin: est.toInt(),
       userLevels: Map.unmodifiable(levels),
       source: source,
+      isEndless: endlessRaw as bool?,
+      bracket: bracketRaw as String?,
     );
   }
 }

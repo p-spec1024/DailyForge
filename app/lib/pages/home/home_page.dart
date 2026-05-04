@@ -6,6 +6,9 @@ import 'package:provider/provider.dart';
 import '../../models/focus_area.dart';
 import '../../providers/home_provider.dart';
 import '../../providers/suggest_provider.dart';
+import '../../widgets/cards/empty_session_card_slot.dart';
+import '../../widgets/cards/state_focus_session_card.dart';
+import '../../widgets/sheets/half_pie_picker_sheet.dart';
 import 'widgets_v2/_tokens_v2.dart';
 import 'widgets_v2/focus_pie_picker.dart';
 import 'widgets_v2/recent_bar_chart.dart';
@@ -15,9 +18,17 @@ import 'widgets_v2/training_load_chart.dart';
 
 /// S13-T4 home page (replaces Sprint-10 dashboard at `_legacy/home_page_s10.dart`).
 ///
+/// **S13-T5 update:** the tap-and-instant-suggest model is replaced by
+/// tap → sheet → pick → suggest. First-load home shows the empty
+/// session-card slot until the user taps a focus and confirms a duration.
+/// `HomeProvider._fetchAll` already does NOT call /suggest; the previous
+/// auto-fire path lived here in `_maybeFireInitialSuggest` and has been
+/// removed.
+///
 /// Composition (top → bottom): app bar with streak chip + body-map shortcut
-/// → today's session card → focus orbit picker → training-load chart →
-/// streak / this-week stat tiles → 14-bar daily-counts chart.
+/// → today's session slot (empty / loading / state-card / body-card / error)
+/// → focus orbit picker → training-load chart → streak / this-week stat
+/// tiles → 14-bar daily-counts chart.
 ///
 /// Data flow: HomeProvider.load() fans out to /home/stats,
 /// /home/weekly-activity, /home/daily-load, /home/daily-counts,
@@ -32,9 +43,11 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  bool _hydrated = false;
   bool _redirected = false;
   DateTime _lastTapAt = DateTime.fromMillisecondsSinceEpoch(0);
+  // Tracks the slug shown on the pie before the user opened the picker, so
+  // a sheet dismiss can revert the pie's visual selection (Decision #13).
+  String? _previousSelectedSlug;
 
   @override
   void initState() {
@@ -42,30 +55,13 @@ class _HomePageState extends State<HomePage> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       // Kick off all home-page data slices and the suggest-provider's
-      // persisted-focus hydration in parallel. The first /suggest call
-      // fires only after both finish (we need the persisted slug + the
-      // focus-areas list to map slug → FocusArea for the orbit chip).
+      // persisted-focus hydration in parallel. T5 removes the auto-fire of
+      // /suggest — the picker flow is the only path that fires it.
       final home = context.read<HomeProvider>();
       final suggest = context.read<SuggestProvider>();
       home.load();
       await suggest.hydrate();
-      if (!mounted) return;
-      setState(() => _hydrated = true);
-      await _maybeFireInitialSuggest();
     });
-  }
-
-  Future<void> _maybeFireInitialSuggest() async {
-    final home = context.read<HomeProvider>();
-    final suggest = context.read<SuggestProvider>();
-    // Only fire once we know which focus-area to target. focus-areas may
-    // still be loading; we'll re-try once it lands.
-    final focusAreas = home.focusAreas;
-    if (focusAreas == null || focusAreas.isEmpty) return;
-    if (suggest.currentSession != null) return;
-    final focus = _resolveFocus(focusAreas, suggest.currentFocusSlug);
-    if (focus == null) return;
-    await _fireSuggest(focus);
   }
 
   FocusArea? _resolveFocus(List<FocusArea> all, String slug) {
@@ -79,23 +75,57 @@ class _HomePageState extends State<HomePage> {
     return all.isNotEmpty ? all.first : null;
   }
 
-  Future<void> _fireSuggest(FocusArea focus) async {
-    final suggest = context.read<SuggestProvider>();
-    if (focus.isBody) {
-      await suggest.selectBodyFocus(focus.slug);
-    } else {
-      // Per S13-T4 build decision May 2 2026: state-focus tap on home
-      // defaults to bracket '21-30'. T5 lands a bracket sheet for re-tap.
-      await suggest.selectStateFocus(focus.slug, kDefaultStateBracket);
-    }
-  }
-
-  void _onChipTap(FocusArea focus) {
+  Future<void> _onChipTap(FocusArea focus) async {
     // 300ms debounce to absorb double-taps on small chips.
     final now = DateTime.now();
     if (now.difference(_lastTapAt).inMilliseconds < 300) return;
     _lastTapAt = now;
-    _fireSuggest(focus);
+
+    final suggest = context.read<SuggestProvider>();
+
+    // Capture the pie's pre-tap slug so a dismiss can revert visually.
+    _previousSelectedSlug = suggest.currentFocusSlug;
+    suggest.previewFocus(focus.slug);
+
+    // S13-T5 AMENDMENT-1: unified half-pie picker for both focus types.
+    // Returns int (minutes) for body or String (bracket label) for state.
+    final picked = await showHalfPiePicker(
+      context,
+      focusSlug: focus.slug,
+      focusName: focus.displayName,
+      focusType: focus.isState ? FocusType.state : FocusType.body,
+    );
+
+    if (!mounted) return;
+
+    if (picked == null) {
+      // Dismissed without a pick. Revert the visual pie selection ONLY —
+      // do NOT touch SuggestProvider's session/error state. If a session
+      // card was already showing, it stays. If state was idle, it stays
+      // idle (empty card slot).
+      final prev = _previousSelectedSlug;
+      if (prev != null) suggest.previewFocus(prev);
+      return;
+    }
+
+    if (focus.isState) {
+      await suggest.selectStateFocus(focus.slug, picked as String);
+    } else {
+      await suggest.selectBodyFocus(focus.slug, timeBudgetMin: picked as int);
+    }
+  }
+
+  Future<void> _reopenPickerForCurrent() async {
+    // Retry path for the error card. Re-opens the picker for the currently
+    // selected focus so the user can confirm intent rather than silently
+    // re-firing with potentially stale parameters.
+    final home = context.read<HomeProvider>();
+    final suggest = context.read<SuggestProvider>();
+    final focusAreas = home.focusAreas;
+    if (focusAreas == null || focusAreas.isEmpty) return;
+    final focus = _resolveFocus(focusAreas, suggest.currentFocusSlug);
+    if (focus == null) return;
+    await _onChipTap(focus);
   }
 
   void _onStart() {
@@ -111,13 +141,10 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _refreshAll() async {
     final home = context.read<HomeProvider>();
-    final suggest = context.read<SuggestProvider>();
     await home.refresh();
-    if (!mounted) return;
-    final focus = home.focusAreas == null
-        ? null
-        : _resolveFocus(home.focusAreas!, suggest.currentFocusSlug);
-    if (focus != null) await _fireSuggest(focus);
+    // Note: T5 does NOT re-fire /suggest on pull-to-refresh. The current
+    // session card (if any) stays as-is; refresh only re-pulls the home
+    // aggregation slices. To get a new session, the user re-taps a focus.
   }
 
   @override
@@ -143,16 +170,6 @@ class _HomePageState extends State<HomePage> {
                   }
                 });
               }
-              // Once focus-areas land, fire the initial /suggest if it
-              // hasn't fired yet.
-              if (_hydrated &&
-                  suggest.currentSession == null &&
-                  !suggest.isLoading &&
-                  home.focusAreas != null) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) _maybeFireInitialSuggest();
-                });
-              }
 
               final selectedFocus = home.focusAreas == null
                   ? null
@@ -170,15 +187,11 @@ class _HomePageState extends State<HomePage> {
                       streakDays: home.stats?.streakDays ?? 0,
                     ),
                     const SizedBox(height: 14),
-                    TodaysSessionCard(
+                    _SessionSlot(
                       focus: selectedFocus,
-                      session: suggest.currentSession,
-                      isLoading: suggest.isLoading,
-                      error: suggest.lastError,
+                      suggest: suggest,
                       onStart: _onStart,
-                      onRetry: () {
-                        if (selectedFocus != null) _fireSuggest(selectedFocus);
-                      },
+                      onRetry: _reopenPickerForCurrent,
                     ),
                     const SizedBox(height: 10),
                     Container(
@@ -225,6 +238,59 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Picks the right session-slot widget given the SuggestProvider state.
+/// Idle (no current session, not loading, no error) → empty prompt slot.
+/// Otherwise delegates to the body-focus card or state-focus card based on
+/// the engine's `session_shape`. The body-focus card also handles its own
+/// loading/error rendering (T4 pattern); state-focus card just renders the
+/// loaded session.
+class _SessionSlot extends StatelessWidget {
+  final FocusArea? focus;
+  final SuggestProvider suggest;
+  final VoidCallback onStart;
+  final VoidCallback onRetry;
+
+  const _SessionSlot({
+    required this.focus,
+    required this.suggest,
+    required this.onStart,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final session = suggest.currentSession;
+    final isLoading = suggest.isLoading;
+    final error = suggest.lastError;
+
+    // Idle: nothing requested yet, no in-flight call, no past error.
+    if (session == null && !isLoading && error == null) {
+      return const EmptySessionCardSlot();
+    }
+
+    // State-focus loaded session gets the dedicated card.
+    if (session != null && session.sessionShape == 'state_focus') {
+      return StateFocusSessionCard(
+        focus: focus,
+        session: session,
+        isLoading: isLoading,
+        onStart: onStart,
+      );
+    }
+
+    // Everything else (body-focus loaded, loading, error) flows through the
+    // T4 card — its internal switch handles skeleton / error / loaded.
+    return TodaysSessionCard(
+      focus: focus,
+      session: session,
+      isLoading: isLoading,
+      error: error,
+      onStart: onStart,
+      onRetry: onRetry,
     );
   }
 }

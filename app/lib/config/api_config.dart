@@ -26,6 +26,13 @@ class ApiConfig {
   // Focus areas (S13-T2) — orbit-picker reference list on the home page.
   static const String focusAreas = '/focus-areas';
 
+  // Focus-area picker support (S13-T5). Both endpoints are JWT-authed
+  // and live under /api/focus-areas/:slug/...
+  static String focusAreaAvailableDurations(String slug) =>
+      '/focus-areas/$slug/available-durations';
+  static String focusAreaSuggestedDefault(String slug) =>
+      '/focus-areas/$slug/suggested-default';
+
   // Home page extensions (S13-T4)
   static const String homeStats = '/home/stats';
   static const String homeWeeklyActivity = '/home/weekly-activity';
