@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 import '../../models/focus_area.dart';
 import '../../providers/home_provider.dart';
 import '../../providers/suggest_provider.dart';
-import '../../widgets/cards/empty_session_card_slot.dart';
 import '../../widgets/cards/state_focus_session_card.dart';
 import '../../widgets/sheets/half_pie_picker_sheet.dart';
 import 'widgets_v2/_tokens_v2.dart';
@@ -268,8 +267,11 @@ class _SessionSlot extends StatelessWidget {
     final error = suggest.lastError;
 
     // Idle: nothing requested yet, no in-flight call, no past error.
+    // Render zero-height — the slot collapses entirely until the user taps
+    // a focus on the pie below. The previous "Pick today's focus →" prompt
+    // card was removed because the pie itself is the affordance.
     if (session == null && !isLoading && error == null) {
-      return const EmptySessionCardSlot();
+      return const SizedBox.shrink();
     }
 
     // State-focus loaded session gets the dedicated card.
