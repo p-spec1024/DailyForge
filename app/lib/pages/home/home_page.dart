@@ -132,7 +132,9 @@ class _HomePageState extends State<HomePage> {
     // placeholder so device-tests don't silently swallow the tap.
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text("Session player wires up in S13-T6."),
+        content: Text(
+          "Session start lands in Sprint 14 — full handoff is being scoped properly.",
+        ),
         duration: Duration(seconds: 2),
       ),
     );
