@@ -11,14 +11,18 @@ import 'providers/home_provider.dart';
 import 'providers/profile_provider.dart';
 import 'providers/settings_provider.dart';
 import 'providers/strength_provider.dart';
+import 'providers/focus_duration_provider.dart';
+import 'providers/suggest_provider.dart';
 import 'providers/workout_session_provider.dart';
 import 'providers/yoga_provider.dart';
 import 'providers/calendar_provider.dart';
 import 'providers/progress_provider.dart';
 import 'providers/yoga_session_provider.dart';
 import 'providers/body_measurements_provider.dart';
+import 'providers/onboarding_provider.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart';
+import 'services/onboarding_service.dart';
 import 'services/storage_service.dart';
 
 void main() {
@@ -35,6 +39,7 @@ class DailyForgeApp extends StatefulWidget {
 
 class _DailyForgeAppState extends State<DailyForgeApp> {
   late final ApiService _apiService;
+  late final StorageService _storageService;
   late final AuthProvider _authProvider;
   late final DashboardProvider _dashboardProvider;
   late final StrengthProvider _strengthProvider;
@@ -49,6 +54,9 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
   late final BodyMeasurementsProvider _bodyMeasurementsProvider;
   late final BodyMapProvider _bodyMapProvider;
   late final HomeProvider _homeProvider;
+  late final SuggestProvider _suggestProvider;
+  late final FocusDurationProvider _focusDurationProvider;
+  late final OnboardingProvider _onboardingProvider;
   late final GoRouter _router;
 
   @override
@@ -58,10 +66,11 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
     final api = ApiService(storage);
     final authService = AuthService(api, storage);
     _apiService = api;
+    _storageService = storage;
 
     _authProvider = AuthProvider(authService, api);
     _authProvider.initialize();
-    
+
     _dashboardProvider = DashboardProvider(api);
     _strengthProvider = StrengthProvider(api);
     _workoutSessionProvider = WorkoutSessionProvider(api);
@@ -75,6 +84,9 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
     _bodyMeasurementsProvider = BodyMeasurementsProvider(api);
     _bodyMapProvider = BodyMapProvider(api);
     _homeProvider = HomeProvider(api);
+    _suggestProvider = SuggestProvider(api, storage);
+    _focusDurationProvider = FocusDurationProvider(api);
+    _onboardingProvider = OnboardingProvider(OnboardingService(api));
 
     // Reset user-scoped caches when auth is invalidated.
     _authProvider.addListener(_handleAuthChanged);
@@ -92,6 +104,9 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
       _bodyMeasurementsProvider.clear();
       _bodyMapProvider.clear();
       _homeProvider.clear();
+      _suggestProvider.clear();
+      _focusDurationProvider.clear();
+      _onboardingProvider.reset();
     }
     _wasAuthenticated = isAuth;
   }
@@ -114,6 +129,9 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
     _bodyMeasurementsProvider.dispose();
     _bodyMapProvider.dispose();
     _homeProvider.dispose();
+    _suggestProvider.dispose();
+    _focusDurationProvider.dispose();
+    _onboardingProvider.dispose();
     super.dispose();
   }
 
@@ -125,6 +143,10 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
         // Provider.value is safe here. Revisit if ApiService ever owns a
         // persistent http.Client or similar.
         Provider<ApiService>.value(value: _apiService),
+        // StorageService exposed so the S13-T5 picker sheets can read/write
+        // their per-focus last-picked SharedPreferences keys without
+        // re-instantiating the wrapper.
+        Provider<StorageService>.value(value: _storageService),
         ChangeNotifierProvider<AuthProvider>.value(value: _authProvider),
         ChangeNotifierProvider<DashboardProvider>.value(value: _dashboardProvider),
         ChangeNotifierProvider<StrengthProvider>.value(value: _strengthProvider),
@@ -139,6 +161,9 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
         ChangeNotifierProvider<BodyMeasurementsProvider>.value(value: _bodyMeasurementsProvider),
         ChangeNotifierProvider<BodyMapProvider>.value(value: _bodyMapProvider),
         ChangeNotifierProvider<HomeProvider>.value(value: _homeProvider),
+        ChangeNotifierProvider<SuggestProvider>.value(value: _suggestProvider),
+        ChangeNotifierProvider<FocusDurationProvider>.value(value: _focusDurationProvider),
+        ChangeNotifierProvider<OnboardingProvider>.value(value: _onboardingProvider),
       ],
       child: MaterialApp.router(
         title: 'DailyForge',
