@@ -51,7 +51,7 @@ class SessionLauncher {
 
 Home `_onStart` → `SessionLauncher.launch(context, currentSession)`. No per-shape conditionals at the call site. All adapter logic lives in the launcher and its sub-modules.
 
-This abstraction lands in T1 and grows organically across the sprint. T1 ships pillar-pure strength_only; T2 adds yoga_only; T3+T4 add cross-pillar; T5 adds state-focus.
+This abstraction lands in T1 and grows organically across the sprint. T1 ships pillar-pure strength via the Strength tab; T2 adds cross-pillar (5-phase) and wires home Start; T3 adds pillar-pure yoga via the Yoga tab; T4 refactors the players for embedding; T5 adds state-focus.
 
 ---
 
@@ -173,7 +173,7 @@ Demoted from original T2.
 ### S14-T5 — State-focus 3-leg chain
 
 **Scope:**
-- Leg manager service: tracks current leg (centering / practice / reflection), what's next, what's behind. Persists state for app-background recovery (similar pattern to T3 phase state machine).
+- Leg manager service: tracks current leg (centering / practice / reflection), what's next, what's behind. Persists state for app-background recovery (similar pattern to T2 phase state machine).
 - Breathwork player extended with optional `onLegComplete` callback. When a leg finishes, calls the manager instead of returning home.
 - New `ReflectionTimerPage` for the reflection leg (where `content_id == null`): countdown timer with "Breathe naturally" prompt, soft chime at end. No protocol cycles, no inhale/hold/exhale display — just a quiet, gentle screen.
 - Skip leg: power-user gesture → confirms → advances to next leg.
@@ -202,7 +202,7 @@ Demoted from original T2.
 **Scope:**
 - Multi-phase completion summary: post-session screen showing all phases completed, time per phase, total time, focus area, level impact (uses `metadata.userLevels` from engine response).
 - Skip-phase / shorten-phase UX polish: confirm dialog wording, undo grace period, post-session note when phases were skipped.
-- Mid-session phase preview polish: T3's modal gets visual treatment (icons per phase, progress bar, estimated time remaining).
+- Mid-session phase preview polish: T2's modal gets visual treatment (icons per phase, progress bar, estimated time remaining).
 - Recency-warning surfacing: T5/S12 wired warnings into the engine response (`session.warnings[]`). Surface them at session start ("You did legs yesterday — proceed?") with options to proceed, swap exercises, or pick a different focus.
 - Honor engine `duration_minutes` for breathwork bookends (Anomaly #11): cap the breathwork player at the engine's budget instead of running full protocol cycles. Introduces a "max duration" mode in `BreathworkTimerProvider`.
 - Yoga swap-from-engine fix: when swapping a pose mid-session, scope the alternatives query to the engine's actual style if present in `metadata.source` or fall back to `vinyasa`.
@@ -240,14 +240,14 @@ Demoted from original T2.
 ## Dependencies + critical path
 
 ```
-T1 (launcher + strength) ─────┬──→ T3 (orchestrator skeleton) ──→ T4 (embed players) ──→ T6 (polish)
-                              │                                                          ↑
-                              ├──→ T2 (yoga adapter) ──────────────────────────────────┤
-                              │                                                          │
-                              └──→ T5 (state-focus chain) ──────────────────────────────┘
+T1 (launcher + strength) ─────┬──→ T2 (cross_pillar + home Start) ─┬──→ T4 (embed players) ──→ T6 (polish)
+                              │                                    │                           ↑
+                              ├──→ T3 (yoga adapter) ──────────────┘                           │
+                              │                                                                │
+                              └──→ T5 (state-focus chain) ─────────────────────────────────────┘
 ```
 
-T1 unblocks everything. T2 and T5 are independent of T3/T4 and can run in parallel if architect time permits (single developer = sequential).
+T1 unblocks all of T2, T3, T5. T4 depends on both T2 (orchestrator) and T3 (yoga adapter) — both must land before embedded players ship. T5 is independent of T2/T3/T4 and can run in parallel (single developer = sequential).
 
 T6 depends on T1–T5 all landing.
 
