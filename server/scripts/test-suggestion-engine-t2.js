@@ -116,6 +116,13 @@ async function assertSession(label, session, levels, exclusions, expectedShape, 
     JSON.stringify(session.metadata?.user_levels) === JSON.stringify(levels),
     `got ${JSON.stringify(session.metadata?.user_levels)} expected ${JSON.stringify(levels)}`);
 
+  // S14-T1: metadata.focus_slug round-trips the request slug. Label format is
+  // `<focus_slug>/<entry>/<budget>` across all callers.
+  const expectedFocusSlug = label.split('/')[0];
+  check(`${label}: metadata.focus_slug == ${expectedFocusSlug}`,
+    session.metadata?.focus_slug === expectedFocusSlug,
+    `got ${session.metadata?.focus_slug}`);
+
   // metadata.estimated_total_min: tight ±10% (≥30 budget) or ±20% (15 budget)
   // when the session is fully populated. Skip the strict check (sanity-only)
   // when content-degraded: any phase has fewer items than the spec count
@@ -779,6 +786,9 @@ async function main() {
             session.metadata?.is_endless === cfg.is_endless);
           check(`${label}: metadata.user_levels.breathwork == ${level}`,
             session.metadata?.user_levels?.breathwork === level);
+          check(`${label}: metadata.focus_slug == ${focus_slug}`,
+            session.metadata?.focus_slug === focus_slug,
+            `got ${session.metadata?.focus_slug}`);
 
           // Duration assertions
           const total = session.metadata?.estimated_total_min;
@@ -1669,6 +1679,8 @@ async function main() {
         check('T7/1 suggest body home: phases is array', Array.isArray(body.phases));
         check('T7/1 suggest body home: metadata.source=engine_v1',
           body.metadata?.source === 'engine_v1', `got ${body.metadata?.source}`);
+        check('T7/1 suggest body home: metadata.focus_slug=biceps',
+          body.metadata?.focus_slug === 'biceps', `got ${body.metadata?.focus_slug}`);
         check('T7/1 suggest body home: warnings is array', Array.isArray(body.warnings));
         const hasMain = (body.phases || []).some((p) => p.phase === 'main' && (p.items || []).length > 0);
         check('T7/1 suggest body home: has main phase with items', hasMain);
@@ -1690,6 +1702,8 @@ async function main() {
           `got ${JSON.stringify(phaseNames)}`);
         check('T7/2 suggest state: metadata.source=engine_v1',
           body.metadata?.source === 'engine_v1');
+        check('T7/2 suggest state: metadata.focus_slug=calm',
+          body.metadata?.focus_slug === 'calm', `got ${body.metadata?.focus_slug}`);
       }
 
       // Sub-block 3: /suggest validation matrix — 9 error cases (criteria #4–#12)
@@ -2803,6 +2817,218 @@ async function main() {
       try { t5Server.close(); } catch {}
       process.removeListener('SIGINT', t5AbortHandler);
       process.removeListener('SIGTERM', t5AbortHandler);
+    }
+  }
+
+  // ── Phase 3i: T1 START-FROM-LIST BLOCK (S14-T1) ──────────────────────
+  // ≥18 assertions across 8 groups exercising POST /api/sessions/start-from-list.
+  // Uses createApp() in-process listener + jwt for auth (matches T1/T2/T5 patterns).
+  // Sentinel: tags all created sessions with notes='s14-t1-smoke-fixture' via
+  // UPDATE-after-insert so cleanup deletes them deterministically. ON DELETE
+  // CASCADE on session_exercises.session_id auto-removes child rows.
+  {
+    console.log('\n=== T1 START-FROM-LIST BLOCK ===');
+    if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET not set — required for T1 START-FROM-LIST block');
+
+    const SFL_SENTINEL = 's14-t1-smoke-fixture';
+
+    // Idempotent pre-clean (covers a previous run that died before its own cleanup).
+    await pool.query(`DELETE FROM sessions WHERE notes = $1`, [SFL_SENTINEL]);
+
+    // Resolve a 3-strength-exercise sample + 1 yoga exercise for pillar-mismatch test.
+    const { rows: strengthRows } = await pool.query(
+      `SELECT id FROM exercises WHERE type = 'strength' ORDER BY id LIMIT 3`
+    );
+    const { rows: yogaRows } = await pool.query(
+      `SELECT id FROM exercises WHERE type = 'yoga' ORDER BY id LIMIT 1`
+    );
+    if (strengthRows.length < 3 || yogaRows.length < 1) {
+      throw new Error('SFL block: insufficient exercise rows for fixtures');
+    }
+    const strengthIds = strengthRows.map((r) => r.id);
+    const yogaExerciseId = yogaRows[0].id;
+    // A reliably-non-existent exercise id.
+    const FAKE_EXERCISE_ID = 999999999;
+
+    const sflApp = createApp();
+    const sflServer = await new Promise((resolve) => {
+      const s = sflApp.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const sflPort = sflServer.address().port;
+    const sflBase = `http://127.0.0.1:${sflPort}`;
+    const sflToken = jwt.sign(
+      { id: user.id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '5m' }
+    );
+    const sflH = { 'Content-Type': 'application/json', Authorization: `Bearer ${sflToken}` };
+    const sflCreatedSessionIds = [];
+
+    async function sflPost(body) {
+      return await fetch(`${sflBase}/api/sessions/start-from-list`, {
+        method: 'POST', headers: sflH, body: JSON.stringify(body),
+      });
+    }
+    async function sflTagSession(sessionId) {
+      // Mark with sentinel so cleanup is independent of the local tracker.
+      await pool.query(`UPDATE sessions SET notes = $1 WHERE id = $2`,
+        [SFL_SENTINEL, sessionId]);
+      sflCreatedSessionIds.push(sessionId);
+    }
+
+    async function sflCleanup() {
+      // CASCADE on session_exercises.session_id removes child rows automatically.
+      await pool.query(`DELETE FROM sessions WHERE notes = $1`, [SFL_SENTINEL]);
+    }
+    const sflAbortHandler = async () => {
+      try { await sflCleanup(); } catch (e) { console.error('[SFL abort cleanup]', e); }
+      try { sflServer.close(); } catch {}
+      process.exit(130);
+    };
+    process.once('SIGINT', sflAbortHandler);
+    process.once('SIGTERM', sflAbortHandler);
+
+    try {
+      // Group 1 (×3): missing top-level required fields.
+      {
+        let r = await sflPost({ focus_slug: 'biceps', exercises: [{ exercise_id: strengthIds[0], sort_order: 0, default_sets: 3, default_reps: 10 }] });
+        let b = await r.json();
+        check('SFL/1a missing type → 400 invalid_session_type',
+          r.status === 400 && b.error === 'invalid_session_type', `got ${r.status} ${b.error}`);
+
+        r = await sflPost({ type: 'strength', exercises: [{ exercise_id: strengthIds[0], sort_order: 0, default_sets: 3, default_reps: 10 }] });
+        b = await r.json();
+        check('SFL/1b missing focus_slug → 400 invalid_focus_slug',
+          r.status === 400 && b.error === 'invalid_focus_slug', `got ${r.status} ${b.error}`);
+
+        r = await sflPost({ type: 'strength', focus_slug: 'biceps' });
+        b = await r.json();
+        check('SFL/1c missing exercises → 400 invalid_exercises',
+          r.status === 400 && b.error === 'invalid_exercises', `got ${r.status} ${b.error}`);
+      }
+
+      // Group 2 (×2): exercises array boundary cases.
+      {
+        let r = await sflPost({ type: 'strength', focus_slug: 'biceps', exercises: [] });
+        let b = await r.json();
+        check('SFL/2a empty exercises → 400 invalid_exercises',
+          r.status === 400 && b.error === 'invalid_exercises', `got ${r.status} ${b.error}`);
+
+        const tooMany = Array.from({ length: 21 }, (_, i) => ({
+          exercise_id: strengthIds[0], sort_order: i, default_sets: 3, default_reps: 10,
+        }));
+        r = await sflPost({ type: 'strength', focus_slug: 'biceps', exercises: tooMany });
+        b = await r.json();
+        check('SFL/2b 21 exercises → 400 too_many_exercises',
+          r.status === 400 && b.error === 'too_many_exercises', `got ${r.status} ${b.error}`);
+      }
+
+      // Group 3 (×3): invalid item shape.
+      {
+        let r = await sflPost({ type: 'strength', focus_slug: 'biceps',
+          exercises: [{ sort_order: 0, default_sets: 3, default_reps: 10 }] });
+        let b = await r.json();
+        check('SFL/3a item missing exercise_id → 400 invalid_exercise_item',
+          r.status === 400 && b.error === 'invalid_exercise_item', `got ${r.status} ${b.error}`);
+
+        r = await sflPost({ type: 'strength', focus_slug: 'biceps',
+          exercises: [{ exercise_id: strengthIds[0], sort_order: 'zero', default_sets: 3, default_reps: 10 }] });
+        b = await r.json();
+        check('SFL/3b non-int sort_order → 400 invalid_exercise_item',
+          r.status === 400 && b.error === 'invalid_exercise_item', `got ${r.status} ${b.error}`);
+
+        r = await sflPost({ type: 'strength', focus_slug: 'biceps',
+          exercises: [{ exercise_id: strengthIds[0], sort_order: 0, default_sets: 'three', default_reps: 10 }] });
+        b = await r.json();
+        check('SFL/3c non-int default_sets → 400 invalid_exercise_item',
+          r.status === 400 && b.error === 'invalid_exercise_item', `got ${r.status} ${b.error}`);
+      }
+
+      // Group 4 (×2): exercise existence + pillar-correctness.
+      {
+        let r = await sflPost({ type: 'strength', focus_slug: 'biceps',
+          exercises: [{ exercise_id: FAKE_EXERCISE_ID, sort_order: 0, default_sets: 3, default_reps: 10 }] });
+        let b = await r.json();
+        check('SFL/4a non-existent exercise_id → 400 unknown_exercise_id',
+          r.status === 400 && b.error === 'unknown_exercise_id', `got ${r.status} ${b.error}`);
+
+        r = await sflPost({ type: 'strength', focus_slug: 'biceps',
+          exercises: [{ exercise_id: yogaExerciseId, sort_order: 0, default_sets: 3, default_reps: 10 }] });
+        b = await r.json();
+        check('SFL/4b yoga exercise_id with type=strength → 400 wrong_pillar_exercise',
+          r.status === 400 && b.error === 'wrong_pillar_exercise', `got ${r.status} ${b.error}`);
+      }
+
+      // Group 5 (×2): unsupported pillar (T2 widens this).
+      {
+        const r = await sflPost({ type: 'yoga', focus_slug: 'biceps',
+          exercises: [{ exercise_id: strengthIds[0], sort_order: 0, default_sets: 3, default_reps: 10 }] });
+        const b = await r.json();
+        check('SFL/5a type=yoga → 400 status', r.status === 400, `got ${r.status}`);
+        check('SFL/5b type=yoga → unsupported_session_type code',
+          b.error === 'unsupported_session_type', `got ${b.error}`);
+      }
+
+      // Group 6 (×4): happy path 3-exercise strength session response shape.
+      let happyBody;
+      {
+        const exercisesPayload = strengthIds.map((id, i) => ({
+          exercise_id: id, sort_order: i, default_sets: 3, default_reps: 10,
+        }));
+        const r = await sflPost({ type: 'strength', focus_slug: 'biceps', exercises: exercisesPayload });
+        check('SFL/6 happy path: status 200', r.status === 200, `got ${r.status}`);
+        happyBody = await r.json();
+        const sessionId = happyBody?.session?.id;
+        if (Number.isInteger(sessionId)) await sflTagSession(sessionId);
+
+        check('SFL/6a session.id is positive integer',
+          Number.isInteger(happyBody?.session?.id) && happyBody.session.id > 0,
+          `got ${happyBody?.session?.id}`);
+        check('SFL/6b session.workout_id === null',
+          happyBody?.session?.workout_id === null, `got ${happyBody?.session?.workout_id}`);
+        check('SFL/6c session.focus_slug === biceps',
+          happyBody?.session?.focus_slug === 'biceps', `got ${happyBody?.session?.focus_slug}`);
+        const allHaveMuscles = Array.isArray(happyBody?.exercises)
+          && happyBody.exercises.length === 3
+          && happyBody.exercises.every((e) => typeof e.target_muscles === 'string');
+        check('SFL/6d exercises[3] populated with target_muscles strings',
+          allHaveMuscles,
+          `got ${JSON.stringify(happyBody?.exercises?.map((e) => e.target_muscles))}`);
+      }
+
+      // Group 7 (×1): DB invariant — N rows in sort_order.
+      {
+        const sessionId = happyBody?.session?.id;
+        const { rows: seRows } = await pool.query(
+          `SELECT exercise_id, sort_order FROM session_exercises
+            WHERE session_id = $1 ORDER BY sort_order ASC`,
+          [sessionId]
+        );
+        const seOk = seRows.length === 3
+          && seRows.every((r, i) => r.sort_order === i)
+          && seRows.map((r) => r.exercise_id).join(',') === strengthIds.join(',');
+        check('SFL/7 session_exercises has 3 rows in sort_order with matching ids',
+          seOk,
+          `got ${JSON.stringify(seRows)}`);
+      }
+
+      // Group 8 (×1): metadata.focus_slug round-trip via /suggest (engine→endpoint
+      // integration, complementary to the in-helper assertion added in Step 2).
+      {
+        const r = await fetch(`${sflBase}/api/sessions/suggest`, {
+          method: 'POST', headers: sflH,
+          body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'home', time_budget_min: 30 }),
+        });
+        const b = await r.json();
+        check('SFL/8 /suggest body home: metadata.focus_slug === biceps',
+          r.status === 200 && b.metadata?.focus_slug === 'biceps',
+          `got status=${r.status} focus_slug=${b.metadata?.focus_slug}`);
+      }
+    } finally {
+      await sflCleanup();
+      try { sflServer.close(); } catch {}
+      process.removeListener('SIGINT', sflAbortHandler);
+      process.removeListener('SIGTERM', sflAbortHandler);
     }
   }
 

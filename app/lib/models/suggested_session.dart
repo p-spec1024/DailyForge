@@ -172,12 +172,19 @@ class SessionMetadata {
   /// null on body-focus responses.
   final String? bracket;
 
+  /// S14-T1: the focus_slug the engine resolved the session to. Always
+  /// non-null in practice once both server and client ship the T1 changes;
+  /// kept nullable in the model to tolerate staged-deploy windows where the
+  /// client may receive a pre-T1 response.
+  final String? focusSlug;
+
   const SessionMetadata({
     required this.estimatedTotalMin,
     required this.userLevels,
     required this.source,
     required this.isEndless,
     required this.bracket,
+    required this.focusSlug,
   });
 
   factory SessionMetadata.fromJson(Map<String, dynamic> json) {
@@ -220,12 +227,19 @@ class SessionMetadata {
         'SessionMetadata: expected `bracket` to be a string or absent, got ${bracketRaw.runtimeType}',
       );
     }
+    final focusSlugRaw = json['focus_slug'];
+    if (focusSlugRaw != null && focusSlugRaw is! String) {
+      throw FormatException(
+        'SessionMetadata: expected `focus_slug` to be a string or absent, got ${focusSlugRaw.runtimeType}',
+      );
+    }
     return SessionMetadata(
       estimatedTotalMin: est.toInt(),
       userLevels: Map.unmodifiable(levels),
       source: source,
       isEndless: endlessRaw as bool?,
       bracket: bracketRaw as String?,
+      focusSlug: focusSlugRaw as String?,
     );
   }
 }

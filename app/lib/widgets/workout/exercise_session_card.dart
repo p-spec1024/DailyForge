@@ -148,23 +148,26 @@ class ExerciseSessionCard extends StatelessWidget {
               ],
             ),
           ),
-          // Set rows
-          ...sets.asMap().entries.map((entry) {
-            final i = entry.key;
-            final setData = entry.value;
-            // A set is locked if any previous set is not completed
-            final locked = i > 0 &&
-                sets.sublist(0, i).any((s) => !s.completed);
-            return SetRow(
-              setNumber: setData.setNumber,
-              setData: setData,
-              previousData: previousData,
-              locked: locked,
-              onComplete: (weight, reps) {
-                onLogSet(setData.setNumber, weight, reps);
-              },
-            );
-          }),
+          // Set rows. The "active" set is the first un-logged set; it gets
+          // the engine's default-reps pre-fill and an interactive ✓ button.
+          // Future un-logged sets render with empty placeholders and a
+          // disabled ✓. -1 means all sets are logged (no active row).
+          ...() {
+            final activeIndex = sets.indexWhere((s) => !s.completed);
+            return sets.asMap().entries.map((entry) {
+              final i = entry.key;
+              final setData = entry.value;
+              return SetRow(
+                setNumber: setData.setNumber,
+                setData: setData,
+                previousData: previousData,
+                isActive: i == activeIndex,
+                onComplete: (weight, reps) {
+                  onLogSet(setData.setNumber, weight, reps);
+                },
+              );
+            });
+          }(),
           const SizedBox(height: 8),
           // Add Set button
           GestureDetector(

@@ -3,11 +3,16 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import '../../config/theme.dart';
+import '../../launchers/session_launcher.dart';
+import '../../models/suggested_session.dart';
 import '../../providers/strength_provider.dart';
+import '../../providers/suggest_provider.dart';
 import '../../widgets/glass_card.dart';
 import 'widgets/exercise_browse_card.dart';
 import 'widgets/muscle_filter_chips.dart';
 import 'widgets/routine_card.dart';
+
+const String _kStrengthTabFallbackFocus = 'biceps';
 
 class StrengthPage extends StatefulWidget {
   const StrengthPage({super.key});
@@ -19,6 +24,11 @@ class StrengthPage extends StatefulWidget {
 class _StrengthPageState extends State<StrengthPage> {
   final TextEditingController _searchController = TextEditingController();
 
+  /// S14-T1 reroute: tracks which focus_slug the "TODAY'S STRENGTH" card has
+  /// already fetched, so a return-to-tab visit after the user changed focus
+  /// on Home triggers a refetch (β behavior, per amendment §5).
+  String? _lastFetchedFocusSlug;
+
   @override
   void initState() {
     super.initState();
@@ -29,6 +39,35 @@ class _StrengthPageState extends State<StrengthPage> {
         provider.refresh();
       }
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final suggest = context.read<SuggestProvider>();
+    final currentFocus = suggest.currentFocusSlug.isNotEmpty
+        ? suggest.currentFocusSlug
+        : _kStrengthTabFallbackFocus;
+    if (_lastFetchedFocusSlug != currentFocus) {
+      _lastFetchedFocusSlug = currentFocus;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _fetchTodaysStrength(currentFocus);
+      });
+    }
+  }
+
+  Future<void> _fetchTodaysStrength(String focusSlug) async {
+    if (!mounted) return;
+    final suggest = context.read<SuggestProvider>();
+    await suggest.refreshForEntryPoint(
+      entryPoint: 'strength_tab',
+      focusSlug: focusSlug,
+    );
+  }
+
+  Future<void> _onTodaysStrengthStart(SuggestedSession session) async {
+    await SessionLauncher.launch(context, session);
   }
 
   @override
@@ -64,6 +103,19 @@ class _StrengthPageState extends State<StrengthPage> {
                       child: Text(
                         'Strength',
                         style: Theme.of(context).textTheme.headlineMedium,
+                      ),
+                    ),
+                  ),
+
+                  // S14-T1 reroute: Today's strength workout (engine-seeded).
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: _TodaysStrengthCard(
+                        onStart: _onTodaysStrengthStart,
+                        onRetry: () => _fetchTodaysStrength(
+                          _lastFetchedFocusSlug ?? _kStrengthTabFallbackFocus,
+                        ),
                       ),
                     ),
                   ),
@@ -346,5 +398,175 @@ class _StrengthPageState extends State<StrengthPage> {
         },
       ),
     );
+  }
+}
+
+/// S14-T1 reroute: top-of-page card on the Strength tab. Shows the engine's
+/// pillar-pure strength suggestion for today's focus and a Start button that
+/// dispatches [SessionLauncher]. Subscribes to [SuggestProvider] so changes
+/// from the home page (or anywhere else) reactively refresh the card.
+///
+/// Visual style mirrors the home session card structurally (TODAY label,
+/// title, subtitle, primary Start button) while reusing the dark-theme
+/// Strength-tab tokens — `GlassCard` + `AppColors.strength` accent.
+class _TodaysStrengthCard extends StatelessWidget {
+  final Future<void> Function(SuggestedSession session) onStart;
+  final VoidCallback onRetry;
+
+  const _TodaysStrengthCard({
+    required this.onStart,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<SuggestProvider>(
+      builder: (context, suggest, _) {
+        final isLoading = suggest.isLoading;
+        final session = suggest.currentSession;
+        final error = suggest.lastError;
+
+        if (isLoading && session == null) {
+          return _buildSkeleton();
+        }
+        if (error != null && session == null) {
+          return _buildError(error.userFacingMessage);
+        }
+        if (session == null) {
+          return const SizedBox.shrink();
+        }
+        if (session.sessionShape != 'pillar_pure') {
+          // Defensive: home is showing cross_pillar via _entryPointHome; we
+          // shouldn't get here from refreshForEntryPoint('strength_tab') but
+          // guard rather than render a broken card.
+          return const SizedBox.shrink();
+        }
+        return _buildReady(session, isLoading);
+      },
+    );
+  }
+
+  Widget _buildSkeleton() {
+    return GlassCard(
+      borderColor: AppColors.strength,
+      child: SizedBox(
+        height: 132,
+        child: Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              color: AppColors.strength.withValues(alpha: 0.6),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildError(String message) {
+    return GlassCard(
+      borderColor: AppColors.strength,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            message,
+            style: const TextStyle(
+              fontSize: 14,
+              color: AppColors.primaryText,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextButton(
+            onPressed: onRetry,
+            style: TextButton.styleFrom(foregroundColor: AppColors.strength),
+            child: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReady(SuggestedSession session, bool refreshing) {
+    final mins = session.metadata.estimatedTotalMin;
+    final focusSlug = session.metadata.focusSlug ?? '';
+    final focusDisplay =
+        focusSlug.isEmpty ? 'Strength' : _capitalizeFocus(focusSlug);
+    final exerciseCount = session.phases
+        .expand((p) => p.items)
+        .where((i) => i.contentType == 'strength')
+        .length;
+
+    final card = GlassCard(
+      borderColor: AppColors.strength,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "TODAY'S STRENGTH",
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2,
+              color: AppColors.secondaryText,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '$focusDisplay · $mins min',
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+              color: AppColors.primaryText,
+              letterSpacing: -0.4,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            exerciseCount == 1 ? '1 exercise' : '$exerciseCount exercises',
+            style: const TextStyle(
+              fontSize: 13,
+              color: AppColors.secondaryText,
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: FilledButton(
+              onPressed: () => onStart(session),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.strength,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              child: const Text('Start'),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (!refreshing) return card;
+    return AnimatedOpacity(
+      opacity: 0.6,
+      duration: const Duration(milliseconds: 180),
+      child: card,
+    );
+  }
+
+  String _capitalizeFocus(String slug) {
+    return slug
+        .split('_')
+        .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
+        .join(' ');
   }
 }

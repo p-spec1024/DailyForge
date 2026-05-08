@@ -10,6 +10,7 @@ const String _kPrefLastTimeBudgetMin = 'last_time_budget_min';
 const String _defaultFocusSlug = 'full_body';
 const int _defaultTimeBudgetMin = 30;
 const String _entryPointHome = 'home';
+const String _entryPointStrengthTab = 'strength_tab';
 
 /// Holds the home-page suggested-session state and the user's last-viewed
 /// focus / time-budget preferences. T4 will drive this provider.
@@ -77,6 +78,40 @@ class SuggestProvider extends ChangeNotifier {
         focusSlug: focusSlug,
         timeBudgetMin: budget,
         entryPoint: _entryPointHome,
+      ),
+      persistAfterSuccess: () =>
+          _storage.setPreference(_kPrefLastTimeBudgetMin, budget),
+    );
+  }
+
+  /// S14-T1 reroute: fetch a suggested session for an explicit entry-point.
+  ///
+  /// Used by entry-point-specific surfaces (Strength tab, future Yoga tab)
+  /// where the caller knows the entry-point at compile time and wants the
+  /// engine to produce a pillar-pure session shape rather than the home
+  /// page's cross_pillar default.
+  ///
+  /// Mirrors [selectBodyFocus] structurally: race-tracks via [_runRequest],
+  /// persists `last_time_budget_min` on success. Body-focus only — state
+  /// focus retains [selectStateFocus] which carries the bracket parameter.
+  Future<void> refreshForEntryPoint({
+    required String entryPoint,
+    required String focusSlug,
+    int? timeBudgetMin,
+  }) async {
+    // T1 reroute ships strength_tab only. T3 widens the assertion when yoga_tab
+    // lands; T5 widens when state-focus surfaces grow this entry seam.
+    assert(
+      entryPoint == _entryPointStrengthTab,
+      'refreshForEntryPoint: only $_entryPointStrengthTab supported in S14-T1',
+    );
+    final budget = timeBudgetMin ?? await getPersistedTimeBudgetMin();
+    await _runRequest(
+      focusSlug: focusSlug,
+      request: () => _service.requestBodyFocusSession(
+        focusSlug: focusSlug,
+        timeBudgetMin: budget,
+        entryPoint: entryPoint,
       ),
       persistAfterSuccess: () =>
           _storage.setPreference(_kPrefLastTimeBudgetMin, budget),

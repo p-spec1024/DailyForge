@@ -74,6 +74,7 @@ class WorkoutSessionProvider extends ChangeNotifier {
   // --- State ---
   int? _sessionId;
   int? _workoutId;
+  String? _focusSlug;
   bool _isActive = false;
   DateTime? _startedAt;
   bool _isLoading = false;
@@ -102,6 +103,7 @@ class WorkoutSessionProvider extends ChangeNotifier {
   // --- Getters ---
   int? get sessionId => _sessionId;
   int? get workoutId => _workoutId;
+  String? get focusSlug => _focusSlug;
   bool get isActive => _isActive;
   DateTime? get startedAt => _startedAt;
   int get elapsedSeconds => elapsedNotifier.value;
@@ -242,6 +244,54 @@ class WorkoutSessionProvider extends ChangeNotifier {
       _isLoading = false;
       notifyListeners();
       debugPrint('Unexpected error starting empty session: $e');
+    }
+  }
+
+  /// S14-T1: Start a session from an engine-supplied exercise list (no
+  /// workout_id). Calls `POST /api/sessions/start-from-list` and hydrates
+  /// provider state. Lets [ApiException] propagate so the launcher can map
+  /// server error codes to user-facing snackbars (spec §7).
+  Future<void> startFromList({
+    required List<Map<String, dynamic>> exercises,
+    required String focusSlug,
+  }) async {
+    if (_isLoading) return;
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final response = await _api.post(ApiConfig.sessionsStartFromList, {
+        'type': 'strength',
+        'focus_slug': focusSlug,
+        'exercises': exercises,
+      });
+
+      final session = response['session'] as Map<String, dynamic>;
+      final hydratedExercises =
+          (response['exercises'] as List).cast<Map<String, dynamic>>();
+
+      _sessionId = _parseId(session['id']);
+      _workoutId = null;
+      _focusSlug = focusSlug;
+      _startedAt = DateTime.parse(session['started_at'] as String);
+      _isActive = true;
+      _exercises = List.of(hydratedExercises);
+      _initializeDefaultSets(hydratedExercises);
+
+      // Background-fetch previous performance like startSession does. Awaiting
+      // it before notifyListeners would gate the player open on a network call
+      // that's only used to pre-fill set rows.
+      unawaited(_fetchPreviousPerformance(hydratedExercises)
+          .then((_) => notifyListeners()));
+
+      _startTimer();
+      _isLoading = false;
+      notifyListeners();
+    } catch (_) {
+      _isLoading = false;
+      notifyListeners();
+      rethrow;
     }
   }
 
@@ -631,13 +681,22 @@ class WorkoutSessionProvider extends ChangeNotifier {
   }
 
   void _initializeDefaultSets(List<Map<String, dynamic>> exercises) {
+    // S14-T1: engine-seeded sessions (set during startFromList) carry a
+    // default_reps per exercise. Pre-fill SetData.reps so the UI's reps
+    // input shows the engine's suggestion. Routine-backed sessions
+    // (_focusSlug == null) keep reps unset so the existing previous-
+    // performance fallback in SetRow._formatReps() takes over.
+    final isEngineSeeded = _focusSlug != null;
     _exerciseSets = <int, List<SetData>>{};
     for (final ex in exercises) {
       final id = _parseId(ex['id']);
       final defaultSets = (ex['default_sets'] as num?)?.toInt() ?? 3;
+      final defaultReps = isEngineSeeded
+          ? (ex['default_reps'] as num?)?.toInt() ?? 0
+          : 0;
       _exerciseSets[id] = List<SetData>.generate(
         defaultSets,
-        (i) => SetData(setNumber: i + 1),
+        (i) => SetData(setNumber: i + 1, reps: defaultReps),
       );
     }
   }
@@ -704,6 +763,7 @@ class WorkoutSessionProvider extends ChangeNotifier {
     elapsedNotifier.value = 0;
     _sessionId = null;
     _workoutId = null;
+    _focusSlug = null;
     _isActive = false;
     _startedAt = null;
     _isLoading = false;

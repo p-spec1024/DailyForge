@@ -128,14 +128,18 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _onStart() {
-    // T6 wires the session player handoff. Until then surface a clear
-    // placeholder so device-tests don't silently swallow the tap.
+    // S14-T1 reroute (Amendment 1): home Start does not launch yet — home
+    // produces `cross_pillar` sessions, which T1's launcher does not handle.
+    // S14-T2 promotes cross_pillar and wires home Start to the launcher.
+    // Until then, point users at the Strength tab where T1's strength_only
+    // path is wired.
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text(
-          "Session start lands in Sprint 14 — full handoff is being scoped properly.",
+          "Strength workouts available now from the Strength tab. "
+          "Full home flow lands in S14-T2.",
         ),
-        duration: Duration(seconds: 2),
+        duration: Duration(seconds: 3),
       ),
     );
   }

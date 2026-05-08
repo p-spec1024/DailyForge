@@ -593,6 +593,7 @@ async function generateCrossPillar({ userId, focus, levels, timeBudget }) {
       estimated_total_min: computeEstimatedTotalMin(phases, 'cross_pillar', timeBudget),
       requested_budget_min: timeBudget,
       user_levels: levels,
+      focus_slug: focus.slug,
     },
   };
 }
@@ -651,6 +652,7 @@ async function generateStrengthOnly({ userId, focus, levels, timeBudget }) {
       estimated_total_min: computeEstimatedTotalMin(phases, 'pillar_pure_strength', timeBudget),
       requested_budget_min: timeBudget,
       user_levels: levels,
+      focus_slug: focus.slug,
     },
   };
 }
@@ -748,6 +750,7 @@ async function generateYogaOnly({ userId, focus, levels, timeBudget }) {
       estimated_total_min: computeEstimatedTotalMin(phases, 'pillar_pure_yoga', timeBudget),
       requested_budget_min: timeBudget,
       user_levels: levels,
+      focus_slug: focus.slug,
     },
   };
 }
@@ -908,6 +911,7 @@ async function generateCrossPillarMobility({ userId, focus, levels, timeBudget }
       estimated_total_min: computeEstimatedTotalMin(phases, 'cross_pillar', timeBudget),
       requested_budget_min: timeBudget,
       user_levels: levels,
+      focus_slug: focus.slug,
     },
   };
 }
@@ -1028,6 +1032,7 @@ async function generateCrossPillarFullBody({ userId, focus, levels, timeBudget }
       estimated_total_min: computeEstimatedTotalMin(phases, 'cross_pillar', timeBudget),
       requested_budget_min: timeBudget,
       user_levels: levels,
+      focus_slug: focus.slug,
     },
   };
 }
@@ -1064,6 +1069,7 @@ async function generateStrengthOnlyFullBody({ userId, focus, levels, timeBudget 
       estimated_total_min: computeEstimatedTotalMin(phases, 'pillar_pure_strength', timeBudget),
       requested_budget_min: timeBudget,
       user_levels: levels,
+      focus_slug: focus.slug,
     },
   };
 }
@@ -1142,6 +1148,7 @@ async function generateYogaOnlyMobility({ userId, focus, levels, timeBudget }) {
       estimated_total_min: computeEstimatedTotalMin(phases, 'pillar_pure_yoga', timeBudget),
       requested_budget_min: timeBudget,
       user_levels: levels,
+      focus_slug: focus.slug,
     },
   };
 }
@@ -1217,6 +1224,7 @@ async function generateYogaOnlyFullBody({ userId, focus, levels, timeBudget }) {
       estimated_total_min: computeEstimatedTotalMin(phases, 'pillar_pure_yoga', timeBudget),
       requested_budget_min: timeBudget,
       user_levels: levels,
+      focus_slug: focus.slug,
     },
   };
 }
@@ -1435,6 +1443,7 @@ async function generateStateFocus({ userId, focus, bracket }) {
       bracket,
       is_endless: cfg.is_endless,
       user_levels: levels,
+      focus_slug: focus.slug,
     },
   };
 }
