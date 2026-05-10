@@ -3032,6 +3032,159 @@ async function main() {
     }
   }
 
+  // ── Phase 3j: T3 YOGA-ADAPTER BLOCK (S14-T3) ─────────────────────────
+  // Engine emission shape + POST /api/yoga/poses-by-ids round-trip.
+  // Uses inline sentinel pattern (matches T1 block above; the originally
+  // referenced scripts/lib/smoke-fixtures.mjs helper does not exist).
+  {
+    console.log('\n=== T3 YOGA-ADAPTER BLOCK ===');
+    if (!process.env.JWT_SECRET) {
+      throw new Error('JWT_SECRET not set — required for T3 YOGA-ADAPTER block');
+    }
+
+    // Group A (×4): engine emits pillar_pure yoga for the cold-start tuple.
+    {
+      const yogaSession = await generateSession({
+        user_id: user.id,
+        focus_slug: 'hamstrings',
+        entry_point: 'yoga_tab',
+        time_budget_min: 30,
+      });
+      check('YA/A1 yoga_tab/hamstrings/30: session_shape=pillar_pure',
+        yogaSession.session_shape === 'pillar_pure',
+        `got ${yogaSession.session_shape}`);
+      const allItems = (yogaSession.phases || []).flatMap((p) => p.items || []);
+      check('YA/A2 all items have content_type=yoga',
+        allItems.length > 0 && allItems.every((i) => i.content_type === 'yoga'),
+        `got types ${[...new Set(allItems.map((i) => i.content_type))].join(',')}`);
+      const phaseTokens = (yogaSession.phases || []).map((p) => p.phase);
+      const allowed = new Set(['warmup', 'main', 'cooldown']);
+      check('YA/A3 phase tokens subset of {warmup, main, cooldown}',
+        phaseTokens.length > 0 && phaseTokens.every((p) => allowed.has(p)),
+        `got ${phaseTokens.join(',')}`);
+      check('YA/A4 metadata.focus_slug present and non-empty',
+        typeof yogaSession.metadata?.focus_slug === 'string'
+          && yogaSession.metadata.focus_slug.length > 0,
+        `got ${yogaSession.metadata?.focus_slug}`);
+    }
+
+    // Sentinel yoga pose for endpoint round-trip + missing-id assertions.
+    const YA_SENTINEL_NAME = 's14-t3-smoke-fixture-pose';
+    await pool.query(`DELETE FROM exercises WHERE name = $1 AND type = 'yoga'`,
+      [YA_SENTINEL_NAME]);
+
+    const { rows: insertedRows } = await pool.query(
+      `INSERT INTO exercises (name, sanskrit_name, description, target_muscles,
+                              difficulty, type, category)
+       VALUES ($1, $2, $3, $4, $5, 'yoga', 'standing')
+       RETURNING id`,
+      [YA_SENTINEL_NAME, 'Sentinel Pose', 'smoke-fixture pose for s14-t3',
+       'hamstrings, calves', 'beginner']
+    );
+    const sentinelPoseId = insertedRows[0].id;
+
+    const yaApp = createApp();
+    const yaServer = await new Promise((resolve) => {
+      const s = yaApp.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const yaPort = yaServer.address().port;
+    const yaBase = `http://127.0.0.1:${yaPort}`;
+    const yaToken = jwt.sign(
+      { id: user.id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '5m' }
+    );
+    const yaH = { 'Content-Type': 'application/json', Authorization: `Bearer ${yaToken}` };
+
+    async function yaPost(body, opts = {}) {
+      return await fetch(`${yaBase}/api/yoga/poses-by-ids`, {
+        method: 'POST',
+        headers: opts.noAuth ? { 'Content-Type': 'application/json' } : yaH,
+        body: JSON.stringify(body),
+      });
+    }
+    async function yaCleanup() {
+      await pool.query(`DELETE FROM exercises WHERE id = $1`, [sentinelPoseId]);
+    }
+    const yaAbortHandler = async () => {
+      try { await yaCleanup(); } catch (e) { console.error('[YA abort cleanup]', e); }
+      try { yaServer.close(); } catch {}
+      process.exit(130);
+    };
+    process.once('SIGINT', yaAbortHandler);
+    process.once('SIGTERM', yaAbortHandler);
+
+    try {
+      // Group B (×6): /poses-by-ids happy-path round-trip.
+      {
+        const r = await yaPost({ ids: [sentinelPoseId] });
+        check('YA/B happy: status 200', r.status === 200, `got ${r.status}`);
+        const b = await r.json();
+        const pose = Array.isArray(b.poses) && b.poses[0];
+        check('YA/B1 poses[0].id === sentinel id',
+          pose && pose.id === sentinelPoseId,
+          `got ${pose && pose.id}`);
+        check('YA/B2 poses[0].name === sentinel name',
+          pose && pose.name === YA_SENTINEL_NAME,
+          `got ${pose && pose.name}`);
+        check('YA/B3 poses[0].sanskrit_name populated',
+          pose && pose.sanskrit_name === 'Sentinel Pose',
+          `got ${pose && pose.sanskrit_name}`);
+        check('YA/B4 poses[0].target_muscles is comma-separated string',
+          pose && typeof pose.target_muscles === 'string'
+            && pose.target_muscles.includes(','),
+          `got ${pose && JSON.stringify(pose.target_muscles)}`);
+        check('YA/B5 poses[0].difficulty === beginner',
+          pose && pose.difficulty === 'beginner',
+          `got ${pose && pose.difficulty}`);
+      }
+
+      // Group C (×4): validation errors.
+      {
+        let r = await yaPost({ ids: [] });
+        let b = await r.json();
+        check('YA/C1 empty ids → 400 invalid_ids',
+          r.status === 400 && b.error === 'invalid_ids',
+          `got ${r.status} ${b.error}`);
+
+        const tooMany = Array.from({ length: 51 }, (_, i) => i + 1);
+        r = await yaPost({ ids: tooMany });
+        b = await r.json();
+        check('YA/C2 51 ids → 400 too_many_ids',
+          r.status === 400 && b.error === 'too_many_ids',
+          `got ${r.status} ${b.error}`);
+
+        r = await yaPost({ ids: ['abc'] });
+        b = await r.json();
+        check('YA/C3 non-int id → 400 invalid_id',
+          r.status === 400 && b.error === 'invalid_id',
+          `got ${r.status} ${b.error}`);
+
+        r = await yaPost({ ids: [sentinelPoseId] }, { noAuth: true });
+        check('YA/C4 no auth → 401',
+          r.status === 401, `got ${r.status}`);
+      }
+
+      // Group D (×2): partial-success rejection (Q3 lock).
+      {
+        const FAKE_POSE_ID = 999999999;
+        const r = await yaPost({ ids: [sentinelPoseId, FAKE_POSE_ID] });
+        const b = await r.json();
+        check('YA/D1 partial success → 404 some_poses_missing',
+          r.status === 404 && b.error === 'some_poses_missing',
+          `got ${r.status} ${b.error}`);
+        check('YA/D2 missing_ids contains the fake id',
+          Array.isArray(b.missing_ids) && b.missing_ids.includes(FAKE_POSE_ID),
+          `got ${JSON.stringify(b.missing_ids)}`);
+      }
+    } finally {
+      await yaCleanup();
+      try { yaServer.close(); } catch {}
+      process.removeListener('SIGINT', yaAbortHandler);
+      process.removeListener('SIGTERM', yaAbortHandler);
+    }
+  }
+
   // ── Phase 4: pretty-print sample sessions ────────────────────────────
   console.log('\n=== Sample: biceps / home / 30 ===');
   const sample = await generateSession({

@@ -11,6 +11,11 @@ const String _defaultFocusSlug = 'full_body';
 const int _defaultTimeBudgetMin = 30;
 const String _entryPointHome = 'home';
 const String _entryPointStrengthTab = 'strength_tab';
+const String _entryPointYogaTab = 'yoga_tab';
+const Set<String> _kSupportedRefreshEntryPoints = {
+  _entryPointStrengthTab,
+  _entryPointYogaTab,
+};
 
 /// Holds the home-page suggested-session state and the user's last-viewed
 /// focus / time-budget preferences. T4 will drive this provider.
@@ -99,11 +104,12 @@ class SuggestProvider extends ChangeNotifier {
     required String focusSlug,
     int? timeBudgetMin,
   }) async {
-    // T1 reroute ships strength_tab only. T3 widens the assertion when yoga_tab
-    // lands; T5 widens when state-focus surfaces grow this entry seam.
+    // S14-T1 shipped strength_tab; S14-T3 widens to yoga_tab. T5 will widen
+    // again if state-focus surfaces grow this entry seam.
     assert(
-      entryPoint == _entryPointStrengthTab,
-      'refreshForEntryPoint: only $_entryPointStrengthTab supported in S14-T1',
+      _kSupportedRefreshEntryPoints.contains(entryPoint),
+      'refreshForEntryPoint: $entryPoint not supported '
+      '(allowed: $_kSupportedRefreshEntryPoints)',
     );
     final budget = timeBudgetMin ?? await getPersistedTimeBudgetMin();
     await _runRequest(

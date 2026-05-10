@@ -1,9 +1,16 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import '../launchers/yoga_session_adapter.dart';
+import '../models/suggested_session.dart';
 import '../models/yoga_models.dart';
 import '../services/api_service.dart';
+import '../services/yoga_service.dart';
 
 class YogaSessionProvider extends ChangeNotifier {
+  final YogaService _yogaService;
+
+  YogaSessionProvider(ApiService api) : _yogaService = YogaService(api);
+
   // Session data
   List<YogaPose> _poses = [];
   int _currentIndex = 0;
@@ -214,6 +221,45 @@ class YogaSessionProvider extends ChangeNotifier {
     _originalSession = null;
     _sessionLogged = false;
     notifyListeners();
+  }
+
+  /// S14-T3: hydrate engine pose ids → run adapter → start session.
+  ///
+  /// Strict-mode (Q3 lock): any failure throws [StateError]; the launcher's
+  /// snackbar wrapper translates user-facing copy. The player must not open
+  /// with placeholder pose names — partial hydration is rejected server-side
+  /// (`/api/yoga/poses-by-ids` returns 404 if any id is missing).
+  Future<void> loadFromEngineSession(SuggestedSession session) async {
+    final ids = <int>{};
+    for (final phase in session.phases) {
+      for (final item in phase.items) {
+        final id = item.contentId;
+        if (id != null) ids.add(id);
+      }
+    }
+    if (ids.isEmpty) {
+      throw StateError('yoga session has no poses');
+    }
+
+    final List<YogaPoseDetails> details;
+    try {
+      details = await _yogaService.fetchPosesByIds(ids.toList());
+    } on ApiException catch (e) {
+      throw StateError('failed to hydrate poses: ${e.message}');
+    } catch (e) {
+      throw StateError('hydration network error: $e');
+    }
+    if (details.length != ids.length) {
+      throw StateError(
+        'hydration incomplete: expected ${ids.length}, got ${details.length}',
+      );
+    }
+    final byId = {for (final d in details) d.id: d};
+    final yogaSession = yogaSessionFromEngine(
+      session: session,
+      hydratedById: byId,
+    );
+    startSession(yogaSession);
   }
 
   @override

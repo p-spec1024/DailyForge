@@ -1,3 +1,4 @@
+import '../launchers/yoga_session_adapter.dart';
 import '../models/yoga_models.dart';
 import 'api_service.dart';
 
@@ -5,6 +6,23 @@ class YogaService {
   final ApiService _api;
 
   YogaService(this._api);
+
+  /// S14-T3: hydrate yoga pose details for a list of pose ids. Used by the
+  /// engine→player adapter to fill in name/description/etc. that the engine
+  /// doesn't carry. Strict-mode: server returns 404 if any id is missing,
+  /// which surfaces here as an [ApiException]. Caller must block navigation
+  /// on any failure (Q3 lock).
+  Future<List<YogaPoseDetails>> fetchPosesByIds(List<int> ids) async {
+    final raw = await _api.post('/yoga/poses-by-ids', {'ids': ids});
+    final poses = raw['poses'] as List?;
+    if (poses == null) {
+      throw ApiException(500, 'No poses array in response');
+    }
+    return poses
+        .whereType<Map<String, dynamic>>()
+        .map(YogaPoseDetails.fromJson)
+        .toList();
+  }
 
   Future<YogaSession> generateSession({
     required String type,

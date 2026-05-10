@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../models/suggested_session.dart';
 import '../providers/cross_pillar_session_provider.dart';
 import '../providers/workout_session_provider.dart';
+import '../providers/yoga_session_provider.dart';
 import '../services/api_service.dart';
 import '../services/storage_service.dart';
 
@@ -12,10 +13,11 @@ import '../services/storage_service.dart';
 ///
 /// S14-T1 supports `pillar_pure` strength end-to-end.
 /// S14-T2 wires `cross_pillar` to the 5-phase orchestrator.
-/// State-focus and pillar-pure non-strength still throw [UnimplementedError]
-/// with an explicit sprint hand-off message; the dispatch-level catch
-/// surfaces them as a user-facing snackbar so the gap shows up loudly
-/// instead of silently no-op'ing or crashing the call site.
+/// S14-T3 wires `pillar_pure` yoga via the engine→player adapter.
+/// State-focus still throws [UnimplementedError] with an explicit sprint
+/// hand-off message; the dispatch-level catch surfaces it as a user-facing
+/// snackbar so the gap shows up loudly instead of silently no-op'ing or
+/// crashing the call site.
 ///
 /// Convention: pre-seed pattern. The launcher hydrates the relevant provider
 /// before calling [GoRouter.go], relying on the player page's `isActive` /
@@ -59,20 +61,54 @@ class SessionLauncher {
     }
   }
 
+  /// S14-T3: dispatch by `content_type` of the main phase's first item.
+  /// Yoga sessions carry 3 phases (warmup/main/cooldown); strength sessions
+  /// carry 1 (main). Per-pillar branches assert their own phase invariants.
   static Future<void> _launchPillarPure(
+    BuildContext context,
+    SuggestedSession session,
+  ) async {
+    if (session.phases.isEmpty) {
+      throw StateError('pillar_pure session has no phases');
+    }
+    final mainPhase = session.phases.firstWhere(
+      (p) => p.phase == 'main',
+      orElse: () => session.phases.first,
+    );
+    if (mainPhase.items.isEmpty) {
+      throw StateError('pillar_pure session has empty main phase');
+    }
+    final pillar = mainPhase.items.first.contentType;
+    switch (pillar) {
+      case 'strength':
+        return _launchPillarPureStrength(context, session);
+      case 'yoga':
+        return _launchPillarPureYoga(context, session);
+      case 'breathwork':
+        throw UnimplementedError(
+          'pillar_pure breathwork shape — unexpected from engine; report.',
+        );
+      default:
+        throw StateError(
+          'unknown content_type in pillar_pure session: $pillar',
+        );
+    }
+  }
+
+  static Future<void> _launchPillarPureStrength(
     BuildContext context,
     SuggestedSession session,
   ) async {
     if (session.phases.length != 1) {
       throw StateError(
-        'pillar_pure expected 1 phase, got ${session.phases.length}',
+        'pillar_pure strength expected 1 phase, got ${session.phases.length}',
       );
     }
     final phase = session.phases.first;
     final allStrength = phase.items.every((i) => i.contentType == 'strength');
     if (!allStrength) {
-      throw UnimplementedError(
-        'pillar_pure non-strength (yoga/breathwork) lands in S14-T3.',
+      throw StateError(
+        'pillar_pure strength session has non-strength items',
       );
     }
 
@@ -120,6 +156,34 @@ class SessionLauncher {
 
     if (!context.mounted) return;
     context.go('/workout');
+  }
+
+  /// S14-T3: hydrate yoga poses, run engine→YogaSession adapter, navigate.
+  /// Strict-mode (Q3 lock): any [StateError] from hydration/adapter blocks
+  /// navigation and surfaces a friendly snackbar — the player never opens
+  /// with placeholder names.
+  static Future<void> _launchPillarPureYoga(
+    BuildContext context,
+    SuggestedSession session,
+  ) async {
+    final provider = context.read<YogaSessionProvider>();
+    try {
+      await provider.loadFromEngineSession(session);
+    } on StateError catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_friendlyYogaError(e))),
+      );
+      return;
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Couldn't load today's yoga.")),
+      );
+      return;
+    }
+    if (!context.mounted) return;
+    context.go('/yoga/session');
   }
 
   static Future<void> _launchCrossPillar(
@@ -203,6 +267,20 @@ class SessionLauncher {
         ],
       ),
     );
+  }
+
+  /// S14-T3: translates yoga adapter [StateError] messages into user-facing
+  /// snackbar copy. The adapter is strict (Q3 lock) — any contract violation
+  /// throws; we don't want raw Dart errors reaching the user.
+  static String _friendlyYogaError(StateError e) {
+    final msg = e.message;
+    if (msg.contains('hydrat')) {
+      return "Couldn't load today's yoga — tap to retry.";
+    }
+    if (msg.contains('focus_slug')) {
+      return 'Could not start session — try picking a focus again.';
+    }
+    return "Couldn't load today's yoga.";
   }
 
   /// Maps server error codes (carried in [ApiException.message]) to

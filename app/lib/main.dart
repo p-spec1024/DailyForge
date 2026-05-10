@@ -80,7 +80,7 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
     _settingsProvider = SettingsProvider(api);
     _breathworkProvider = BreathworkProvider(api);
     _yogaProvider = YogaProvider(api);
-    _yogaSessionProvider = YogaSessionProvider();
+    _yogaSessionProvider = YogaSessionProvider(api);
     _calendarProvider = CalendarProvider(api);
     _progressProvider = ProgressProvider(api);
     _bodyMeasurementsProvider = BodyMeasurementsProvider(api);
