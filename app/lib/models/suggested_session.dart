@@ -52,6 +52,13 @@ class SuggestedSession {
       metadata: SessionMetadata.fromJson(rawMetadata),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'session_shape': sessionShape,
+        'phases': phases.map((p) => p.toJson()).toList(),
+        'warnings': warnings,
+        'metadata': metadata.toJson(),
+      };
 }
 
 class SessionPhase {
@@ -78,6 +85,11 @@ class SessionPhase {
       items: _strictMap(rawItems, 'items', SessionItem.fromJson),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'phase': phase,
+        'items': items.map((i) => i.toJson()).toList(),
+      };
 }
 
 class SessionItem {
@@ -154,6 +166,16 @@ class SessionItem {
       reps: reps == null ? null : (reps as num).toInt(),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'content_type': contentType,
+        'content_id': contentId,
+        'name': name,
+        'duration_minutes': durationMinutes,
+        'tier_badge': tierBadge,
+        'sets': sets,
+        'reps': reps,
+      };
 }
 
 class SessionMetadata {
@@ -242,6 +264,15 @@ class SessionMetadata {
       focusSlug: focusSlugRaw as String?,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'estimated_total_min': estimatedTotalMin,
+        'user_levels': userLevels,
+        'source': source,
+        'is_endless': isEndless,
+        'bracket': bracket,
+        'focus_slug': focusSlug,
+      };
 }
 
 List<T> _strictMap<T>(

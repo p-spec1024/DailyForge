@@ -6,6 +6,7 @@ import 'config/routes.dart';
 import 'providers/auth_provider.dart';
 import 'providers/body_map_provider.dart';
 import 'providers/breathwork_provider.dart';
+import 'providers/cross_pillar_session_provider.dart';
 import 'providers/dashboard_provider.dart';
 import 'providers/home_provider.dart';
 import 'providers/profile_provider.dart';
@@ -57,6 +58,7 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
   late final SuggestProvider _suggestProvider;
   late final FocusDurationProvider _focusDurationProvider;
   late final OnboardingProvider _onboardingProvider;
+  late final CrossPillarSessionProvider _crossPillarSessionProvider;
   late final GoRouter _router;
 
   @override
@@ -87,6 +89,7 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
     _suggestProvider = SuggestProvider(api, storage);
     _focusDurationProvider = FocusDurationProvider(api);
     _onboardingProvider = OnboardingProvider(OnboardingService(api));
+    _crossPillarSessionProvider = CrossPillarSessionProvider();
 
     // Reset user-scoped caches when auth is invalidated.
     _authProvider.addListener(_handleAuthChanged);
@@ -132,6 +135,7 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
     _suggestProvider.dispose();
     _focusDurationProvider.dispose();
     _onboardingProvider.dispose();
+    _crossPillarSessionProvider.dispose();
     super.dispose();
   }
 
@@ -164,6 +168,7 @@ class _DailyForgeAppState extends State<DailyForgeApp> {
         ChangeNotifierProvider<SuggestProvider>.value(value: _suggestProvider),
         ChangeNotifierProvider<FocusDurationProvider>.value(value: _focusDurationProvider),
         ChangeNotifierProvider<OnboardingProvider>.value(value: _onboardingProvider),
+        ChangeNotifierProvider<CrossPillarSessionProvider>.value(value: _crossPillarSessionProvider),
       ],
       child: MaterialApp.router(
         title: 'DailyForge',

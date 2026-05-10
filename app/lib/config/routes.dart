@@ -12,6 +12,7 @@ import '../pages/breathwork/breathwork_timer_page.dart';
 import '../pages/profile/profile_page.dart';
 import '../pages/progress/exercise_history_page.dart';
 import '../pages/progress/exercise_progress_page.dart';
+import '../pages/session/five_phase_session_page.dart';
 import '../pages/workout_page.dart';
 import '../pages/yoga/yoga_session_page.dart';
 import '../pages/yoga/yoga_complete_page.dart';
@@ -99,6 +100,10 @@ GoRouter createRouter(AuthProvider authProvider) {
             resumeData: extra?['resumeData'] as Map<String, dynamic>?,
           );
         },
+      ),
+      GoRoute(
+        path: '/session/cross-pillar',
+        builder: (context, state) => const FivePhaseSessionPage(),
       ),
       GoRoute(
         path: '/exercise-history',

@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
+import '../../launchers/session_launcher.dart';
 import '../../models/focus_area.dart';
 import '../../providers/home_provider.dart';
 import '../../providers/suggest_provider.dart';
@@ -127,21 +128,14 @@ class _HomePageState extends State<HomePage> {
     await _onChipTap(focus);
   }
 
-  void _onStart() {
-    // S14-T1 reroute (Amendment 1): home Start does not launch yet — home
-    // produces `cross_pillar` sessions, which T1's launcher does not handle.
-    // S14-T2 promotes cross_pillar and wires home Start to the launcher.
-    // Until then, point users at the Strength tab where T1's strength_only
-    // path is wired.
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          "Strength workouts available now from the Strength tab. "
-          "Full home flow lands in S14-T2.",
-        ),
-        duration: Duration(seconds: 3),
-      ),
-    );
+  void _onStart() async {
+    final suggest = context.read<SuggestProvider>();
+    final session = suggest.currentSession;
+    if (session == null) return;
+    // Anomaly #10 (T1): the launcher reads focus_slug from
+    // session.metadata.focusSlug, NOT from suggest.currentFocusSlug, so a
+    // chip-tap that races with a Start tap can't ship the wrong slug.
+    await SessionLauncher.launch(context, session);
   }
 
   Future<void> _refreshAll() async {
