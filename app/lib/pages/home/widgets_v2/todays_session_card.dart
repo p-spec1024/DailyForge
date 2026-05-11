@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../models/focus_area.dart';
 import '../../../models/suggested_session.dart';
 import '../../../services/suggest_service.dart';
+import '../../../utils/phase_label.dart';
 import '_tokens_v2.dart';
 
 /// Hero card on the home page. Renders the engine's pick for the currently
@@ -61,7 +62,12 @@ class _LoadedCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final phaseSummary = session.phases.map((p) => _humanPhase(p.phase)).join(' → ');
+    final phaseSummary = session.phases
+        .map((p) => phaseDisplayLabel(
+              p.phase,
+              contentType: p.items.isNotEmpty ? p.items.first.contentType : null,
+            ))
+        .join(' → ');
     final mins = session.metadata.estimatedTotalMin;
     final title = focus == null
         ? '$mins min session'
@@ -163,33 +169,6 @@ class _LoadedCard extends StatelessWidget {
     return null;
   }
 
-  String _humanPhase(String phase) {
-    switch (phase) {
-      case 'warmup':
-      case 'warm_up':
-      case 'yoga_warmup':
-        return 'Yoga warm';
-      case 'main':
-      case 'strength':
-      case 'practice':
-        return 'Strength';
-      case 'cooldown':
-      case 'breath':
-      case 'breathwork':
-      case 'closing':
-        return 'Breath';
-      case 'centering':
-        return 'Centering';
-      case 'integration':
-      case 'reflection':
-        return 'Reflection';
-      default:
-        return phase
-            .split('_')
-            .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
-            .join(' ');
-    }
-  }
 }
 
 class _FocusTypePill extends StatelessWidget {

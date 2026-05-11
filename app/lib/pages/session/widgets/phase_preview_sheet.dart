@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../models/suggested_session.dart';
 import '../../../providers/cross_pillar_session_provider.dart';
+import '../../../utils/phase_label.dart';
 
 /// Bottom sheet listing every phase with its status; reachable from the
 /// app-bar overflow on [FivePhaseSessionPage]. Read-only — tapping a row
@@ -43,7 +44,12 @@ class PhasePreviewSheet extends StatelessWidget {
                     final isCurrent = i == currentIndex;
                     return ListTile(
                       leading: _leadingIcon(status, isCurrent: isCurrent),
-                      title: Text(_phaseLabel(phase.phase)),
+                      title: Text(phaseDisplayLabel(
+                        phase.phase,
+                        contentType: phase.items.isNotEmpty
+                            ? phase.items.first.contentType
+                            : null,
+                      )),
                       subtitle: Text('${phase.items.length} item(s)'),
                       trailing: isCurrent
                           ? Text(
@@ -82,20 +88,4 @@ class PhasePreviewSheet extends StatelessWidget {
     }
   }
 
-  String _phaseLabel(String phase) {
-    switch (phase) {
-      case 'bookend_open':
-        return 'Opening Breath';
-      case 'warmup':
-        return 'Warm-up';
-      case 'main':
-        return 'Main Work';
-      case 'cooldown':
-        return 'Cool-down';
-      case 'bookend_close':
-        return 'Closing Breath';
-      default:
-        return phase;
-    }
-  }
 }
