@@ -318,6 +318,20 @@ CREATE TABLE IF NOT EXISTS user_pillar_levels (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(user_id, pillar)
 );
+
+-- S14-T4: Cross-pillar session header. One row per orchestrator session;
+-- per-pillar phase rows in sessions / breathwork_sessions carry a FK back
+-- via cross_pillar_session_id. See AMENDMENT-1 D3 for the dual-table FK.
+CREATE TABLE IF NOT EXISTS cross_pillar_sessions (
+  id               SERIAL PRIMARY KEY,
+  user_id          INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  focus_slug       VARCHAR(40) NOT NULL,
+  started_at       TIMESTAMPTZ NOT NULL,
+  completed_at     TIMESTAMPTZ,
+  phases_completed INT NOT NULL DEFAULT 0,
+  total_phases     INT NOT NULL,
+  end_intent       VARCHAR(20) CHECK (end_intent IN ('completed', 'end_early', 'abandoned'))
+);
 `;
 
 const s11t4Functions = `
@@ -705,6 +719,15 @@ ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS advanced_duration_max
 -- (sessions.focus_slug was added by S12-T1 directly to prod DB out-of-band;
 --  not duplicated here. T1 schema reconciliation tracked separately.)
 ALTER TABLE breathwork_sessions ADD COLUMN IF NOT EXISTS focus_slug VARCHAR(40);
+
+-- S14-T4: cross-pillar FK on per-pillar session rows. The dual ALTER (sessions
+-- AND breathwork_sessions) is required because breathwork uses its own table
+-- (see AMENDMENT-1 D3). The new POST /api/cross-pillar-sessions endpoint fans
+-- the FK update across both tables in one transaction.
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS cross_pillar_session_id INT REFERENCES cross_pillar_sessions(id);
+ALTER TABLE breathwork_sessions
+  ADD COLUMN IF NOT EXISTS cross_pillar_session_id INT REFERENCES cross_pillar_sessions(id);
 `;
 
 const indexes = `
@@ -765,6 +788,16 @@ CREATE INDEX IF NOT EXISTS idx_upl_user
 CREATE INDEX IF NOT EXISTS idx_breathwork_sessions_user_focus_created
   ON breathwork_sessions(user_id, focus_slug, created_at)
   WHERE completed = true;
+
+-- S14-T4: cross-pillar indexes.
+CREATE INDEX IF NOT EXISTS idx_cps_user
+  ON cross_pillar_sessions(user_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_cps
+  ON sessions(cross_pillar_session_id)
+  WHERE cross_pillar_session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_breathwork_sessions_cps
+  ON breathwork_sessions(cross_pillar_session_id)
+  WHERE cross_pillar_session_id IS NOT NULL;
 `;
 
 async function migrate() {

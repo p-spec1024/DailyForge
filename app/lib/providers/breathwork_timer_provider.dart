@@ -40,6 +40,39 @@ class BreathworkTimerProvider extends ChangeNotifier {
 
   Timer? _timer;
 
+  /// S14-T4: server-side `breathwork_sessions.id` after _logSession resolves.
+  /// Null until logging completes (or if logging fails). Embedded mode
+  /// reads this for cross_pillar FK linkage.
+  int? _loggedSessionId;
+  int? get loggedSessionId => _loggedSessionId;
+
+  /// S14-T4: the in-flight logging Future. Embedded players await this via
+  /// [awaitLogging] before emitting onPhaseComplete so the FK id is ready.
+  Future<void>? _loggingFuture;
+
+  /// Awaits the in-flight breathwork_sessions write (if any) and returns
+  /// the logged id. Idempotent: safe to call after completion.
+  Future<int?> awaitLogging() async {
+    if (_loggingFuture != null) {
+      try {
+        await _loggingFuture;
+      } catch (_) {
+        // _logSession already swallows errors; this catch is defensive.
+      }
+    }
+    return _loggedSessionId;
+  }
+
+  /// S14-T4: optional hard duration cap in seconds. When set and reached
+  /// mid-protocol, the timer transitions to completed (logging the rounds
+  /// actually achieved). Used by embedded mode to honor engine
+  /// `duration_minutes`. Null = no cap (standalone / full protocol).
+  int? _durationCapSeconds;
+
+  /// S14-T4: focus_slug to thread through the breathwork_sessions write.
+  /// Embedded mode passes the engine-supplied slug; standalone is null.
+  String? _focusSlug;
+
   // Getters
   BreathworkTechnique? get technique => _technique;
   TimerState get state => _state;
@@ -101,8 +134,14 @@ class BreathworkTimerProvider extends ChangeNotifier {
     return ((d - _phaseSecondsRemaining) / d).clamp(0.0, 1.0);
   }
 
-  void setTechnique(BreathworkTechnique technique) {
+  void setTechnique(
+    BreathworkTechnique technique, {
+    int? durationCapSeconds,
+    String? focusSlug,
+  }) {
     _technique = technique;
+    _durationCapSeconds = durationCapSeconds;
+    _focusSlug = focusSlug;
     final protocol = technique.protocol;
     final rawPhases = (protocol['phases'] as List?) ?? const [];
     _phases = rawPhases
@@ -150,7 +189,7 @@ class BreathworkTimerProvider extends ChangeNotifier {
   void stop() {
     _timer?.cancel();
     _state = TimerState.completed;
-    _logSession(completed: false);
+    _loggingFuture = _logSession(completed: false);
     notifyListeners();
   }
 
@@ -163,6 +202,12 @@ class BreathworkTimerProvider extends ChangeNotifier {
     if (_state != TimerState.running) return;
     _totalElapsedSeconds += 1;
     _phaseSecondsRemaining -= 1;
+    // S14-T4: duration cap (embedded mode honors engine's phase budget).
+    final cap = _durationCapSeconds;
+    if (cap != null && _totalElapsedSeconds >= cap) {
+      _completeSession();
+      return;
+    }
     if (_phaseSecondsRemaining <= 0) {
       _advancePhase();
     }
@@ -189,7 +234,7 @@ class BreathworkTimerProvider extends ChangeNotifier {
     _timer?.cancel();
     _state = TimerState.completed;
     _phaseSecondsRemaining = 0;
-    _logSession(completed: true);
+    _loggingFuture = _logSession(completed: true);
   }
 
   Future<void> _logSession({required bool completed}) async {
@@ -197,11 +242,12 @@ class BreathworkTimerProvider extends ChangeNotifier {
     _sessionLogged = true;
     final rounds = completed ? _totalRounds : (_currentRound - 1).clamp(0, _totalRounds);
     try {
-      await _service.logSession(
+      _loggedSessionId = await _service.logSession(
         techniqueId: _technique!.id,
         durationSeconds: _totalElapsedSeconds,
         roundsCompleted: rounds,
         completed: completed,
+        focusSlug: _focusSlug,
       );
     } catch (_) {
       // Silently ignore — session completion shouldn't block UI.

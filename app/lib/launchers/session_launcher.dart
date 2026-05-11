@@ -209,21 +209,39 @@ class SessionLauncher {
     final existing = await provider.peekFromStorage(storage);
     if (!context.mounted) return;
     if (existing != null && _isFresh(existing.startedAt)) {
-      final choice = await _showResumeDialog(context, existing);
-      if (!context.mounted) return;
-      if (choice == _ResumeChoice.resume) {
-        await provider.resumeFromStorage(storage);
-        if (!context.mounted) return;
-        context.go('/session/cross-pillar');
-        return;
-      } else if (choice == _ResumeChoice.discard) {
-        await provider.discard(storage);
-        if (!context.mounted) return;
-        // Fall through to the fresh-start path below.
-      } else {
-        // null — user dismissed. Abort launch; leave any in-progress
-        // session as-is so a later attempt can still resume it.
-        return;
+      // S14-T4 quit-intent semantics (spec §6):
+      //   null      — intent (a) app killed; auto-resume silently
+      //   'pause'   — intent (b) explicit save-and-quit; prompt to resume
+      //   'end_early' — defensive: blob shouldn't exist after end_early
+      //                 cleared storage; treat as discard.
+      switch (existing.quitIntent) {
+        case 'pause':
+          final choice = await _showResumeDialog(context, existing);
+          if (!context.mounted) return;
+          if (choice == _ResumeChoice.resume) {
+            await provider.resumeFromStorage(storage);
+            if (!context.mounted) return;
+            context.go('/session/cross-pillar');
+            return;
+          } else if (choice == _ResumeChoice.discard) {
+            await provider.discard(storage);
+            if (!context.mounted) return;
+            // Fall through to fresh-start path below.
+          } else {
+            return; // User dismissed — leave the saved session intact.
+          }
+          break;
+        case 'end_early':
+          await provider.discard(storage);
+          if (!context.mounted) return;
+          // Fall through to fresh-start path below.
+          break;
+        case null:
+          // App-killed path — auto-resume silently, no prompt.
+          await provider.resumeFromStorage(storage);
+          if (!context.mounted) return;
+          context.go('/session/cross-pillar');
+          return;
       }
     }
 

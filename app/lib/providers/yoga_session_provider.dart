@@ -186,12 +186,14 @@ class YogaSessionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Log session to API
-  Future<void> logSession(ApiService api) async {
-    if (_sessionLogged || _originalSession == null) return;
+  // Log session to API. Returns the server-side `sessions.id` on success so
+  // callers (S14-T4 embedded mode) can FK it on `cross_pillar_sessions`.
+  // null when not seeded, already logged, or on transport failure.
+  Future<int?> logSession(ApiService api, {String? focusSlug}) async {
+    if (_sessionLogged || _originalSession == null) return null;
     _sessionLogged = true;
     try {
-      await api.post('/yoga/session', {
+      final body = <String, dynamic>{
         'type': _originalSession!.type,
         'level': _originalSession!.level,
         'duration': _originalSession!.duration,
@@ -200,10 +202,19 @@ class YogaSessionProvider extends ChangeNotifier {
         'completed_poses': _posesCompleted,
         'skipped_poses': _skippedPoseIds,
         'total_duration_seconds': elapsedSeconds,
-      });
+      };
+      if (focusSlug != null && focusSlug.isNotEmpty) {
+        body['focus_slug'] = focusSlug;
+      }
+      final response = await api.post('/yoga/session', body);
+      final id = response['id'];
+      if (id is int) return id;
+      if (id is num) return id.toInt();
+      return null;
     } catch (e) {
       debugPrint('[YogaSessionProvider] logSession error: $e');
       // Don't block UI on logging failure
+      return null;
     }
   }
 

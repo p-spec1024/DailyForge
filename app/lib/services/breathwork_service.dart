@@ -23,17 +23,29 @@ class BreathworkService {
     return BreathworkTechnique.fromJson(raw);
   }
 
-  Future<void> logSession({
+  /// Returns the server-side `breathwork_sessions.id` on success so callers
+  /// (S14-T4 embedded mode) can FK it on `cross_pillar_sessions`. null on
+  /// any transport failure or malformed response.
+  Future<int?> logSession({
     required int techniqueId,
     required int durationSeconds,
     required int roundsCompleted,
     required bool completed,
+    String? focusSlug,
   }) async {
-    await _api.post(ApiConfig.breathworkSessions, {
+    final body = <String, dynamic>{
       'technique_id': techniqueId,
       'duration_seconds': durationSeconds,
       'rounds_completed': roundsCompleted,
       'completed': completed,
-    });
+    };
+    if (focusSlug != null && focusSlug.isNotEmpty) {
+      body['focus_slug'] = focusSlug;
+    }
+    final response = await _api.post(ApiConfig.breathworkSessions, body);
+    final id = response['id'];
+    if (id is int) return id;
+    if (id is num) return id.toInt();
+    return null;
   }
 }

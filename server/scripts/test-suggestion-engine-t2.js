@@ -3185,6 +3185,196 @@ async function main() {
     }
   }
 
+  // ── Phase 3k: T4 CROSS-PILLAR SESSIONS BLOCK (S14-T4) ────────────────
+  // Exercises POST /api/cross-pillar-sessions. Verifies happy-path FK fan
+  // across BOTH sessions and breathwork_sessions (AMENDMENT-1 D3 dual-FK).
+  // Uses inline sentinel pattern (T1/T3 precedent — the originally
+  // referenced smoke-fixtures.mjs helper does not exist).
+  // Sentinels: sessions.notes = 's14-t4-smoke-fixture',
+  //            breathwork_sessions.focus_slug = 's14_t4_smoke',
+  //            cross_pillar_sessions.focus_slug = 's14_t4_smoke'.
+  {
+    console.log('\n=== T4 CROSS-PILLAR SESSIONS BLOCK ===');
+    if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET not set');
+
+    const CPS_SENTINEL_NOTES = 's14-t4-smoke-fixture';
+    const CPS_SENTINEL_FOCUS = 's14_t4_smoke';
+
+    // Pre-clean from any previous aborted run. Order matters: child rows
+    // first (sessions / breathwork_sessions FK back to cross_pillar_sessions),
+    // then cross_pillar_sessions.
+    await pool.query(`DELETE FROM sessions WHERE notes = $1`, [CPS_SENTINEL_NOTES]);
+    await pool.query(
+      `DELETE FROM breathwork_sessions WHERE focus_slug = $1`,
+      [CPS_SENTINEL_FOCUS]
+    );
+    await pool.query(
+      `DELETE FROM cross_pillar_sessions WHERE focus_slug = $1`,
+      [CPS_SENTINEL_FOCUS]
+    );
+
+    // Need one technique id for breathwork_sessions FK; reuse any green-tier.
+    const { rows: btRows } = await pool.query(
+      `SELECT id FROM breathwork_techniques WHERE safety_level = 'green' LIMIT 1`
+    );
+    if (btRows.length === 0) {
+      throw new Error('CPS block: no green-tier breathwork technique available');
+    }
+    const bwTechniqueId = btRows[0].id;
+
+    const cpsApp = createApp();
+    const cpsServer = await new Promise((resolve) => {
+      const s = cpsApp.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const cpsPort = cpsServer.address().port;
+    const cpsBase = `http://127.0.0.1:${cpsPort}`;
+    const cpsToken = jwt.sign(
+      { id: user.id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '5m' }
+    );
+    const cpsH = { 'Content-Type': 'application/json', Authorization: `Bearer ${cpsToken}` };
+
+    async function cpsPost(body, opts = {}) {
+      return await fetch(`${cpsBase}/api/cross-pillar-sessions`, {
+        method: 'POST',
+        headers: opts.noAuth ? { 'Content-Type': 'application/json' } : cpsH,
+        body: JSON.stringify(body),
+      });
+    }
+
+    async function cpsCleanup() {
+      await pool.query(`DELETE FROM sessions WHERE notes = $1`, [CPS_SENTINEL_NOTES]);
+      await pool.query(
+        `DELETE FROM breathwork_sessions WHERE focus_slug = $1`,
+        [CPS_SENTINEL_FOCUS]
+      );
+      await pool.query(
+        `DELETE FROM cross_pillar_sessions WHERE focus_slug = $1`,
+        [CPS_SENTINEL_FOCUS]
+      );
+    }
+    const cpsAbortHandler = async () => {
+      try { await cpsCleanup(); } catch (e) { console.error('[CPS abort cleanup]', e); }
+      try { cpsServer.close(); } catch {}
+      process.exit(130);
+    };
+    process.once('SIGINT', cpsAbortHandler);
+    process.once('SIGTERM', cpsAbortHandler);
+
+    try {
+      // Seed two pre-existing per-pillar session rows (one in `sessions` for
+      // the strength/yoga side, one in `breathwork_sessions` for the breath
+      // side) tagged with the sentinel so cleanup catches them.
+      const { rows: sRows } = await pool.query(
+        `INSERT INTO sessions (user_id, type, date, started_at, completed_at,
+                               completed, duration, focus_slug, notes)
+         VALUES ($1, 'yoga', CURRENT_DATE, NOW() - INTERVAL '10 minutes', NOW(),
+                 true, 600, $2, $3)
+         RETURNING id`,
+        [user.id, CPS_SENTINEL_FOCUS, CPS_SENTINEL_NOTES]
+      );
+      const seedSessionId = sRows[0].id;
+
+      const { rows: bRows } = await pool.query(
+        `INSERT INTO breathwork_sessions (user_id, technique_id, duration_seconds,
+                                          rounds_completed, completed, focus_slug)
+         VALUES ($1, $2, 300, 5, true, $3)
+         RETURNING id`,
+        [user.id, bwTechniqueId, CPS_SENTINEL_FOCUS]
+      );
+      const seedBreathId = bRows[0].id;
+
+      // T4/A — happy path: valid POST creates cross_pillar_sessions row and
+      // fans FK to both sessions + breathwork_sessions.
+      const happyBody = {
+        focus_slug: CPS_SENTINEL_FOCUS,
+        started_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        completed_at: new Date().toISOString(),
+        phases_completed: 2,
+        total_phases: 5,
+        end_intent: 'completed',
+        strength_yoga_session_ids: [seedSessionId],
+        breathwork_session_ids: [seedBreathId],
+      };
+      const r = await cpsPost(happyBody);
+      check('T4/A happy: status 201', r.status === 201, `got ${r.status}`);
+      const body = await r.json();
+      check('T4/A happy: returns positive integer id',
+        Number.isInteger(body?.id) && body.id > 0, `got ${body?.id}`);
+
+      // T4/B — row in cross_pillar_sessions has expected fields.
+      const { rows: cpsRows } = await pool.query(
+        `SELECT focus_slug, phases_completed, total_phases, end_intent
+           FROM cross_pillar_sessions WHERE id = $1`,
+        [body.id]
+      );
+      check('T4/B cross_pillar_sessions row populated',
+        cpsRows.length === 1
+          && cpsRows[0].focus_slug === CPS_SENTINEL_FOCUS
+          && cpsRows[0].phases_completed === 2
+          && cpsRows[0].total_phases === 5
+          && cpsRows[0].end_intent === 'completed',
+        JSON.stringify(cpsRows[0] || null));
+
+      // T4/C — sessions FK populated.
+      const { rows: sCheck } = await pool.query(
+        `SELECT cross_pillar_session_id FROM sessions WHERE id = $1`,
+        [seedSessionId]
+      );
+      check('T4/C sessions.cross_pillar_session_id set',
+        sCheck[0]?.cross_pillar_session_id === body.id,
+        `got ${sCheck[0]?.cross_pillar_session_id}`);
+
+      // T4/D — breathwork_sessions FK populated.
+      const { rows: bCheck } = await pool.query(
+        `SELECT cross_pillar_session_id FROM breathwork_sessions WHERE id = $1`,
+        [seedBreathId]
+      );
+      check('T4/D breathwork_sessions.cross_pillar_session_id set',
+        bCheck[0]?.cross_pillar_session_id === body.id,
+        `got ${bCheck[0]?.cross_pillar_session_id}`);
+
+      // T4/E — validation: invalid_focus_slug.
+      {
+        const r2 = await cpsPost({ ...happyBody, focus_slug: 'X' });
+        const b2 = await r2.json();
+        check('T4/E invalid focus_slug → 400 invalid_focus_slug',
+          r2.status === 400 && b2.error === 'invalid_focus_slug',
+          `got ${r2.status} ${b2.error}`);
+      }
+
+      // T4/F — validation: invalid_end_intent.
+      {
+        const r2 = await cpsPost({ ...happyBody, end_intent: 'bogus' });
+        const b2 = await r2.json();
+        check('T4/F invalid end_intent → 400 invalid_end_intent',
+          r2.status === 400 && b2.error === 'invalid_end_intent',
+          `got ${r2.status} ${b2.error}`);
+      }
+
+      // T4/G — validation: phases_completed > total_phases.
+      {
+        const r2 = await cpsPost({ ...happyBody, phases_completed: 6 });
+        const b2 = await r2.json();
+        check('T4/G phases_completed>total → 400 phases_completed_exceeds_total',
+          r2.status === 400 && b2.error === 'phases_completed_exceeds_total',
+          `got ${r2.status} ${b2.error}`);
+      }
+
+      // T4/H — no auth → 401.
+      {
+        const r2 = await cpsPost(happyBody, { noAuth: true });
+        check('T4/H no auth → 401', r2.status === 401, `got ${r2.status}`);
+      }
+    } finally {
+      await cpsCleanup();
+      try { cpsServer.close(); } catch {}
+      process.removeListener('SIGINT', cpsAbortHandler);
+      process.removeListener('SIGTERM', cpsAbortHandler);
+    }
+  }
+
   // ── Phase 4: pretty-print sample sessions ────────────────────────────
   console.log('\n=== Sample: biceps / home / 30 ===');
   const sample = await generateSession({
