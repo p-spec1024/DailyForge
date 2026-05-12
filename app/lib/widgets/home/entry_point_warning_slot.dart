@@ -4,6 +4,25 @@ import 'package:provider/provider.dart';
 import '../../providers/suggest_provider.dart';
 import 'recency_warning_banner.dart';
 
+/// S14-T6 §6.4 / Commit 1.5 (retest #1): state-focus slugs the engine may
+/// surface as `alternative_focus_slug`. Used by the banner to route the
+/// "Switch to ..." action through [SuggestProvider.selectStateFocus]
+/// (bracket-based) instead of [selectBodyFocus] (time-budget-based) which
+/// the engine rejects for state focuses.
+const Set<String> _kStateFocusSlugs = <String>{
+  'calm',
+  'energize',
+  'focus',
+  'sleep',
+  'recover',
+};
+
+/// Default bracket when switching to a state-focus alternative. The engine
+/// returns `recover` today; '10-20' is a gentle middle ground that suits a
+/// recovery session without committing to a long sit. User can adjust via
+/// the picker after the switch.
+const String _kStateFocusDefaultBracket = '10-20';
+
 /// S14-T6 §6.4: tab-card-agnostic wrapper that decides whether to surface
 /// a [RecencyWarningBanner] above the Start button. Each entry point
 /// (home / yoga_tab / strength_tab) drops this widget in once and the
@@ -62,6 +81,15 @@ class _EntryPointWarningSlotState extends State<EntryPointWarningSlot> {
       message: message,
       alternativeFocusDisplayName: _displayName(altSlug),
       onSwitchToAlternative: () async {
+        // S14-T6 Commit 1.5 (retest #1): the engine emits state-focus slugs
+        // (today only 'recover') as the recency-overlap alternative. State
+        // focuses route through selectStateFocus(bracket), not the body-
+        // focus path — the engine rejects body-focus requests for state
+        // slugs and the user sees "Something went wrong" on first tap.
+        if (_kStateFocusSlugs.contains(altSlug)) {
+          await suggest.selectStateFocus(altSlug, _kStateFocusDefaultBracket);
+          return;
+        }
         if (widget.entryPoint == 'home') {
           await suggest.selectBodyFocus(altSlug,
               timeBudgetMin: widget.timeBudgetMin);

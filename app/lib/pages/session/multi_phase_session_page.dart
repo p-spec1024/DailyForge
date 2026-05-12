@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../config/theme.dart';
 import '../../models/completed_phase_snapshot.dart';
 import '../../models/suggested_session.dart';
 import '../../players/breathwork_player.dart';
@@ -48,6 +51,21 @@ class _MultiPhaseSessionPageState extends State<MultiPhaseSessionPage> {
   bool _showCountdown = false;
   String _nextPhaseLabel = '';
 
+  // S14-T6 Commit 1.5 (retest #1 follow-up) — once we've scheduled the
+  // navigation to /session/summary, suppress the defensive null-session
+  // bail in build() unconditionally. go_router keeps this page mounted
+  // during the route-transition animation; the provider's deferred
+  // complete() clears session state during that window, and the bail
+  // would otherwise fire `context.go('/home')` and pre-empt the summary.
+  // The Router will dispose this page when the transition finishes; the
+  // flag just keeps build() from racing it.
+  bool _navigatingToSummary = false;
+
+  // S14-T6 Commit 1.5 — top-anchored undo banner state. Held on the page
+  // so dispose() can clean up before the OverlayEntry leaks.
+  OverlayEntry? _undoEntry;
+  Timer? _undoTimer;
+
   @override
   void initState() {
     super.initState();
@@ -56,8 +74,105 @@ class _MultiPhaseSessionPageState extends State<MultiPhaseSessionPage> {
 
   @override
   void dispose() {
+    _dismissUndoBanner();
     WakelockService.disable();
     super.dispose();
+  }
+
+  /// S14-T6 Commit 1.5 — top-anchored, auto-dismissing undo banner.
+  ///
+  /// Replaces ScaffoldMessenger.showSnackBar (bottom-anchored, sometimes
+  /// failed to auto-dismiss because surrounding rebuilds re-emitted it).
+  /// Manual OverlayEntry + Timer gives us deterministic 3s dismissal and
+  /// the top placement spec §6.2 called for.
+  ///
+  /// Double-trigger safe: a second call dismisses the first banner before
+  /// showing the new one. Disposed cleanly via [_dismissUndoBanner] from
+  /// the page's dispose().
+  void _showUndoBanner({
+    required String phaseLabel,
+    required Future<void> Function() onUndo,
+  }) {
+    _dismissUndoBanner();
+    final overlay = Overlay.of(context, rootOverlay: true);
+    final entry = OverlayEntry(
+      builder: (ctx) {
+        return Positioned(
+          top: MediaQuery.of(ctx).padding.top + 8,
+          left: 16,
+          right: 16,
+          child: SafeArea(
+            bottom: false,
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.cardBorder),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.35),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '$phaseLabel skipped',
+                        style: const TextStyle(
+                          color: AppColors.primaryText,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        _dismissUndoBanner();
+                        await onUndo();
+                      },
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.gold,
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 14),
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text(
+                        'UNDO',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    overlay.insert(entry);
+    _undoEntry = entry;
+    _undoTimer = Timer(const Duration(seconds: 3), _dismissUndoBanner);
+  }
+
+  void _dismissUndoBanner() {
+    _undoTimer?.cancel();
+    _undoTimer = null;
+    final entry = _undoEntry;
+    _undoEntry = null;
+    if (entry != null && entry.mounted) {
+      entry.remove();
+    }
   }
 
   /// Reads the concrete subclass provider for the active session shape,
@@ -78,6 +193,14 @@ class _MultiPhaseSessionPageState extends State<MultiPhaseSessionPage> {
     final provider = _provider(context);
     final session = provider.session;
     if (session == null) {
+      // S14-T6 Commit 1.5: if we already scheduled a navigation to summary,
+      // do NOT bail home — the Router is mid-transition and the page is
+      // about to be disposed. Bailing here would race + pre-empt the
+      // summary nav (the original Bug 1 mechanism). Just render an empty
+      // frame while the Router finishes the transition.
+      if (_navigatingToSummary) {
+        return const SizedBox.shrink();
+      }
       // Defensive: launcher pre-seeds, so this shouldn't fire on a
       // normal entry. Bail home rather than crash.
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -235,9 +358,19 @@ class _MultiPhaseSessionPageState extends State<MultiPhaseSessionPage> {
     if (provider.allPhasesDone) {
       // S14-T6 §6.1: snapshot args BEFORE complete() resets _phaseResults.
       final args = _buildSummaryArgs(provider);
-      await provider.complete(storage: storage, api: api);
-      if (!context.mounted) return;
+      // S14-T6 Commit 1.5 (retest #1): set the suppress-bail flag BEFORE
+      // navigating. go_router keeps this page mounted through the route-
+      // transition animation; during that window provider.complete() runs
+      // and clears session state. The flag tells build() not to bail home
+      // when it sees the null session — the Router will dispose us.
+      // Without the flag, the bail wins the race (intermittently) and the
+      // summary flashes for ~50ms before being replaced by home.
+      _navigatingToSummary = true;
       context.go('/session/summary', extra: args);
+      // ignore: unawaited_futures — fire-and-forget. The page is gone from
+      // the tree once the transition completes; backend write errors are
+      // swallowed inside _writeMultiPhaseSessionRow.
+      provider.complete(storage: storage, api: api);
       return;
     }
     if (provider.useAutoAdvanceCountdown) {
@@ -282,34 +415,24 @@ class _MultiPhaseSessionPageState extends State<MultiPhaseSessionPage> {
     if (provider.allPhasesDone) {
       // Final-phase skip: skip the undo window and go straight to summary
       // (the undo banner would be displaced by the summary navigation).
+      // Same retest #1 pattern as _handlePhaseComplete — set the flag
+      // before context.go so the build()-defensive bail doesn't fire
+      // when complete()'s deferred notification clears session state
+      // during the route-transition window.
       final args = _buildSummaryArgs(provider);
-      await provider.complete(storage: storage, api: api);
-      if (!context.mounted) return;
+      _navigatingToSummary = true;
       context.go('/session/summary', extra: args);
+      // ignore: unawaited_futures
+      provider.complete(storage: storage, api: api);
       return;
     }
-    // S14-T6 §6.2: 3-second undo banner. SnackBar action lets the user
-    // restore the phase if they tapped Skip by mistake.
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.clearSnackBars();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text('$phaseLabel skipped'),
-        duration: const Duration(seconds: 3),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () async {
-            final ok = await provider.undoLastSkip(storage: storage);
-            if (!context.mounted || !ok) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('$phaseLabel restored'),
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          },
-        ),
-      ),
+    // S14-T6 §6.2 / Commit 1.5: top-anchored, auto-dismissing undo banner.
+    _showUndoBanner(
+      phaseLabel: phaseLabel,
+      onUndo: () async {
+        final ok = await provider.undoLastSkip(storage: storage);
+        if (!ok || !mounted) return;
+      },
     );
   }
 
