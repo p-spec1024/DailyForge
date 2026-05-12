@@ -3701,6 +3701,132 @@ async function main() {
           check('S14-T6/C with-focus: focus_streak.is_first is bool',
             typeof j2.focus_streak?.is_first === 'boolean',
             `got ${typeof j2.focus_streak?.is_first}`);
+
+          // S14-T6 Commit 1.7 (/review CR-1): the streak query must UNION
+          // sessions + breathwork_sessions so state-focus sessions (which
+          // only write to breathwork_sessions) contribute to daily/focus/
+          // weekly counts. Without the UNION, a breathwork-only user sees
+          // daily_streak=0 forever — broken headline summary metric.
+          //
+          // Verify: insert a today-dated breathwork_sessions row for a
+          // state focus, snapshot streaks before/after, assert the row
+          // bumps daily_streak_days (or holds it at the same non-zero
+          // value if the user already has a session today) and bumps
+          // focus_streak.count_this_week for the state focus.
+          const t6c1BeforeRes =
+            await fetch(`${t6Base}/api/users/me/streaks?focus_slug=calm`,
+              { headers: t6H });
+          const t6c1Before = await t6c1BeforeRes.json();
+
+          // Find any breathwork technique so the FK is satisfiable. Use
+          // the first one — content is irrelevant for the streak query.
+          const techRes = await pool.query(
+            `SELECT id FROM breathwork_techniques ORDER BY id ASC LIMIT 1`);
+          if (techRes.rows.length === 0) {
+            console.log(
+              '  SKIP  S14-T6/C union-check — no breathwork_techniques in DB',
+            );
+          } else {
+            const techId = techRes.rows[0].id;
+            const t6c1Insert = await pool.query(
+              `INSERT INTO breathwork_sessions
+                 (user_id, technique_id, duration_seconds, rounds_completed,
+                  completed, focus_slug, created_at)
+               VALUES ($1, $2, 60, 1, true, 'calm', NOW())
+               RETURNING id`,
+              [user.id, techId]);
+            const t6c1Id = t6c1Insert.rows[0].id;
+            try {
+              const t6c1AfterRes =
+                await fetch(`${t6Base}/api/users/me/streaks?focus_slug=calm`,
+                  { headers: t6H });
+              const t6c1After = await t6c1AfterRes.json();
+
+              check('S14-T6/C union: state-focus row bumps weekly_count (or holds)',
+                t6c1After.weekly_count >= t6c1Before.weekly_count
+                  && t6c1After.weekly_count >= 1,
+                `before=${t6c1Before.weekly_count} after=${t6c1After.weekly_count}`);
+              check('S14-T6/C union: state-focus row bumps focus_streak.count_this_week',
+                (t6c1After.focus_streak?.count_this_week ?? 0)
+                  >= (t6c1Before.focus_streak?.count_this_week ?? 0)
+                  && (t6c1After.focus_streak?.count_this_week ?? 0) >= 1,
+                `before=${t6c1Before.focus_streak?.count_this_week} `
+                + `after=${t6c1After.focus_streak?.count_this_week}`);
+              check('S14-T6/C union: daily_streak_days includes today via breathwork_sessions',
+                t6c1After.daily_streak_days >= 1,
+                `got ${t6c1After.daily_streak_days}`);
+            } finally {
+              await pool.query(
+                `DELETE FROM breathwork_sessions WHERE id = $1`, [t6c1Id]);
+            }
+          }
+
+          // S14-T6 Commit 1.7 (/review CR-2): verify the swap endpoint
+          // returns a non-empty alternatives[] under real auth. Pre-fix,
+          // a stringly-typed req.user.id from auth middleware would cause
+          // rankAlternatives' Number.isInteger validator to throw, the
+          // catch logged, alternatives degraded to []. Smoke previously
+          // called rankAlternatives directly and missed this seam.
+          const swapTargetRes = await pool.query(
+            `SELECT sa.exercise_id, sa.alternative_exercise_id
+               FROM slot_alternatives sa
+               JOIN exercises e1 ON e1.id = sa.exercise_id
+               JOIN exercises e2 ON e2.id = sa.alternative_exercise_id
+              WHERE e1.type = 'strength' AND e2.type = 'strength'
+              LIMIT 1`);
+          if (swapTargetRes.rows.length === 0) {
+            console.log(
+              '  SKIP  S14-T6/C swap-auth — no slot_alternatives strength pair in DB',
+            );
+          } else {
+            const { exercise_id: swapExId, alternative_exercise_id: swapAltId }
+              = swapTargetRes.rows[0];
+            // Snapshot the swap_counts row so we can restore.
+            const swapCountBefore = await pool.query(
+              `SELECT swap_count, prompt_state FROM exercise_swap_counts
+                WHERE user_id = $1 AND exercise_id = $2`,
+              [user.id, swapExId]);
+            try {
+              const swapRes = await fetch(
+                `${t6Base}/api/workout/slot/${swapExId}/choose`,
+                {
+                  method: 'PUT',
+                  headers: { ...t6H, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ chosen_exercise_id: swapAltId }),
+                });
+              check('S14-T6/C swap-auth: 200', swapRes.status === 200,
+                `got ${swapRes.status}`);
+              const swapJson = await swapRes.json();
+              check('S14-T6/C swap-auth: alternatives is array',
+                Array.isArray(swapJson.alternatives),
+                `got ${typeof swapJson.alternatives}`);
+              check('S14-T6/C swap-auth: alternatives non-empty under real auth (CR-2)',
+                Array.isArray(swapJson.alternatives)
+                  && swapJson.alternatives.length > 0,
+                `len=${swapJson.alternatives?.length}`);
+            } finally {
+              // Restore swap_count + prompt_state to pre-test state.
+              if (swapCountBefore.rows.length > 0) {
+                await pool.query(
+                  `UPDATE exercise_swap_counts
+                      SET swap_count = $1, prompt_state = $2
+                    WHERE user_id = $3 AND exercise_id = $4`,
+                  [swapCountBefore.rows[0].swap_count,
+                   swapCountBefore.rows[0].prompt_state,
+                   user.id, swapExId]);
+              } else {
+                await pool.query(
+                  `DELETE FROM exercise_swap_counts
+                    WHERE user_id = $1 AND exercise_id = $2`,
+                  [user.id, swapExId]);
+              }
+              // Also revert user_exercise_prefs (the choose endpoint UPSERTs it).
+              await pool.query(
+                `DELETE FROM user_exercise_prefs
+                  WHERE user_id = $1 AND exercise_id = $2`,
+                [user.id, swapExId]);
+            }
+          }
         } finally {
           try { t6Server.close(); } catch {}
         }

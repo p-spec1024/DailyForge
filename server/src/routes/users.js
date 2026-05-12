@@ -123,6 +123,14 @@ router.get('/me/pillar-levels', async (req, res, next) => {
 // have to do client-date math (S12-T5 timezone-drift incident). Date math
 // stays inside one Postgres session — same TZ on both sides of comparisons.
 //
+// S14-T6 Commit 1.7 (/review CR-1): all three queries now UNION across
+// sessions + breathwork_sessions. State-focus sessions only write to
+// breathwork_sessions (no `sessions` row), so the pre-fix queries returned
+// zero for daily/focus/weekly on breathwork-only users. breathwork_sessions
+// has no `date` column (only `created_at TIMESTAMPTZ`); we cast to date
+// inside each CTE — server timezone applies (FUTURE_SCOPE #212 unifies via
+// a v_completed_sessions VIEW).
+//
 // Response:
 //   {
 //     daily_streak_days: INT,
@@ -141,24 +149,31 @@ router.get('/me/streaks', async (req, res, next) => {
     // 1. Daily streak — count consecutive days back from today, stopping at
     //    the first gap. Looks back at most 60 days (cap-safe for v1; 60+ day
     //    streaks are a great problem to have). Implementation: distinct
-    //    session-days, gap-detect via row_number vs date offset.
+    //    session-days across BOTH session tables, gap-detect via row_number
+    //    vs date offset.
     const dailyResult = await pool.query(
-      `WITH days AS (
-         SELECT DISTINCT date
+      `WITH user_days AS (
+         SELECT date
            FROM sessions
           WHERE user_id = $1 AND completed = true
             AND date >= CURRENT_DATE - INTERVAL '60 days'
             AND date <= CURRENT_DATE
+         UNION
+         SELECT created_at::date AS date
+           FROM breathwork_sessions
+          WHERE user_id = $1 AND completed = true
+            AND created_at >= (CURRENT_DATE - INTERVAL '60 days')::timestamptz
+            AND created_at::date <= CURRENT_DATE
        ),
        ordered AS (
-         SELECT date,
+         SELECT DISTINCT date,
                 ROW_NUMBER() OVER (ORDER BY date DESC) AS rn
-           FROM days
+           FROM user_days
        ),
        streak_days AS (
          SELECT date
            FROM ordered
-          WHERE date = CURRENT_DATE - (rn - 1) * INTERVAL '1 day'
+          WHERE date = (CURRENT_DATE - (rn - 1)::int)
        )
        SELECT COUNT(*)::int AS days FROM streak_days`,
       [req.user.id]
@@ -166,9 +181,10 @@ router.get('/me/streaks', async (req, res, next) => {
     const dailyStreakDays = dailyResult.rows[0]?.days ?? 0;
 
     // 2. Focus streak — count of sessions with the target focus_slug in the
-    //    current ISO week. is_first is true when 0 prior sessions for that
-    //    focus exist (anywhere in history) — drives the "Your first biceps
-    //    session this week" copy.
+    //    current ISO week + total ever. is_first is true when total <= 1
+    //    (the just-completed session is the user's only session for this
+    //    focus). Both queries union sessions + breathwork_sessions so
+    //    state-focus slugs (calm/energize/focus/sleep/recover) count too.
     let focusStreak = {
       focus_slug: focusSlug,
       count_this_week: 0,
@@ -176,14 +192,17 @@ router.get('/me/streaks', async (req, res, next) => {
     };
     if (focusSlug) {
       const focusResult = await pool.query(
-        `SELECT
-           (SELECT COUNT(*)::int FROM sessions
-             WHERE user_id = $1 AND completed = true
-               AND focus_slug = $2
-               AND date >= date_trunc('week', CURRENT_DATE)) AS count_this_week,
-           (SELECT COUNT(*)::int FROM sessions
-             WHERE user_id = $1 AND completed = true
-               AND focus_slug = $2) AS total`,
+        `WITH focus_dates AS (
+           SELECT date FROM sessions
+            WHERE user_id = $1 AND completed = true AND focus_slug = $2
+           UNION ALL
+           SELECT created_at::date AS date FROM breathwork_sessions
+            WHERE user_id = $1 AND completed = true AND focus_slug = $2
+         )
+         SELECT
+           (SELECT COUNT(*)::int FROM focus_dates
+             WHERE date >= date_trunc('week', CURRENT_DATE)) AS count_this_week,
+           (SELECT COUNT(*)::int FROM focus_dates) AS total`,
         [req.user.id, focusSlug]
       );
       const row = focusResult.rows[0] ?? { count_this_week: 0, total: 0 };
@@ -194,12 +213,22 @@ router.get('/me/streaks', async (req, res, next) => {
       };
     }
 
-    // 3. Weekly count — all completed sessions this week (any focus).
+    // 3. Weekly count — all completed sessions this week (any focus). Distinct
+    //    on (date, table) so a state-focus session that lives only in
+    //    breathwork_sessions counts once, and a cross-pillar day with both a
+    //    sessions row and a breathwork_sessions row counts once per session
+    //    (intentional: cross-pillar has multiple per-pillar rows).
     const weeklyResult = await pool.query(
-      `SELECT COUNT(*)::int AS weekly_count
-         FROM sessions
-        WHERE user_id = $1 AND completed = true
-          AND date >= date_trunc('week', CURRENT_DATE)`,
+      `WITH weekly_sessions AS (
+         SELECT date FROM sessions
+          WHERE user_id = $1 AND completed = true
+            AND date >= date_trunc('week', CURRENT_DATE)
+         UNION ALL
+         SELECT created_at::date AS date FROM breathwork_sessions
+          WHERE user_id = $1 AND completed = true
+            AND created_at >= date_trunc('week', CURRENT_DATE)::timestamptz
+       )
+       SELECT COUNT(*)::int AS weekly_count FROM weekly_sessions`,
       [req.user.id]
     );
     const weeklyCount = weeklyResult.rows[0]?.weekly_count ?? 0;

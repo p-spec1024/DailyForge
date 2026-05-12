@@ -280,21 +280,37 @@ router.put('/slot/:exerciseId/choose', async (req, res, next) => {
     // S14-T6 / FS #198: surface a ranked alternative list alongside the swap
     // response. T6 UI consumes index 0; the full list is exposed for a future
     // picker UX. Failures here must not break the save — log and return [].
+    //
+    // S14-T6 Commit 1.7 (/review CR-2): coerce req.user.id at this boundary
+    // and validate. JWT payloads preserve types via JSON, but signing code
+    // is split across the codebase — if any login path ever signs with a
+    // string id, this service's Number.isInteger() validator would reject
+    // every real request and silently degrade alternatives to []. Coerce
+    // once at the route layer; the service stays strict. FUTURE_SCOPE #215
+    // tracks the broader middleware-shim cleanup.
     let alternatives = [];
-    try {
-      const lvlRow = await pool.query(
-        `SELECT level FROM user_pillar_levels
-          WHERE user_id = $1 AND pillar = 'strength'`,
-        [req.user.id]
+    const coercedUserId = Number(req.user.id);
+    if (!Number.isInteger(coercedUserId) || coercedUserId <= 0) {
+      console.error(
+        '[workout.slot.choose] invalid req.user.id, skipping alternatives:',
+        req.user.id,
       );
-      const pillarLevel = lvlRow.rows[0]?.level ?? 'beginner';
-      alternatives = await rankAlternatives({
-        userId: req.user.id,
-        originalExerciseId: exerciseId,
-        pillarLevel,
-      });
-    } catch (rankErr) {
-      console.error('[workout.slot.choose] rankAlternatives failed:', rankErr.message);
+    } else {
+      try {
+        const lvlRow = await pool.query(
+          `SELECT level FROM user_pillar_levels
+            WHERE user_id = $1 AND pillar = 'strength'`,
+          [coercedUserId]
+        );
+        const pillarLevel = lvlRow.rows[0]?.level ?? 'beginner';
+        alternatives = await rankAlternatives({
+          userId: coercedUserId,
+          originalExerciseId: exerciseId,
+          pillarLevel,
+        });
+      } catch (rankErr) {
+        console.error('[workout.slot.choose] rankAlternatives failed:', rankErr.message);
+      }
     }
 
     res.json({

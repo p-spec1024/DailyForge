@@ -134,8 +134,17 @@ class _MultiPhaseSessionPageState extends State<MultiPhaseSessionPage> {
                     ),
                     TextButton(
                       onPressed: () async {
+                        // S14-T6 Commit 1.7 (/review W-5): wrap onUndo in
+                        // try/catch. provider.undoLastSkip can throw from
+                        // its storage write; an uncaught Future from a
+                        // button handler shows a red error overlay in
+                        // debug. Dismiss the banner regardless.
                         _dismissUndoBanner();
-                        await onUndo();
+                        try {
+                          await onUndo();
+                        } catch (err) {
+                          debugPrint('[multi_phase] undo failed: $err');
+                        }
                       },
                       style: TextButton.styleFrom(
                         foregroundColor: AppColors.gold,
@@ -367,10 +376,18 @@ class _MultiPhaseSessionPageState extends State<MultiPhaseSessionPage> {
       // summary flashes for ~50ms before being replaced by home.
       _navigatingToSummary = true;
       context.go('/session/summary', extra: args);
-      // ignore: unawaited_futures — fire-and-forget. The page is gone from
-      // the tree once the transition completes; backend write errors are
-      // swallowed inside _writeMultiPhaseSessionRow.
-      provider.complete(storage: storage, api: api);
+      // S14-T6 Commit 1.7 (/review CR-3): fire-and-forget complete() must
+      // attach an error handler. _writeMultiPhaseSessionRow swallows its
+      // own errors, but storage.removePreference can throw (KeyStore /
+      // shared_preferences plugin failures), which would leave a zombie
+      // resume snapshot. Catch and best-effort the cleanup.
+      provider.complete(storage: storage, api: api).catchError((err) {
+        debugPrint('[multi_phase] post-nav complete() failed: $err');
+        storage.removePreference(provider.storageKey).catchError((_) {
+          // Already log-only — if the second removal also fails the
+          // launcher's peekFromStorage drops malformed blobs anyway.
+        });
+      });
       return;
     }
     if (provider.useAutoAdvanceCountdown) {
@@ -422,8 +439,11 @@ class _MultiPhaseSessionPageState extends State<MultiPhaseSessionPage> {
       final args = _buildSummaryArgs(provider);
       _navigatingToSummary = true;
       context.go('/session/summary', extra: args);
-      // ignore: unawaited_futures
-      provider.complete(storage: storage, api: api);
+      // Same /review CR-3 fix as _handlePhaseComplete — see comment there.
+      provider.complete(storage: storage, api: api).catchError((err) {
+        debugPrint('[multi_phase] post-nav complete() failed (skip path): $err');
+        storage.removePreference(provider.storageKey).catchError((_) {});
+      });
       return;
     }
     // S14-T6 §6.2 / Commit 1.5: top-anchored, auto-dismissing undo banner.

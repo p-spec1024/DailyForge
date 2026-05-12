@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:dailyforge/models/breathwork_technique.dart';
 import 'package:dailyforge/providers/breathwork_timer_provider.dart';
@@ -258,6 +259,33 @@ void main() {
           reason: 'cycle 3 was completed in-progress when cap crossed');
       expect(provider.totalElapsedSeconds, 30,
           reason: 'overshoot of 5s is the documented Decision C behavior');
+    });
+
+    // S14-T6 Commit 1.7 (/review W-7): defensive consistency log fires when
+    // cap < one cycle. Behavior is unchanged (Test 2 already verifies 1
+    // cycle runs); this test guards the observability shim.
+    test('startCapped logs warning when cap < one cycle', () async {
+      final service = _FakeBreathworkService();
+      final provider = BreathworkTimerProvider.withService(service);
+      final logs = <String>[];
+      final original = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) {
+        if (message != null) logs.add(message);
+      };
+      try {
+        provider.startCapped(
+          technique: _tenSecondCycle(cycles: 10),
+          maxDuration: const Duration(seconds: 5),
+        );
+      } finally {
+        debugPrint = original;
+      }
+      expect(
+        logs.any((m) =>
+            m.contains('startCapped') && m.contains('shorter than one cycle')),
+        isTrue,
+        reason: 'sub-cycle cap should emit a consistency warning',
+      );
     });
   });
 }

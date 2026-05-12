@@ -214,6 +214,20 @@ class BreathworkTimerProvider extends ChangeNotifier {
         'must be > 0 (engine clamps via *_duration_min — defensive)',
       );
     }
+    // S14-T6 Commit 1.7 (/review W-7): defensive cycle-length consistency
+    // log. The cap fires at end-of-cycle, so a cap shorter than one cycle
+    // means "run exactly one cycle, then stop" — by design per Decision C.
+    // Logging makes the (intentional) overshoot observable when an engine
+    // emit drifts (e.g. picking a 20s cycle for a 5s bookend budget).
+    final cycleSeconds = _estimateCycleSeconds(technique);
+    if (cycleSeconds > 0 && maxDuration.inSeconds < cycleSeconds) {
+      debugPrint(
+        '[BreathworkTimerProvider] startCapped: cap '
+        '${maxDuration.inSeconds}s is shorter than one cycle '
+        '(${cycleSeconds}s) — session will run exactly 1 cycle '
+        '(${cycleSeconds}s) per cycle-integrity contract (Decision C).',
+      );
+    }
     setTechnique(
       technique,
       durationCapSeconds: maxDuration.inSeconds,
@@ -221,6 +235,19 @@ class BreathworkTimerProvider extends ChangeNotifier {
       mode: BreathworkMode.capped,
     );
     start();
+  }
+
+  /// Sums the duration of every protocol phase to produce a per-cycle
+  /// total. Used by [startCapped]'s consistency log. Returns 0 if the
+  /// technique has no phases (shouldn't happen — engine validates).
+  int _estimateCycleSeconds(BreathworkTechnique technique) {
+    final rawPhases = (technique.protocol['phases'] as List?) ?? const [];
+    var total = 0;
+    for (final p in rawPhases.whereType<Map>()) {
+      final d = (p['duration'] as num?)?.toInt() ?? 0;
+      if (d > 0) total += d;
+    }
+    return total;
   }
 
   /// S14-T6 §6.5: configure + immediately start in endless mode. No cap;
