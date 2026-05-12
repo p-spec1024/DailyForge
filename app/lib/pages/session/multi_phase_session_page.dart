@@ -374,7 +374,15 @@ class _MultiPhaseSessionPageState extends State<MultiPhaseSessionPage> {
       // when it sees the null session — the Router will dispose us.
       // Without the flag, the bail wins the race (intermittently) and the
       // summary flashes for ~50ms before being replaced by home.
-      _navigatingToSummary = true;
+      // S14-T6 Commit 1.8 (/review pass 2 W-4'): wrap the suppress-bail
+      // flag in setState. The previous direct assignment relied on the
+      // provider's next notifyListeners() to drive the rebuild that
+      // observes the new flag value — works in practice but incidentally,
+      // not by framework contract. setState schedules an explicit rebuild
+      // and is the idiomatic Flutter pattern.
+      setState(() {
+        _navigatingToSummary = true;
+      });
       context.go('/session/summary', extra: args);
       // S14-T6 Commit 1.7 (/review CR-3): fire-and-forget complete() must
       // attach an error handler. _writeMultiPhaseSessionRow swallows its
@@ -437,7 +445,10 @@ class _MultiPhaseSessionPageState extends State<MultiPhaseSessionPage> {
       // when complete()'s deferred notification clears session state
       // during the route-transition window.
       final args = _buildSummaryArgs(provider);
-      _navigatingToSummary = true;
+      // Same /review pass 2 W-4' setState wrap as _handlePhaseComplete.
+      setState(() {
+        _navigatingToSummary = true;
+      });
       context.go('/session/summary', extra: args);
       // Same /review CR-3 fix as _handlePhaseComplete — see comment there.
       provider.complete(storage: storage, api: api).catchError((err) {

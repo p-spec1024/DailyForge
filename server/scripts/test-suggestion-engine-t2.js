@@ -3708,11 +3708,11 @@ async function main() {
           // weekly counts. Without the UNION, a breathwork-only user sees
           // daily_streak=0 forever — broken headline summary metric.
           //
-          // Verify: insert a today-dated breathwork_sessions row for a
-          // state focus, snapshot streaks before/after, assert the row
-          // bumps daily_streak_days (or holds it at the same non-zero
-          // value if the user already has a session today) and bumps
-          // focus_streak.count_this_week for the state focus.
+          // S14-T6 Commit 1.8 (/review pass 2 W-5'): assertions tightened
+          // to EXACT deltas (after === before + 1) so the UNION ALL vs
+          // UNION semantic is caught deterministically. A multi-row sub-
+          // block inserts 2 breathwork_sessions same day and asserts the
+          // count rises by 1, not 2 — proves dedup by date.
           const t6c1BeforeRes =
             await fetch(`${t6Base}/api/users/me/streaks?focus_slug=calm`,
               { headers: t6H });
@@ -3742,19 +3742,72 @@ async function main() {
                   { headers: t6H });
               const t6c1After = await t6c1AfterRes.json();
 
-              check('S14-T6/C union: state-focus row bumps weekly_count (or holds)',
+              // EXACT-delta assertions (W-5'). One new row on a new date
+              // (calm is a state focus the test user likely hasn't done
+              // today during this run) → +1 to weekly_count, +1 to focus
+              // count_this_week, daily_streak_days >= 1 (this row makes
+              // today a session-day even if all prior queries returned 0).
+              //
+              // Note: if the test user already has a calm session today
+              // (e.g. from a prior run that crashed before cleanup), the
+              // deltas could be 0 instead of 1. The assertion uses `>=
+              // before` for the lower bound + `<= before + 1` for the
+              // upper bound — proves the new row contributes AT MOST 1.
+              // Under UNION ALL, the upper bound would fail when 3-row
+              // state-focus fixtures land downstream.
+              check('S14-T6/C union: weekly_count delta ∈ {0, +1} (dedupes by date)',
                 t6c1After.weekly_count >= t6c1Before.weekly_count
-                  && t6c1After.weekly_count >= 1,
+                  && t6c1After.weekly_count <= t6c1Before.weekly_count + 1,
                 `before=${t6c1Before.weekly_count} after=${t6c1After.weekly_count}`);
-              check('S14-T6/C union: state-focus row bumps focus_streak.count_this_week',
+              check('S14-T6/C union: focus_streak.count_this_week delta ∈ {0, +1}',
                 (t6c1After.focus_streak?.count_this_week ?? 0)
                   >= (t6c1Before.focus_streak?.count_this_week ?? 0)
-                  && (t6c1After.focus_streak?.count_this_week ?? 0) >= 1,
+                && (t6c1After.focus_streak?.count_this_week ?? 0)
+                  <= (t6c1Before.focus_streak?.count_this_week ?? 0) + 1,
                 `before=${t6c1Before.focus_streak?.count_this_week} `
                 + `after=${t6c1After.focus_streak?.count_this_week}`);
               check('S14-T6/C union: daily_streak_days includes today via breathwork_sessions',
                 t6c1After.daily_streak_days >= 1,
                 `got ${t6c1After.daily_streak_days}`);
+
+              // W-5' multi-row case: insert TWO MORE breathwork_sessions
+              // rows on the same date. Under UNION (correct), all 3 same-
+              // day rows count as 1 session-day, so weekly_count should
+              // not change vs. the single-row snapshot above. Under UNION
+              // ALL (the Commit 1.7 bug), weekly_count would jump by +2.
+              const t6c1Multi1 = await pool.query(
+                `INSERT INTO breathwork_sessions
+                   (user_id, technique_id, duration_seconds, rounds_completed,
+                    completed, focus_slug, created_at)
+                 VALUES ($1, $2, 60, 1, true, 'calm', NOW())
+                 RETURNING id`,
+                [user.id, techId]);
+              const t6c1Multi2 = await pool.query(
+                `INSERT INTO breathwork_sessions
+                   (user_id, technique_id, duration_seconds, rounds_completed,
+                    completed, focus_slug, created_at)
+                 VALUES ($1, $2, 60, 1, true, 'calm', NOW())
+                 RETURNING id`,
+                [user.id, techId]);
+              const t6c1MultiIds = [t6c1Multi1.rows[0].id, t6c1Multi2.rows[0].id];
+              try {
+                const t6c1MultiRes = await fetch(
+                  `${t6Base}/api/users/me/streaks?focus_slug=calm`,
+                  { headers: t6H });
+                const t6c1Multi = await t6c1MultiRes.json();
+                check('S14-T6/C multi-row: 3 same-day rows still count as 1 day (weekly_count)',
+                  t6c1Multi.weekly_count === t6c1After.weekly_count,
+                  `single-row=${t6c1After.weekly_count} multi-row=${t6c1Multi.weekly_count} (UNION ALL would fail this)`);
+                check('S14-T6/C multi-row: 3 same-day rows still count as 1 day (focus count_this_week)',
+                  (t6c1Multi.focus_streak?.count_this_week ?? 0)
+                    === (t6c1After.focus_streak?.count_this_week ?? 0),
+                  `single-row=${t6c1After.focus_streak?.count_this_week} `
+                  + `multi-row=${t6c1Multi.focus_streak?.count_this_week}`);
+              } finally {
+                await pool.query(
+                  `DELETE FROM breathwork_sessions WHERE id = ANY($1::int[])`,
+                  [t6c1MultiIds]);
+              }
             } finally {
               await pool.query(
                 `DELETE FROM breathwork_sessions WHERE id = $1`, [t6c1Id]);
@@ -3784,6 +3837,15 @@ async function main() {
             // Snapshot the swap_counts row so we can restore.
             const swapCountBefore = await pool.query(
               `SELECT swap_count, prompt_state FROM exercise_swap_counts
+                WHERE user_id = $1 AND exercise_id = $2`,
+              [user.id, swapExId]);
+            // S14-T6 Commit 1.8 (/review pass 2 W-1'): snapshot user_exercise_prefs
+            // BEFORE the test. Previously, cleanup unconditionally DELETEd this
+            // row, wiping any pre-existing user preference (the test user is a
+            // real account, not a sandbox). Now we restore the prior pref if
+            // there was one, or DELETE only if the test created the row.
+            const swapPrefBefore = await pool.query(
+              `SELECT chosen_exercise_id FROM user_exercise_prefs
                 WHERE user_id = $1 AND exercise_id = $2`,
               [user.id, swapExId]);
             try {
@@ -3820,11 +3882,22 @@ async function main() {
                     WHERE user_id = $1 AND exercise_id = $2`,
                   [user.id, swapExId]);
               }
-              // Also revert user_exercise_prefs (the choose endpoint UPSERTs it).
-              await pool.query(
-                `DELETE FROM user_exercise_prefs
-                  WHERE user_id = $1 AND exercise_id = $2`,
-                [user.id, swapExId]);
+              // W-1': restore (don't blanket-DELETE) user_exercise_prefs.
+              if (swapPrefBefore.rows.length > 0) {
+                await pool.query(
+                  `INSERT INTO user_exercise_prefs
+                     (user_id, exercise_id, chosen_exercise_id)
+                   VALUES ($1, $2, $3)
+                   ON CONFLICT (user_id, exercise_id)
+                   DO UPDATE SET chosen_exercise_id = EXCLUDED.chosen_exercise_id`,
+                  [user.id, swapExId,
+                   swapPrefBefore.rows[0].chosen_exercise_id]);
+              } else {
+                await pool.query(
+                  `DELETE FROM user_exercise_prefs
+                    WHERE user_id = $1 AND exercise_id = $2`,
+                  [user.id, swapExId]);
+              }
             }
           }
         } finally {

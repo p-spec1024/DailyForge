@@ -217,6 +217,17 @@ router.get('/:workoutId/slots/:exerciseId/alternatives', async (req, res, next) 
 // UPSERT + counter-increment run in a single transaction (Decision 3).
 router.put('/slot/:exerciseId/choose', async (req, res, next) => {
   try {
+    // S14-T6 Commit 1.8 (/review pass 2 W-3'): coerce req.user.id once at
+    // the top of the handler. Pre-fix, the handler trusted req.user.id in
+    // the swap-counts UPSERT + incrementSwap call but coerced separately
+    // for rankAlternatives — half-coerced handler, two defensiveness
+    // regimes. Now `userId` is the single int reference used everywhere
+    // below. FUTURE_SCOPE #215 sweeps the rest of the backend.
+    const userId = Number(req.user.id);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({ error: 'invalid_user_id' });
+    }
+
     const exerciseId = parseInt(req.params.exerciseId, 10);
     const chosenId = parseInt(req.body.chosen_exercise_id, 10);
     if (isNaN(exerciseId) || isNaN(chosenId)) {
@@ -247,11 +258,11 @@ router.put('/slot/:exerciseId/choose', async (req, res, next) => {
          VALUES ($1, $2, $3)
          ON CONFLICT (user_id, exercise_id)
          DO UPDATE SET chosen_exercise_id = EXCLUDED.chosen_exercise_id, created_at = NOW()`,
-        [req.user.id, exerciseId, chosenId]
+        [userId, exerciseId, chosenId]
       );
 
       if (isSwap) {
-        const swapState = await incrementSwap(req.user.id, exerciseId, client);
+        const swapState = await incrementSwap(userId, exerciseId, client);
         swap_count = swapState.swap_count;
         should_prompt = swapState.should_prompt;
         prompt_state = swapState.prompt_state;
@@ -261,7 +272,7 @@ router.put('/slot/:exerciseId/choose', async (req, res, next) => {
         const cur = await client.query(
           `SELECT swap_count, prompt_state FROM exercise_swap_counts
             WHERE user_id = $1 AND exercise_id = $2`,
-          [req.user.id, exerciseId]
+          [userId, exerciseId]
         );
         if (cur.rows.length > 0) {
           swap_count = cur.rows[0].swap_count;
@@ -280,37 +291,21 @@ router.put('/slot/:exerciseId/choose', async (req, res, next) => {
     // S14-T6 / FS #198: surface a ranked alternative list alongside the swap
     // response. T6 UI consumes index 0; the full list is exposed for a future
     // picker UX. Failures here must not break the save — log and return [].
-    //
-    // S14-T6 Commit 1.7 (/review CR-2): coerce req.user.id at this boundary
-    // and validate. JWT payloads preserve types via JSON, but signing code
-    // is split across the codebase — if any login path ever signs with a
-    // string id, this service's Number.isInteger() validator would reject
-    // every real request and silently degrade alternatives to []. Coerce
-    // once at the route layer; the service stays strict. FUTURE_SCOPE #215
-    // tracks the broader middleware-shim cleanup.
     let alternatives = [];
-    const coercedUserId = Number(req.user.id);
-    if (!Number.isInteger(coercedUserId) || coercedUserId <= 0) {
-      console.error(
-        '[workout.slot.choose] invalid req.user.id, skipping alternatives:',
-        req.user.id,
+    try {
+      const lvlRow = await pool.query(
+        `SELECT level FROM user_pillar_levels
+          WHERE user_id = $1 AND pillar = 'strength'`,
+        [userId]
       );
-    } else {
-      try {
-        const lvlRow = await pool.query(
-          `SELECT level FROM user_pillar_levels
-            WHERE user_id = $1 AND pillar = 'strength'`,
-          [coercedUserId]
-        );
-        const pillarLevel = lvlRow.rows[0]?.level ?? 'beginner';
-        alternatives = await rankAlternatives({
-          userId: coercedUserId,
-          originalExerciseId: exerciseId,
-          pillarLevel,
-        });
-      } catch (rankErr) {
-        console.error('[workout.slot.choose] rankAlternatives failed:', rankErr.message);
-      }
+      const pillarLevel = lvlRow.rows[0]?.level ?? 'beginner';
+      alternatives = await rankAlternatives({
+        userId,
+        originalExerciseId: exerciseId,
+        pillarLevel,
+      });
+    } catch (rankErr) {
+      console.error('[workout.slot.choose] rankAlternatives failed:', rankErr.message);
     }
 
     res.json({

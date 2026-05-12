@@ -191,11 +191,15 @@ router.get('/me/streaks', async (req, res, next) => {
       is_first: false,
     };
     if (focusSlug) {
+      // S14-T6 Commit 1.8 (/review pass 2 CR-1'): UNION (not UNION ALL) so
+      // a state-focus session that writes 3 breathwork_sessions rows for
+      // the same day counts as 1 session-day, not 3. Same for a user who
+      // does multiple phases on one day across both tables.
       const focusResult = await pool.query(
         `WITH focus_dates AS (
            SELECT date FROM sessions
             WHERE user_id = $1 AND completed = true AND focus_slug = $2
-           UNION ALL
+           UNION
            SELECT created_at::date AS date FROM breathwork_sessions
             WHERE user_id = $1 AND completed = true AND focus_slug = $2
          )
@@ -213,17 +217,21 @@ router.get('/me/streaks', async (req, res, next) => {
       };
     }
 
-    // 3. Weekly count — all completed sessions this week (any focus). Distinct
-    //    on (date, table) so a state-focus session that lives only in
-    //    breathwork_sessions counts once, and a cross-pillar day with both a
-    //    sessions row and a breathwork_sessions row counts once per session
-    //    (intentional: cross-pillar has multiple per-pillar rows).
+    // 3. Weekly count — distinct session-days this week (any focus).
+    //
+    // S14-T6 Commit 1.8 (/review pass 2 CR-1'): UNION (not UNION ALL) dedupes
+    // by date, so a cross-pillar workout (1 sessions row + 2 breathwork_sessions
+    // rows, same date) counts as 1 day, not 3. A state-focus session (3
+    // breathwork_sessions rows, same date) counts as 1. Matches the user-
+    // facing "X sessions this week" semantic (= active days). Two real
+    // sessions on the same calendar day count as 1 — under-count edge case
+    // accepted in v1; the typical user does ≤ 1 session/day.
     const weeklyResult = await pool.query(
       `WITH weekly_sessions AS (
          SELECT date FROM sessions
           WHERE user_id = $1 AND completed = true
             AND date >= date_trunc('week', CURRENT_DATE)
-         UNION ALL
+         UNION
          SELECT created_at::date AS date FROM breathwork_sessions
           WHERE user_id = $1 AND completed = true
             AND created_at >= date_trunc('week', CURRENT_DATE)::timestamptz
