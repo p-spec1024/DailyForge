@@ -39,6 +39,9 @@ dependencies:
   # 3D body map (S10-T5a)
   interactive_3d: ^2.0.3
 
+  # S14-T5 AMENDMENT-1 D12: hold screen on during active sessions.
+  wakelock_plus: ^1.2.8
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -9,6 +9,7 @@ import '../players/phase_result.dart';
 import '../players/strength_player.dart';
 import '../providers/workout_session_provider.dart';
 import '../services/api_service.dart';
+import '../services/wakelock_service.dart';
 import 'workout/session_summary_page.dart';
 
 /// Standalone strength session shell. Hosts the [StrengthPlayer] body and
@@ -46,7 +47,14 @@ class _WorkoutPageState extends State<WorkoutPage> {
   @override
   void initState() {
     super.initState();
+    WakelockService.enable();
     WidgetsBinding.instance.addPostFrameCallback((_) => _initSession());
+  }
+
+  @override
+  void dispose() {
+    WakelockService.disable();
+    super.dispose();
   }
 
   Future<void> _initSession() async {

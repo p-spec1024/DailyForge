@@ -3185,32 +3185,36 @@ async function main() {
     }
   }
 
-  // ── Phase 3k: T4 CROSS-PILLAR SESSIONS BLOCK (S14-T4) ────────────────
-  // Exercises POST /api/cross-pillar-sessions. Verifies happy-path FK fan
-  // across BOTH sessions and breathwork_sessions (AMENDMENT-1 D3 dual-FK).
-  // Uses inline sentinel pattern (T1/T3 precedent — the originally
-  // referenced smoke-fixtures.mjs helper does not exist).
+  // ── Phase 3k: T4+T5 MULTI-PHASE SESSIONS BLOCK (S14-T4, extended S14-T5) ──
+  // Exercises POST /api/multi-phase-sessions (renamed S14-T5 from
+  // /api/cross-pillar-sessions). Verifies happy-path FK fan across BOTH
+  // sessions and breathwork_sessions (T4 AMENDMENT-1 D3 dual-FK), AND that
+  // both session_shape values ('cross_pillar', 'state_focus') round-trip
+  // through the endpoint. Uses inline sentinel pattern (T1/T3 precedent —
+  // the originally referenced smoke-fixtures.mjs helper does not exist).
   // Sentinels: sessions.notes = 's14-t4-smoke-fixture',
   //            breathwork_sessions.focus_slug = 's14_t4_smoke',
-  //            cross_pillar_sessions.focus_slug = 's14_t4_smoke'.
+  //            multi_phase_sessions.focus_slug = 's14_t4_smoke' or
+  //            's14_t5_smoke' (state-focus block).
   {
-    console.log('\n=== T4 CROSS-PILLAR SESSIONS BLOCK ===');
+    console.log('\n=== T4+T5 MULTI-PHASE SESSIONS BLOCK ===');
     if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET not set');
 
     const CPS_SENTINEL_NOTES = 's14-t4-smoke-fixture';
     const CPS_SENTINEL_FOCUS = 's14_t4_smoke';
+    const T5_SENTINEL_FOCUS  = 's14_t5_smoke';
 
     // Pre-clean from any previous aborted run. Order matters: child rows
-    // first (sessions / breathwork_sessions FK back to cross_pillar_sessions),
-    // then cross_pillar_sessions.
+    // first (sessions / breathwork_sessions FK back to multi_phase_sessions),
+    // then multi_phase_sessions.
     await pool.query(`DELETE FROM sessions WHERE notes = $1`, [CPS_SENTINEL_NOTES]);
     await pool.query(
-      `DELETE FROM breathwork_sessions WHERE focus_slug = $1`,
-      [CPS_SENTINEL_FOCUS]
+      `DELETE FROM breathwork_sessions WHERE focus_slug = ANY($1::text[])`,
+      [[CPS_SENTINEL_FOCUS, T5_SENTINEL_FOCUS]]
     );
     await pool.query(
-      `DELETE FROM cross_pillar_sessions WHERE focus_slug = $1`,
-      [CPS_SENTINEL_FOCUS]
+      `DELETE FROM multi_phase_sessions WHERE focus_slug = ANY($1::text[])`,
+      [[CPS_SENTINEL_FOCUS, T5_SENTINEL_FOCUS]]
     );
 
     // Need one technique id for breathwork_sessions FK; reuse any green-tier.
@@ -3236,7 +3240,7 @@ async function main() {
     const cpsH = { 'Content-Type': 'application/json', Authorization: `Bearer ${cpsToken}` };
 
     async function cpsPost(body, opts = {}) {
-      return await fetch(`${cpsBase}/api/cross-pillar-sessions`, {
+      return await fetch(`${cpsBase}/api/multi-phase-sessions`, {
         method: 'POST',
         headers: opts.noAuth ? { 'Content-Type': 'application/json' } : cpsH,
         body: JSON.stringify(body),
@@ -3246,12 +3250,12 @@ async function main() {
     async function cpsCleanup() {
       await pool.query(`DELETE FROM sessions WHERE notes = $1`, [CPS_SENTINEL_NOTES]);
       await pool.query(
-        `DELETE FROM breathwork_sessions WHERE focus_slug = $1`,
-        [CPS_SENTINEL_FOCUS]
+        `DELETE FROM breathwork_sessions WHERE focus_slug = ANY($1::text[])`,
+        [[CPS_SENTINEL_FOCUS, T5_SENTINEL_FOCUS]]
       );
       await pool.query(
-        `DELETE FROM cross_pillar_sessions WHERE focus_slug = $1`,
-        [CPS_SENTINEL_FOCUS]
+        `DELETE FROM multi_phase_sessions WHERE focus_slug = ANY($1::text[])`,
+        [[CPS_SENTINEL_FOCUS, T5_SENTINEL_FOCUS]]
       );
     }
     const cpsAbortHandler = async () => {
@@ -3285,10 +3289,11 @@ async function main() {
       );
       const seedBreathId = bRows[0].id;
 
-      // T4/A — happy path: valid POST creates cross_pillar_sessions row and
+      // T4/A — happy path: valid POST creates multi_phase_sessions row and
       // fans FK to both sessions + breathwork_sessions.
       const happyBody = {
         focus_slug: CPS_SENTINEL_FOCUS,
+        session_shape: 'cross_pillar',
         started_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
         completed_at: new Date().toISOString(),
         phases_completed: 2,
@@ -3303,15 +3308,16 @@ async function main() {
       check('T4/A happy: returns positive integer id',
         Number.isInteger(body?.id) && body.id > 0, `got ${body?.id}`);
 
-      // T4/B — row in cross_pillar_sessions has expected fields.
+      // T4/B — row in multi_phase_sessions has expected fields + session_shape.
       const { rows: cpsRows } = await pool.query(
-        `SELECT focus_slug, phases_completed, total_phases, end_intent
-           FROM cross_pillar_sessions WHERE id = $1`,
+        `SELECT focus_slug, session_shape, phases_completed, total_phases, end_intent
+           FROM multi_phase_sessions WHERE id = $1`,
         [body.id]
       );
-      check('T4/B cross_pillar_sessions row populated',
+      check('T4/B multi_phase_sessions row populated (cross_pillar shape)',
         cpsRows.length === 1
           && cpsRows[0].focus_slug === CPS_SENTINEL_FOCUS
+          && cpsRows[0].session_shape === 'cross_pillar'
           && cpsRows[0].phases_completed === 2
           && cpsRows[0].total_phases === 5
           && cpsRows[0].end_intent === 'completed',
@@ -3319,21 +3325,21 @@ async function main() {
 
       // T4/C — sessions FK populated.
       const { rows: sCheck } = await pool.query(
-        `SELECT cross_pillar_session_id FROM sessions WHERE id = $1`,
+        `SELECT multi_phase_session_id FROM sessions WHERE id = $1`,
         [seedSessionId]
       );
-      check('T4/C sessions.cross_pillar_session_id set',
-        sCheck[0]?.cross_pillar_session_id === body.id,
-        `got ${sCheck[0]?.cross_pillar_session_id}`);
+      check('T4/C sessions.multi_phase_session_id set',
+        sCheck[0]?.multi_phase_session_id === body.id,
+        `got ${sCheck[0]?.multi_phase_session_id}`);
 
       // T4/D — breathwork_sessions FK populated.
       const { rows: bCheck } = await pool.query(
-        `SELECT cross_pillar_session_id FROM breathwork_sessions WHERE id = $1`,
+        `SELECT multi_phase_session_id FROM breathwork_sessions WHERE id = $1`,
         [seedBreathId]
       );
-      check('T4/D breathwork_sessions.cross_pillar_session_id set',
-        bCheck[0]?.cross_pillar_session_id === body.id,
-        `got ${bCheck[0]?.cross_pillar_session_id}`);
+      check('T4/D breathwork_sessions.multi_phase_session_id set',
+        bCheck[0]?.multi_phase_session_id === body.id,
+        `got ${bCheck[0]?.multi_phase_session_id}`);
 
       // T4/E — validation: invalid_focus_slug.
       {
@@ -3366,6 +3372,128 @@ async function main() {
       {
         const r2 = await cpsPost(happyBody, { noAuth: true });
         check('T4/H no auth → 401', r2.status === 401, `got ${r2.status}`);
+      }
+
+      // ── S14-T5 ADDITIONS ──────────────────────────────────────────────
+      // Seed a state-focus-flavored breathwork_sessions pair (centering +
+      // practice phases; reflection writes NO row per spec §16). Then POST
+      // a state_focus session and verify the row + FK fanout + shape.
+
+      const { rows: bRows2 } = await pool.query(
+        `INSERT INTO breathwork_sessions (user_id, technique_id, duration_seconds,
+                                          rounds_completed, completed, focus_slug)
+         VALUES
+           ($1, $2, 120, 3, true, $3),
+           ($1, $2, 480, 8, true, $3)
+         RETURNING id`,
+        [user.id, bwTechniqueId, T5_SENTINEL_FOCUS]
+      );
+      const centeringId = bRows2[0].id;
+      const practiceId  = bRows2[1].id;
+
+      // T5/A — happy path: state_focus shape accepted, row written with
+      // session_shape='state_focus'.
+      const t5Body = {
+        focus_slug: T5_SENTINEL_FOCUS,
+        session_shape: 'state_focus',
+        started_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+        completed_at: new Date().toISOString(),
+        phases_completed: 3,
+        total_phases: 3,
+        end_intent: 'completed',
+        strength_yoga_session_ids: [],
+        breathwork_session_ids: [centeringId, practiceId],
+      };
+      const r5 = await cpsPost(t5Body);
+      check('T5/A state_focus happy: status 201', r5.status === 201, `got ${r5.status}`);
+      const t5Resp = await r5.json();
+      check('T5/A state_focus happy: returns positive integer id',
+        Number.isInteger(t5Resp?.id) && t5Resp.id > 0, `got ${t5Resp?.id}`);
+
+      // T5/B — row written with session_shape='state_focus'.
+      const { rows: t5Rows } = await pool.query(
+        `SELECT focus_slug, session_shape, phases_completed, total_phases, end_intent
+           FROM multi_phase_sessions WHERE id = $1`,
+        [t5Resp.id]
+      );
+      check('T5/B multi_phase_sessions row populated (state_focus shape)',
+        t5Rows.length === 1
+          && t5Rows[0].focus_slug === T5_SENTINEL_FOCUS
+          && t5Rows[0].session_shape === 'state_focus'
+          && t5Rows[0].phases_completed === 3
+          && t5Rows[0].total_phases === 3
+          && t5Rows[0].end_intent === 'completed',
+        JSON.stringify(t5Rows[0] || null));
+
+      // T5/C — both breathwork_sessions rows (centering + practice) FK
+      // back to the new multi_phase_sessions row.
+      const { rows: t5Bfks } = await pool.query(
+        `SELECT id, multi_phase_session_id
+           FROM breathwork_sessions
+          WHERE id = ANY($1::int[])
+          ORDER BY id`,
+        [[centeringId, practiceId]]
+      );
+      check('T5/C centering breathwork FK → multi_phase_sessions',
+        t5Bfks[0]?.multi_phase_session_id === t5Resp.id,
+        `got ${t5Bfks[0]?.multi_phase_session_id}`);
+      check('T5/C practice breathwork FK → multi_phase_sessions',
+        t5Bfks[1]?.multi_phase_session_id === t5Resp.id,
+        `got ${t5Bfks[1]?.multi_phase_session_id}`);
+
+      // T5/D — validation: invalid session_shape → 400.
+      {
+        const r2 = await cpsPost({ ...t5Body, session_shape: 'pillar_pure' });
+        const b2 = await r2.json();
+        check('T5/D invalid session_shape → 400 invalid_session_shape',
+          r2.status === 400 && b2.error === 'invalid_session_shape',
+          `got ${r2.status} ${b2.error}`);
+      }
+
+      // T5/E — validation: missing session_shape → 400.
+      {
+        const noShape = { ...t5Body };
+        delete noShape.session_shape;
+        const r2 = await cpsPost(noShape);
+        const b2 = await r2.json();
+        check('T5/E missing session_shape → 400 invalid_session_shape',
+          r2.status === 400 && b2.error === 'invalid_session_shape',
+          `got ${r2.status} ${b2.error}`);
+      }
+
+      // T5/F — engine emission: state_focus sessions have phases.length===3,
+      // reflection has content_id===null, centering+practice have non-null
+      // content_id. This is a direct engine assertion (not HTTP), covering
+      // the contract the launcher's _validateStateFocusShape relies on.
+      {
+        const eng = await generateSession({
+          user_id: user.id,
+          focus_slug: 'calm',
+          entry_point: 'breathwork_tab',
+          bracket: '10-20',
+        });
+        check('T5/F engine state_focus: session_shape', eng.session_shape === 'state_focus');
+        check('T5/F engine state_focus: 3 phases', eng.phases.length === 3);
+        check('T5/F engine state_focus: reflection content_id===null',
+          eng.phases[2]?.items[0]?.content_id === null,
+          `got ${eng.phases[2]?.items[0]?.content_id}`);
+        check('T5/F engine state_focus: centering content_id is int',
+          Number.isInteger(eng.phases[0]?.items[0]?.content_id));
+        check('T5/F engine state_focus: practice content_id is int',
+          Number.isInteger(eng.phases[1]?.items[0]?.content_id));
+      }
+
+      // T5/G — engine emission: endless bracket sets metadata.is_endless.
+      {
+        const eng = await generateSession({
+          user_id: user.id,
+          focus_slug: 'calm',
+          entry_point: 'breathwork_tab',
+          bracket: 'endless',
+        });
+        check('T5/G engine endless: metadata.is_endless===true',
+          eng.metadata?.is_endless === true,
+          `got ${eng.metadata?.is_endless}`);
       }
     } finally {
       await cpsCleanup();

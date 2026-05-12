@@ -6,6 +6,15 @@ import '../services/breathwork_service.dart';
 
 enum TimerState { idle, running, paused, completed }
 
+/// Why the session ended. Distinguishes natural completion from user stop
+/// from duration-cap (embedded mode). Set inside [_completeSession].
+///
+/// AMENDMENT-1 D5: pre-T5 the provider had no end-reason field; the player
+/// inferred "stopped early" from `roundsCompleted < totalRounds`, which
+/// misfired when the completion state wasn't normalized (off-by-one) and
+/// hung silently when the duration cap fired (no notifyListeners).
+enum BreathworkEndReason { none, naturalCompletion, userStopped, durationCap }
+
 class BreathworkPhase {
   final String type;
   final int duration;
@@ -27,6 +36,13 @@ class BreathworkTimerProvider extends ChangeNotifier {
 
   BreathworkTimerProvider(ApiService api) : _service = BreathworkService(api);
 
+  /// Test seam — bypasses the production [ApiService] / [BreathworkService]
+  /// construction so unit tests can drive completion without a real network
+  /// or platform plugin (StorageService uses flutter_secure_storage which
+  /// throws MissingPluginException in `flutter test`).
+  @visibleForTesting
+  BreathworkTimerProvider.withService(this._service);
+
   BreathworkTechnique? _technique;
   List<BreathworkPhase> _phases = const [];
   int _totalRounds = 1;
@@ -37,6 +53,7 @@ class BreathworkTimerProvider extends ChangeNotifier {
   int _phaseSecondsRemaining = 0;
   int _totalElapsedSeconds = 0;
   bool _sessionLogged = false;
+  BreathworkEndReason _endReason = BreathworkEndReason.none;
 
   Timer? _timer;
 
@@ -85,6 +102,13 @@ class BreathworkTimerProvider extends ChangeNotifier {
   int get totalRounds => _totalRounds;
   int get totalElapsedSeconds => _totalElapsedSeconds;
   int get secondsRemaining => _phaseSecondsRemaining;
+
+  BreathworkEndReason get endReason => _endReason;
+
+  /// True only for user-initiated stops (Stop button). Natural completion
+  /// and duration-cap completion are NOT interruptions — they're the
+  /// session ending on its own terms.
+  bool get wasInterrupted => _endReason == BreathworkEndReason.userStopped;
 
   BreathworkPhase? get _currentPhase =>
       _phases.isEmpty ? null : _phases[_currentPhaseIndex];
@@ -162,6 +186,7 @@ class BreathworkTimerProvider extends ChangeNotifier {
     _phaseSecondsRemaining = _phases.isNotEmpty ? _phases.first.duration : 0;
     _totalElapsedSeconds = 0;
     _sessionLogged = false;
+    _endReason = BreathworkEndReason.none;
     notifyListeners();
   }
 
@@ -187,16 +212,17 @@ class BreathworkTimerProvider extends ChangeNotifier {
   }
 
   void stop() {
-    _timer?.cancel();
-    _state = TimerState.completed;
-    _loggingFuture = _logSession(completed: false);
-    notifyListeners();
+    if (_state == TimerState.completed) return;
+    _completeSession(BreathworkEndReason.userStopped);
   }
 
   void _startTicker() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
+
+  @visibleForTesting
+  void debugTick() => _tick();
 
   void _tick() {
     if (_state != TimerState.running) return;
@@ -205,11 +231,12 @@ class BreathworkTimerProvider extends ChangeNotifier {
     // S14-T4: duration cap (embedded mode honors engine's phase budget).
     final cap = _durationCapSeconds;
     if (cap != null && _totalElapsedSeconds >= cap) {
-      _completeSession();
+      _completeSession(BreathworkEndReason.durationCap);
       return;
     }
     if (_phaseSecondsRemaining <= 0) {
       _advancePhase();
+      if (_state == TimerState.completed) return;
     }
     notifyListeners();
   }
@@ -219,7 +246,7 @@ class BreathworkTimerProvider extends ChangeNotifier {
     if (nextIndex >= _phases.length) {
       // End of round
       if (_currentRound >= _totalRounds) {
-        _completeSession();
+        _completeSession(BreathworkEndReason.naturalCompletion);
         return;
       }
       _currentRound += 1;
@@ -230,11 +257,15 @@ class BreathworkTimerProvider extends ChangeNotifier {
     _phaseSecondsRemaining = _phases[_currentPhaseIndex].duration;
   }
 
-  void _completeSession() {
+  void _completeSession(BreathworkEndReason reason) {
     _timer?.cancel();
     _state = TimerState.completed;
+    _endReason = reason;
     _phaseSecondsRemaining = 0;
-    _loggingFuture = _logSession(completed: true);
+    _loggingFuture = _logSession(
+      completed: reason == BreathworkEndReason.naturalCompletion,
+    );
+    notifyListeners();
   }
 
   Future<void> _logSession({required bool completed}) async {
@@ -255,16 +286,19 @@ class BreathworkTimerProvider extends ChangeNotifier {
   }
 
   int get roundsCompleted {
-    if (isCompleted && _currentPhaseIndex == 0 && _phaseSecondsRemaining == 0) {
+    // AMENDMENT-1 D5: authoritative via _endReason. Pre-fix, this getter
+    // used a state-shape sentinel (_currentPhaseIndex == 0 &&
+    // _phaseSecondsRemaining == 0) which both missed natural completion
+    // (when state wasn't normalized) and false-positived on user-stop at
+    // a round boundary.
+    if (_endReason == BreathworkEndReason.naturalCompletion) {
       return _totalRounds;
     }
     return (_currentRound - 1).clamp(0, _totalRounds);
   }
 
   bool get fullyCompleted =>
-      isCompleted &&
-      _currentRound > _totalRounds - 1 &&
-      (_phaseSecondsRemaining == 0);
+      _endReason == BreathworkEndReason.naturalCompletion;
 
   @override
   void dispose() {

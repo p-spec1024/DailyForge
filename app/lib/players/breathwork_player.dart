@@ -13,6 +13,12 @@ import 'embeddable_player.dart';
 import 'phase_metadata.dart';
 import 'phase_result.dart';
 
+String _fmtElapsedStatic(int s) {
+  final m = (s ~/ 60).toString().padLeft(2, '0');
+  final sec = (s % 60).toString().padLeft(2, '0');
+  return '$m:$sec';
+}
+
 /// S14-T4: extracted breathwork body widget. Renders inside
 /// [BreathworkTimerPage]'s Scaffold shell for standalone use, or directly
 /// inside [FivePhaseSessionPage] for cross-pillar phases 1 (bookend_open)
@@ -128,10 +134,19 @@ class _BreathworkBodyState extends State<_BreathworkBody> {
       });
       final provider = context.read<BreathworkTimerProvider>();
       if (widget.isEmbedded) {
+        // S14-T5: state-focus practice in the endless bracket runs without
+        // a duration cap — the user drives completion via the "I'm done"
+        // button (which calls timer.stop, which writes the breathwork_sessions
+        // row with `duration_seconds = _totalElapsedSeconds`). All other
+        // embedded paths (T4 cross-pillar bookends, T5 centering, T5 timed
+        // practice) keep T4's hard cap.
+        final isOpenEnded = widget.phaseMetadata.isEndless &&
+            widget.phaseMetadata.phase == 'practice';
         final dur = widget.phaseMetadata.durationMinutes;
         provider.setTechnique(
           t,
-          durationCapSeconds: dur != null ? dur * 60 : null,
+          durationCapSeconds:
+              isOpenEnded ? null : (dur != null ? dur * 60 : null),
           focusSlug: widget.phaseMetadata.focusSlug,
         );
         // Embedded: skip safety modal (engine is trusted to pick safe-for-
@@ -320,8 +335,14 @@ class _BreathworkBodyState extends State<_BreathworkBody> {
           technique: technique,
           timer: timer,
           showAppBar: !widget.isEmbedded,
+          // S14-T5: state-focus endless practice gets the inline stopwatch
+          // + "I'm done" footer so the user can advance whenever ready.
+          showEndlessFooter: widget.isEmbedded &&
+              widget.phaseMetadata.isEndless &&
+              widget.phaseMetadata.phase == 'practice',
           onBack: _handleStandaloneBack,
           onStop: _confirmStopStandalone,
+          onUserDone: () => timer.stop(),
         );
       },
     );
@@ -516,22 +537,22 @@ class _ActiveTimerView extends StatelessWidget {
   final BreathworkTechnique technique;
   final BreathworkTimerProvider timer;
   final bool showAppBar;
+  final bool showEndlessFooter;
   final VoidCallback onBack;
   final VoidCallback onStop;
+  final VoidCallback onUserDone;
 
   const _ActiveTimerView({
     required this.technique,
     required this.timer,
     required this.showAppBar,
+    required this.showEndlessFooter,
     required this.onBack,
     required this.onStop,
+    required this.onUserDone,
   });
 
-  String _fmtElapsed(int s) {
-    final m = (s ~/ 60).toString().padLeft(2, '0');
-    final sec = (s % 60).toString().padLeft(2, '0');
-    return '$m:$sec';
-  }
+  String _fmtElapsed(int s) => _fmtElapsedStatic(s);
 
   @override
   Widget build(BuildContext context) {
@@ -542,6 +563,19 @@ class _ActiveTimerView extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
         child: Column(
           children: [
+            const SizedBox(height: 8),
+            // AMENDMENT-1 D6: technique label always rendered. In embedded
+            // mode (state-focus practice / cross-pillar bookend) this is the
+            // only place the user sees which technique is playing.
+            Text(
+              technique.name,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppColors.primaryText,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             const SizedBox(height: 8),
             if (timer.currentInstruction.isNotEmpty)
               Padding(
@@ -582,6 +616,56 @@ class _ActiveTimerView extends StatelessWidget {
                     timer.isRunning ? timer.pause() : timer.resume(),
                 onStop: onStop,
               ),
+            // S14-T5: endless practice footer (stopwatch counting up +
+            // "I'm done" button). Only rendered when the orchestrator passed
+            // showEndlessFooter=true (state-focus practice in endless mode).
+            if (showEndlessFooter) ...[
+              Text(
+                _fmtElapsedStatic(timer.totalElapsedSeconds),
+                style: const TextStyle(
+                  fontFamily: 'RobotoMono',
+                  color: AppColors.primaryText,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w300,
+                  letterSpacing: 1.5,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'elapsed',
+                style: TextStyle(
+                  color: AppColors.hintText,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: onUserDone,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.purple.withValues(alpha: 0.15),
+                    foregroundColor: AppColors.purple,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(
+                        color: AppColors.purple.withValues(alpha: 0.4),
+                      ),
+                    ),
+                  ),
+                  child: const Text(
+                    "I'm done",
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
           ],
         ),

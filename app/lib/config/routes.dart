@@ -12,7 +12,7 @@ import '../pages/breathwork/breathwork_timer_page.dart';
 import '../pages/profile/profile_page.dart';
 import '../pages/progress/exercise_history_page.dart';
 import '../pages/progress/exercise_progress_page.dart';
-import '../pages/session/five_phase_session_page.dart';
+import '../pages/session/multi_phase_session_page.dart';
 import '../pages/workout_page.dart';
 import '../pages/yoga/yoga_session_page.dart';
 import '../pages/yoga/yoga_complete_page.dart';
@@ -103,7 +103,13 @@ GoRouter createRouter(AuthProvider authProvider) {
       ),
       GoRoute(
         path: '/session/cross-pillar',
-        builder: (context, state) => const FivePhaseSessionPage(),
+        builder: (context, state) =>
+            const MultiPhaseSessionPage(sessionShape: 'cross_pillar'),
+      ),
+      GoRoute(
+        path: '/session/state-focus',
+        builder: (context, state) =>
+            const MultiPhaseSessionPage(sessionShape: 'state_focus'),
       ),
       GoRoute(
         path: '/exercise-history',

@@ -6,11 +6,32 @@ import '../../players/phase_metadata.dart';
 import '../../players/phase_result.dart';
 import '../../players/yoga_session_player.dart';
 import '../../providers/yoga_session_provider.dart';
+import '../../services/wakelock_service.dart';
 
 /// Standalone yoga session shell. Hosts [YogaSessionPlayer] for the
 /// pre-seeded provider state. T4 split: chrome here, body in the player.
-class YogaSessionPage extends StatelessWidget {
+///
+/// S14-T5 AMENDMENT-1 D12: converted to StatefulWidget to acquire a
+/// wakelock for the lifetime of the page (release on dispose).
+class YogaSessionPage extends StatefulWidget {
   const YogaSessionPage({super.key});
+
+  @override
+  State<YogaSessionPage> createState() => _YogaSessionPageState();
+}
+
+class _YogaSessionPageState extends State<YogaSessionPage> {
+  @override
+  void initState() {
+    super.initState();
+    WakelockService.enable();
+  }
+
+  @override
+  void dispose() {
+    WakelockService.disable();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

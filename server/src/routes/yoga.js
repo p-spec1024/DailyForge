@@ -475,9 +475,12 @@ router.post('/session', authenticate, async (req, res, next) => {
   try {
     const { type, level, duration, focus, poses, focus_slug } = req.body;
     const dur = parseInt(duration, 10);
-    if (isNaN(dur) || dur < 5 || dur > 120) {
-      client.release();
-      return res.status(400).json({ error: 'Duration must be between 5 and 120 minutes' });
+    // AMENDMENT-1 D11: floor lowered from 5 → 1 to admit embedded cross-pillar
+    // sub-phases (engine emits warmup_total / cooldown_total as low as 3 min).
+    // No client.release() here — the finally block at end of handler is the
+    // single release site. Double-release crashed the pool prior to this fix.
+    if (isNaN(dur) || dur < 1 || dur > 120) {
+      return res.status(400).json({ error: 'Duration must be between 1 and 120 minutes' });
     }
     const validType = VALID_TYPES.includes(type) ? type : 'vinyasa';
     const validLevel = VALID_LEVELS.includes(level) ? level : 'intermediate';

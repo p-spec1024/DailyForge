@@ -37,6 +37,14 @@ class PhaseMetadata {
   /// false when on its own route.
   final bool isEmbedded;
 
+  /// S14-T5: session-level endless flag. Sourced from
+  /// `SuggestedSession.metadata.isEndless`, propagated down to embedded
+  /// players so they can switch UX mode:
+  ///   - state-focus practice + isEndless → stopwatch + "I'm done"
+  ///   - state-focus reflection + isEndless → silent screen, no timer
+  /// Defaults to false; cross-pillar phases (T4) never set this.
+  final bool isEndless;
+
   const PhaseMetadata({
     required this.focusSlug,
     required this.phase,
@@ -45,6 +53,7 @@ class PhaseMetadata {
     required this.items,
     required this.userLevels,
     required this.isEmbedded,
+    this.isEndless = false,
   });
 
   /// Construct a PhaseMetadata from an engine-supplied [SessionPhase]. Used
@@ -55,6 +64,7 @@ class PhaseMetadata {
     required String? focusSlug,
     required Map<String, String> userLevels,
     required bool isEmbedded,
+    bool isEndless = false,
   }) {
     if (phase.items.isEmpty) {
       throw StateError(
@@ -76,6 +86,7 @@ class PhaseMetadata {
       items: phase.items,
       userLevels: userLevels,
       isEmbedded: isEmbedded,
+      isEndless: isEndless,
     );
   }
 }

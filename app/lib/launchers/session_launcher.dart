@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../models/suggested_session.dart';
 import '../providers/cross_pillar_session_provider.dart';
+import '../providers/state_focus_session_provider.dart';
 import '../providers/workout_session_provider.dart';
 import '../providers/yoga_session_provider.dart';
 import '../services/api_service.dart';
@@ -36,9 +37,7 @@ class SessionLauncher {
         case 'cross_pillar':
           return await _launchCrossPillar(context, session);
         case 'state_focus':
-          throw UnimplementedError(
-            'state_focus shape lands in S14-T5 (3-leg chain).',
-          );
+          return await _launchStateFocus(context, session);
         default:
           throw UnimplementedError(
             'unknown session_shape: ${session.sessionShape}',
@@ -186,6 +185,103 @@ class SessionLauncher {
     context.go('/yoga/session');
   }
 
+  /// S14-T5: state-focus 3-stage chain. Mirrors the cross-pillar flow —
+  /// validates the session shape, checks for a resumable snapshot, and
+  /// either resumes or starts fresh before navigating to the renamed
+  /// [MultiPhaseSessionPage] under route `/session/state-focus`.
+  static Future<void> _launchStateFocus(
+    BuildContext context,
+    SuggestedSession session,
+  ) async {
+    _validateStateFocusShape(session);
+
+    final provider = context.read<StateFocusSessionProvider>();
+    final storage = context.read<StorageService>();
+
+    final existing = await provider.peekFromStorage(storage);
+    if (!context.mounted) return;
+    if (existing != null && _isFresh(existing.startedAt)) {
+      switch (existing.quitIntent) {
+        case 'pause':
+          final choice = await _showResumeDialog(context, existing);
+          if (!context.mounted) return;
+          if (choice == _ResumeChoice.resume) {
+            await provider.resumeFromStorage(storage);
+            if (!context.mounted) return;
+            context.go('/session/state-focus');
+            return;
+          } else if (choice == _ResumeChoice.discard) {
+            await provider.discard(storage);
+            if (!context.mounted) return;
+          } else {
+            return;
+          }
+          break;
+        case 'end_early':
+          await provider.discard(storage);
+          if (!context.mounted) return;
+          break;
+        case null:
+          await provider.resumeFromStorage(storage);
+          if (!context.mounted) return;
+          context.go('/session/state-focus');
+          return;
+      }
+    }
+
+    await provider.startFresh(session, storage: storage);
+    if (!context.mounted) return;
+    context.go('/session/state-focus');
+  }
+
+  /// Engine contract for state_focus (per S14-T5 pre-flight Gate 1):
+  ///   - session_shape == 'state_focus'
+  ///   - exactly 3 phases: ['centering', 'practice', 'reflection']
+  ///   - all items content_type == 'breathwork'
+  ///   - centering + practice: content_id != null
+  ///   - reflection: content_id == null (the silent-timer signal)
+  static void _validateStateFocusShape(SuggestedSession s) {
+    if (s.sessionShape != 'state_focus') {
+      throw StateError(
+        'expected state_focus, got ${s.sessionShape}',
+      );
+    }
+    if (s.phases.length != 3) {
+      throw StateError(
+        'state_focus must have 3 phases, got ${s.phases.length}',
+      );
+    }
+    const expectedPhases = ['centering', 'practice', 'reflection'];
+    for (int i = 0; i < 3; i++) {
+      final phase = s.phases[i];
+      if (phase.phase != expectedPhases[i]) {
+        throw StateError(
+          'phase $i expected ${expectedPhases[i]}, got ${phase.phase}',
+        );
+      }
+      if (phase.items.isEmpty) {
+        throw StateError('phase ${phase.phase} has no items');
+      }
+      final item = phase.items.first;
+      if (item.contentType != 'breathwork') {
+        throw StateError(
+          'state_focus item content_type must be breathwork, '
+          'got ${item.contentType} on ${phase.phase}',
+        );
+      }
+      if (i < 2 && item.contentId == null) {
+        throw StateError(
+          '${phase.phase} must have non-null content_id',
+        );
+      }
+      if (i == 2 && item.contentId != null) {
+        throw StateError(
+          'reflection must have null content_id; got ${item.contentId}',
+        );
+      }
+    }
+  }
+
   static Future<void> _launchCrossPillar(
     BuildContext context,
     SuggestedSession session,
@@ -258,7 +354,7 @@ class SessionLauncher {
 
   static Future<_ResumeChoice?> _showResumeDialog(
     BuildContext context,
-    CrossPillarSessionSnapshot snapshot,
+    MultiPhaseSessionSnapshot snapshot,
   ) async {
     final focusSlug = snapshot.session.metadata.focusSlug ?? 'session';
     return showDialog<_ResumeChoice>(
