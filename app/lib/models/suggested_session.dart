@@ -181,7 +181,13 @@ class SessionItem {
 class SessionMetadata {
   final int estimatedTotalMin;
   final Map<String, String> userLevels;
-  final String source;
+
+  /// S14-T6 §6.6 / AMENDMENT-1 Decision A: yoga style the engine committed
+  /// to (`'hatha'` / `'vinyasa'`). Emitted on all yoga-bearing recipes
+  /// (pillar-pure yoga + cross-pillar with yoga warmup/cooldown). Null on
+  /// pillar-pure-strength and state-focus responses, which have no yoga
+  /// phase. Consumed by the client-side yoga swap fallback chain.
+  final String? source;
 
   /// State-focus only (S13-T5): true when the engine generated an
   /// open-ended practice (no upper duration bound). null on body-focus
@@ -203,10 +209,10 @@ class SessionMetadata {
   const SessionMetadata({
     required this.estimatedTotalMin,
     required this.userLevels,
-    required this.source,
     required this.isEndless,
     required this.bracket,
     required this.focusSlug,
+    this.source,
   });
 
   factory SessionMetadata.fromJson(Map<String, dynamic> json) {
@@ -216,10 +222,10 @@ class SessionMetadata {
         'SessionMetadata: expected `estimated_total_min` to be a number, got ${est.runtimeType}',
       );
     }
-    final source = json['source'];
-    if (source is! String) {
+    final sourceRaw = json['source'];
+    if (sourceRaw != null && sourceRaw is! String) {
       throw FormatException(
-        'SessionMetadata: expected `source` to be a string, got ${source.runtimeType}',
+        'SessionMetadata: expected `source` to be a string or absent, got ${sourceRaw.runtimeType}',
       );
     }
     final rawLevels = json['user_levels'];
@@ -258,7 +264,7 @@ class SessionMetadata {
     return SessionMetadata(
       estimatedTotalMin: est.toInt(),
       userLevels: Map.unmodifiable(levels),
-      source: source,
+      source: sourceRaw as String?,
       isEndless: endlessRaw as bool?,
       bracket: bracketRaw as String?,
       focusSlug: focusSlugRaw as String?,

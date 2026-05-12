@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { authenticate } from '../middleware/auth.js';
 import { incrementSwap } from '../services/swapCounter.js';
+import { rankAlternatives } from '../services/substitutionLadder.js';
 
 const router = Router();
 router.use(authenticate);
@@ -276,6 +277,26 @@ router.put('/slot/:exerciseId/choose', async (req, res, next) => {
       client.release();
     }
 
+    // S14-T6 / FS #198: surface a ranked alternative list alongside the swap
+    // response. T6 UI consumes index 0; the full list is exposed for a future
+    // picker UX. Failures here must not break the save — log and return [].
+    let alternatives = [];
+    try {
+      const lvlRow = await pool.query(
+        `SELECT level FROM user_pillar_levels
+          WHERE user_id = $1 AND pillar = 'strength'`,
+        [req.user.id]
+      );
+      const pillarLevel = lvlRow.rows[0]?.level ?? 'beginner';
+      alternatives = await rankAlternatives({
+        userId: req.user.id,
+        originalExerciseId: exerciseId,
+        pillarLevel,
+      });
+    } catch (rankErr) {
+      console.error('[workout.slot.choose] rankAlternatives failed:', rankErr.message);
+    }
+
     res.json({
       success: true,
       slot_id: exerciseId,
@@ -283,6 +304,7 @@ router.put('/slot/:exerciseId/choose', async (req, res, next) => {
       should_prompt,
       swap_count,
       prompt_state,
+      alternatives,
     });
   } catch (err) {
     next(err);

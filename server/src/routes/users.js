@@ -117,4 +117,101 @@ router.get('/me/pillar-levels', async (req, res, next) => {
   }
 });
 
+// S14-T6 §6.1.1 — GET /api/users/me/streaks
+//
+// Computes three streak metrics server-side so the summary page doesn't
+// have to do client-date math (S12-T5 timezone-drift incident). Date math
+// stays inside one Postgres session — same TZ on both sides of comparisons.
+//
+// Response:
+//   {
+//     daily_streak_days: INT,
+//     focus_streak: { focus_slug: STRING | null, count_this_week: INT, is_first: BOOL },
+//     weekly_count: INT
+//   }
+//
+// Query param: ?focus_slug=<slug>  (the focus the session that just ended targeted)
+//   - Optional. When absent, focus_streak.focus_slug is null + count_this_week 0.
+router.get('/me/streaks', async (req, res, next) => {
+  try {
+    const focusSlug = typeof req.query.focus_slug === 'string' && req.query.focus_slug.length > 0
+      ? req.query.focus_slug
+      : null;
+
+    // 1. Daily streak — count consecutive days back from today, stopping at
+    //    the first gap. Looks back at most 60 days (cap-safe for v1; 60+ day
+    //    streaks are a great problem to have). Implementation: distinct
+    //    session-days, gap-detect via row_number vs date offset.
+    const dailyResult = await pool.query(
+      `WITH days AS (
+         SELECT DISTINCT date
+           FROM sessions
+          WHERE user_id = $1 AND completed = true
+            AND date >= CURRENT_DATE - INTERVAL '60 days'
+            AND date <= CURRENT_DATE
+       ),
+       ordered AS (
+         SELECT date,
+                ROW_NUMBER() OVER (ORDER BY date DESC) AS rn
+           FROM days
+       ),
+       streak_days AS (
+         SELECT date
+           FROM ordered
+          WHERE date = CURRENT_DATE - (rn - 1) * INTERVAL '1 day'
+       )
+       SELECT COUNT(*)::int AS days FROM streak_days`,
+      [req.user.id]
+    );
+    const dailyStreakDays = dailyResult.rows[0]?.days ?? 0;
+
+    // 2. Focus streak — count of sessions with the target focus_slug in the
+    //    current ISO week. is_first is true when 0 prior sessions for that
+    //    focus exist (anywhere in history) — drives the "Your first biceps
+    //    session this week" copy.
+    let focusStreak = {
+      focus_slug: focusSlug,
+      count_this_week: 0,
+      is_first: false,
+    };
+    if (focusSlug) {
+      const focusResult = await pool.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM sessions
+             WHERE user_id = $1 AND completed = true
+               AND focus_slug = $2
+               AND date >= date_trunc('week', CURRENT_DATE)) AS count_this_week,
+           (SELECT COUNT(*)::int FROM sessions
+             WHERE user_id = $1 AND completed = true
+               AND focus_slug = $2) AS total`,
+        [req.user.id, focusSlug]
+      );
+      const row = focusResult.rows[0] ?? { count_this_week: 0, total: 0 };
+      focusStreak = {
+        focus_slug: focusSlug,
+        count_this_week: row.count_this_week,
+        is_first: row.total <= 1,
+      };
+    }
+
+    // 3. Weekly count — all completed sessions this week (any focus).
+    const weeklyResult = await pool.query(
+      `SELECT COUNT(*)::int AS weekly_count
+         FROM sessions
+        WHERE user_id = $1 AND completed = true
+          AND date >= date_trunc('week', CURRENT_DATE)`,
+      [req.user.id]
+    );
+    const weeklyCount = weeklyResult.rows[0]?.weekly_count ?? 0;
+
+    res.json({
+      daily_streak_days: dailyStreakDays,
+      focus_streak: focusStreak,
+      weekly_count: weeklyCount,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;

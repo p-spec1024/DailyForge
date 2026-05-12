@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../models/completed_phase_snapshot.dart';
 import '../../models/suggested_session.dart';
 import '../../players/breathwork_player.dart';
 import '../../players/phase_metadata.dart';
@@ -16,6 +17,7 @@ import '../../services/api_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/wakelock_service.dart';
 import '../../utils/phase_label.dart';
+import 'session_summary_page.dart';
 import 'widgets/auto_advance_overlay.dart';
 import 'widgets/phase_indicator.dart';
 import 'widgets/phase_preview_sheet.dart';
@@ -231,17 +233,11 @@ class _MultiPhaseSessionPageState extends State<MultiPhaseSessionPage> {
     await provider.completeCurrentPhase(result, storage: storage);
     if (!context.mounted) return;
     if (provider.allPhasesDone) {
-      // Snapshot the count before complete() resets in-memory state.
-      final completedCount = provider.phasesCompletedCount;
-      final noun = provider.phasesNoun(completedCount);
+      // S14-T6 §6.1: snapshot args BEFORE complete() resets _phaseResults.
+      final args = _buildSummaryArgs(provider);
       await provider.complete(storage: storage, api: api);
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Session complete — $completedCount $noun logged.'),
-        ),
-      );
-      context.go('/home');
+      context.go('/session/summary', extra: args);
       return;
     }
     if (provider.useAutoAdvanceCountdown) {
@@ -272,28 +268,93 @@ class _MultiPhaseSessionPageState extends State<MultiPhaseSessionPage> {
     final storage = context.read<StorageService>();
     final api = context.read<ApiService>();
 
-    // State-focus uses a confirm bottom sheet (spec §7) — two-tap friction
-    // since calm-session users may be in emotionally sensitive states.
-    // Cross-pillar preserves T4's single-tap skip.
-    if (widget.sessionShape == 'state_focus') {
-      final confirmed = await _showSkipConfirmSheet(context, provider);
-      if (!context.mounted || confirmed != true) return;
-    }
+    // S14-T6 §6.2: confirm dialog for both shapes (cross-pillar previously
+    // single-tap; state-focus already had this). Calm-session users may be
+    // in emotionally sensitive states; cross-pillar users benefit from a
+    // misclick guard before losing the phase's elapsed work.
+    final confirmed = await _showSkipConfirmSheet(context, provider);
+    if (!context.mounted || confirmed != true) return;
 
+    final phaseLabel = _phaseLabel(provider.session!.phases[provider.currentPhaseIndex]);
     await provider.skipCurrentPhase(storage: storage);
     if (!context.mounted) return;
+
     if (provider.allPhasesDone) {
-      final completedCount = provider.phasesCompletedCount;
-      final noun = provider.phasesNoun(completedCount);
+      // Final-phase skip: skip the undo window and go straight to summary
+      // (the undo banner would be displaced by the summary navigation).
+      final args = _buildSummaryArgs(provider);
       await provider.complete(storage: storage, api: api);
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Session complete — $completedCount $noun logged.'),
-        ),
-      );
-      context.go('/home');
+      context.go('/session/summary', extra: args);
+      return;
     }
+    // S14-T6 §6.2: 3-second undo banner. SnackBar action lets the user
+    // restore the phase if they tapped Skip by mistake.
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('$phaseLabel skipped'),
+        duration: const Duration(seconds: 3),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () async {
+            final ok = await provider.undoLastSkip(storage: storage);
+            if (!context.mounted || !ok) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('$phaseLabel restored'),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Composes the summary page args from the provider's current state.
+  /// Must be called BEFORE [MultiPhaseSessionProvider.complete] resets
+  /// `_phaseResults`.
+  SessionSummaryArgs _buildSummaryArgs(MultiPhaseSessionProvider provider) {
+    final session = provider.session!;
+    final results = provider.phaseResults;
+    // Map phase index → PhaseResult so we can pair engine phases with the
+    // player's actual durations + skip flags.
+    final byIndex = <int, PhaseResult>{};
+    for (var i = 0; i < results.length && i < session.phases.length; i++) {
+      byIndex[i] = results[i];
+    }
+    final phases = <CompletedPhaseSnapshot>[];
+    final skippedLabels = <String>[];
+    var totalSeconds = 0;
+    for (var i = 0; i < session.phases.length; i++) {
+      final p = session.phases[i];
+      final r = byIndex[i];
+      final ct = p.items.isNotEmpty ? p.items.first.contentType : null;
+      final label = phaseDisplayLabel(p.phase, contentType: ct);
+      final dur = r?.actualDuration.inSeconds ?? 0;
+      final skipped = r?.wasSkipped ?? false;
+      final firstItem = p.items.isNotEmpty ? p.items.first : null;
+      phases.add(CompletedPhaseSnapshot(
+        phaseLabel: label,
+        phaseSlug: p.phase,
+        durationSeconds: skipped ? 0 : dur,
+        wasSkipped: skipped,
+        primaryContentName: firstItem?.name,
+      ));
+      if (skipped) skippedLabels.add(label);
+      if (!skipped) totalSeconds += dur;
+    }
+    return SessionSummaryArgs(
+      sessionShape: widget.sessionShape,
+      focusSlug: session.metadata.focusSlug ?? 'unknown',
+      focusDisplayName: _focusTitle(session.metadata.focusSlug),
+      phases: phases,
+      skippedPhaseLabels: skippedLabels,
+      totalSeconds: totalSeconds,
+      userLevels: Map<String, String>.from(session.metadata.userLevels),
+    );
   }
 
   Future<bool?> _showSkipConfirmSheet(
@@ -358,6 +419,7 @@ class _MultiPhaseSessionPageState extends State<MultiPhaseSessionPage> {
         phases: session.phases,
         currentIndex: provider.currentPhaseIndex,
         statuses: provider.statuses,
+        currentPhaseElapsedSeconds: provider.currentPhaseElapsedSeconds,
       ),
     );
   }

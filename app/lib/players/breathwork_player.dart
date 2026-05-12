@@ -134,26 +134,37 @@ class _BreathworkBodyState extends State<_BreathworkBody> {
       });
       final provider = context.read<BreathworkTimerProvider>();
       if (widget.isEmbedded) {
-        // S14-T5: state-focus practice in the endless bracket runs without
-        // a duration cap — the user drives completion via the "I'm done"
-        // button (which calls timer.stop, which writes the breathwork_sessions
-        // row with `duration_seconds = _totalElapsedSeconds`). All other
-        // embedded paths (T4 cross-pillar bookends, T5 centering, T5 timed
-        // practice) keep T4's hard cap.
-        final isOpenEnded = widget.phaseMetadata.isEndless &&
-            widget.phaseMetadata.phase == 'practice';
-        final dur = widget.phaseMetadata.durationMinutes;
-        provider.setTechnique(
-          t,
-          durationCapSeconds:
-              isOpenEnded ? null : (dur != null ? dur * 60 : null),
-          focusSlug: widget.phaseMetadata.focusSlug,
-        );
+        // S14-T6 §6.5: route through mode-aware start methods. Endless
+        // (state-focus practice) uses startEndless — no cap, user-driven
+        // completion. Capped (cross-pillar bookends, state-focus centering,
+        // timed practice) uses startCapped — cycle-boundary completion
+        // "always ≥ engine budget, never <" per Decision C.
+        //
         // Embedded: skip safety modal (engine is trusted to pick safe-for-
         // bookend techniques) and auto-start. Pre-flight gate 4 confirmed
         // engine bookends are always green-tier.
+        final isOpenEnded = widget.phaseMetadata.isEndless &&
+            widget.phaseMetadata.phase == 'practice';
+        final dur = widget.phaseMetadata.durationMinutes;
         _startedAt = DateTime.now();
-        provider.start();
+        if (isOpenEnded) {
+          provider.startEndless(
+            technique: t,
+            focusSlug: widget.phaseMetadata.focusSlug,
+          );
+        } else if (dur != null && dur > 0) {
+          provider.startCapped(
+            technique: t,
+            maxDuration: Duration(minutes: dur),
+            focusSlug: widget.phaseMetadata.focusSlug,
+          );
+        } else {
+          // Embedded but no duration in metadata — defensive fallback to
+          // full protocol. Engine should never emit this shape, but the
+          // path is here so a missing field doesn't crash the player.
+          provider.setTechnique(t, focusSlug: widget.phaseMetadata.focusSlug);
+          provider.start();
+        }
       } else {
         provider.setTechnique(t);
       }

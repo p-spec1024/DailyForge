@@ -112,22 +112,24 @@ void main() {
         () async {
       final service = _FakeBreathworkService();
       final provider = BreathworkTimerProvider.withService(service);
-      // Cap shorter than full protocol (3 cycles × 16s = 48s) — cap fires first.
-      provider.setTechnique(
-        _boxBreathing(cycles: 3),
-        durationCapSeconds: 10,
+      // S14-T6 Decision C: cap fires at cycle boundary, not mid-tick.
+      // Box Breathing cycle is 16s; with cap=10 the cap fires at end of
+      // cycle 1 (tick 16, elapsed=16 >= 10) — overshoot of 6s is the
+      // documented "always ≥ budget, never <" behavior.
+      provider.startCapped(
+        technique: _boxBreathing(cycles: 3),
+        maxDuration: const Duration(seconds: 10),
       );
 
       var notifications = 0;
       provider.addListener(() => notifications += 1);
-      provider.start();
 
-      for (var i = 0; i < 10; i++) {
+      for (var i = 0; i < 16; i++) {
         provider.debugTick();
       }
 
       expect(provider.isCompleted, isTrue,
-          reason: 'cap should complete the session after 10s elapsed');
+          reason: 'cap should complete the session at cycle 1 end');
       expect(provider.endReason, BreathworkEndReason.durationCap);
       expect(provider.wasInterrupted, isFalse,
           reason: 'cap completion is engine-driven, not user-initiated');
@@ -151,4 +153,132 @@ void main() {
       expect(provider.isIdle, isTrue);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // S14-T6 — BreathworkMode capped (Decision C: cycle-boundary cap;
+  // "always ≥ engine budget, never <"). Each case uses a 10s-per-cycle
+  // technique so the math is easy to read.
+  // ─────────────────────────────────────────────────────────────────────
+  group('S14-T6: BreathworkMode capped (cycle-boundary; Decision C)', () {
+    test('30s cap, 10s cycle → 3 cycles, stops at ~30s', () async {
+      final service = _FakeBreathworkService();
+      final provider = BreathworkTimerProvider.withService(service);
+      provider.startCapped(
+        technique: _tenSecondCycle(cycles: 10),
+        maxDuration: const Duration(seconds: 30),
+      );
+      for (var i = 0; i < 30; i++) {
+        provider.debugTick();
+      }
+      expect(provider.isCompleted, isTrue);
+      expect(provider.endReason, BreathworkEndReason.durationCap);
+      expect(provider.roundsCompleted, 3);
+      expect(provider.totalElapsedSeconds, 30);
+      expect(provider.mode, BreathworkMode.capped);
+    });
+
+    test('5s cap, 10s cycle → 1 cycle, stops at ~10s (cycle integrity wins)',
+        () async {
+      final service = _FakeBreathworkService();
+      final provider = BreathworkTimerProvider.withService(service);
+      provider.startCapped(
+        technique: _tenSecondCycle(cycles: 10),
+        maxDuration: const Duration(seconds: 5),
+      );
+      for (var i = 0; i < 10; i++) {
+        provider.debugTick();
+      }
+      expect(provider.isCompleted, isTrue);
+      expect(provider.endReason, BreathworkEndReason.durationCap);
+      expect(provider.roundsCompleted, 1,
+          reason: 'cap is < cycle length — completes exactly 1 cycle');
+      expect(provider.totalElapsedSeconds, 10);
+    });
+
+    test('0s cap → throws ArgumentError', () async {
+      final service = _FakeBreathworkService();
+      final provider = BreathworkTimerProvider.withService(service);
+      expect(
+        () => provider.startCapped(
+          technique: _tenSecondCycle(cycles: 1),
+          maxDuration: Duration.zero,
+        ),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test('endless mode does NOT auto-complete at totalRounds (regression)',
+        () async {
+      final service = _FakeBreathworkService();
+      final provider = BreathworkTimerProvider.withService(service);
+      provider.startEndless(technique: _tenSecondCycle(cycles: 2));
+      // Tick past the protocol cycle count — 3 cycles' worth.
+      for (var i = 0; i < 30; i++) {
+        provider.debugTick();
+      }
+      expect(provider.isCompleted, isFalse,
+          reason: 'endless mode keeps cycling past protocol totalRounds');
+      expect(provider.mode, BreathworkMode.endless);
+      // User-driven stop still works in endless mode.
+      provider.stop();
+      expect(provider.isCompleted, isTrue);
+      expect(provider.endReason, BreathworkEndReason.userStopped);
+    });
+
+    test('protocolCycles mode still completes at totalRounds (regression)',
+        () async {
+      final service = _FakeBreathworkService();
+      final provider = BreathworkTimerProvider.withService(service);
+      provider.setTechnique(_tenSecondCycle(cycles: 2));
+      expect(provider.mode, BreathworkMode.protocolCycles);
+      provider.start();
+      for (var i = 0; i < 20; i++) {
+        provider.debugTick();
+      }
+      expect(provider.isCompleted, isTrue);
+      expect(provider.endReason, BreathworkEndReason.naturalCompletion);
+      expect(provider.roundsCompleted, 2);
+    });
+
+    test('25s cap, 10s cycle → 3 cycles, stops at 30s (overshoot of 5s)',
+        () async {
+      final service = _FakeBreathworkService();
+      final provider = BreathworkTimerProvider.withService(service);
+      provider.startCapped(
+        technique: _tenSecondCycle(cycles: 10),
+        maxDuration: const Duration(seconds: 25),
+      );
+      for (var i = 0; i < 30; i++) {
+        provider.debugTick();
+      }
+      expect(provider.isCompleted, isTrue,
+          reason: 'cap (25s) crossed during cycle 3 — finish the cycle, then stop');
+      expect(provider.endReason, BreathworkEndReason.durationCap);
+      expect(provider.roundsCompleted, 3,
+          reason: 'cycle 3 was completed in-progress when cap crossed');
+      expect(provider.totalElapsedSeconds, 30,
+          reason: 'overshoot of 5s is the documented Decision C behavior');
+    });
+  });
+}
+
+/// Helper: build a 10-second-per-cycle technique for capped-mode tests.
+/// Two phases of 5s each = 10s cycle, regardless of `cycles` count.
+BreathworkTechnique _tenSecondCycle({required int cycles}) {
+  return BreathworkTechnique(
+    id: 99,
+    name: '10s test technique',
+    tradition: 'modern',
+    category: 'balancing',
+    purposes: const ['calm'],
+    difficulty: 'beginner',
+    safetyLevel: 'green',
+    protocol: <String, dynamic>{
+      'cycles': cycles,
+      'phases': <Map<String, dynamic>>[
+        {'type': 'inhale', 'duration': 5},
+        {'type': 'exhale', 'duration': 5},
+      ],
+    },
+  );
 }

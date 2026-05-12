@@ -47,6 +47,15 @@ abstract class MultiPhaseSessionProvider extends ChangeNotifier {
   final List<PhaseResult> _phaseResults = [];
   QuitIntent _quitIntent;
 
+  /// S14-T6 §6.3: wall-clock anchor for the current phase. Used by the
+  /// preview modal to render "Now • {time remaining}". Re-set on every
+  /// [_advance], cleared on session end. Resumed sessions don't restore
+  /// the original anchor — modal shows time-since-resume, which is fine
+  /// for a transient sheet.
+  DateTime? _currentPhaseStartedAt;
+  DateTime? _pausedAt;
+  Duration _accumulatedPauseOnPhase = Duration.zero;
+
   SuggestedSession? get session => _session;
   int get currentPhaseIndex => _currentPhaseIndex;
   Map<int, PhaseStatus> get statuses => Map.unmodifiable(_statuses);
@@ -60,6 +69,30 @@ abstract class MultiPhaseSessionProvider extends ChangeNotifier {
   /// phases_completed` and by the end-early snackbar.
   int get phasesCompletedCount =>
       _phaseResults.where((r) => !r.wasSkipped).length;
+
+  /// S14-T6 §6.2: phase slugs (engine tokens like `bookend_open`, `warmup`,
+  /// `centering`) the user skipped during the session. Drives the summary
+  /// page's "skipped" badge + share-card stat strip.
+  Set<String> get skippedPhaseSlugs => _phaseResults
+      .where((r) => r.wasSkipped)
+      .map((r) => r.phase)
+      .toSet();
+
+  /// S14-T6 §6.3: seconds elapsed in the current phase, computed from a
+  /// wall-clock anchor minus any time the orchestrator was paused. Returns
+  /// 0 before the first phase starts or after session end.
+  int get currentPhaseElapsedSeconds {
+    final start = _currentPhaseStartedAt;
+    if (start == null) return 0;
+    final raw = DateTime.now().difference(start);
+    final pauseAdjust = _accumulatedPauseOnPhase +
+        (_paused && _pausedAt != null
+            ? DateTime.now().difference(_pausedAt!)
+            : Duration.zero);
+    final net = raw - pauseAdjust;
+    if (net.isNegative) return 0;
+    return net.inSeconds;
+  }
 
   /// True when the orchestrator is on its final phase (zero-indexed).
   bool get isLastPhase {
@@ -94,6 +127,9 @@ abstract class MultiPhaseSessionProvider extends ChangeNotifier {
     _statuses[0] = PhaseStatus.active;
     _paused = false;
     _startedAt = DateTime.now();
+    _currentPhaseStartedAt = DateTime.now();
+    _accumulatedPauseOnPhase = Duration.zero;
+    _pausedAt = null;
     _phaseResults.clear();
     _quitIntent = null;
     await _persist(storage);
@@ -127,6 +163,10 @@ abstract class MultiPhaseSessionProvider extends ChangeNotifier {
     _statuses = Map.of(snapshot.statuses);
     _paused = snapshot.paused;
     _startedAt = snapshot.startedAt;
+    // S14-T6: phase-level elapsed isn't persisted; resume anchors to now.
+    _currentPhaseStartedAt = DateTime.now();
+    _accumulatedPauseOnPhase = Duration.zero;
+    _pausedAt = null;
     _phaseResults
       ..clear()
       ..addAll(snapshot.phaseResults);
@@ -168,9 +208,37 @@ abstract class MultiPhaseSessionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// S14-T6 §6.2: undo the most recent skip if it was the last action and
+  /// it skipped the immediately-preceding phase. Returns true on success.
+  ///
+  /// Defensive: refuses to undo if the previous result wasn't a skip
+  /// (player completion), if there's no result to undo, or if the cursor
+  /// has moved on past one phase (multiple advances since the skip).
+  Future<bool> undoLastSkip({required StorageService storage}) async {
+    if (_session == null || _phaseResults.isEmpty) return false;
+    final last = _phaseResults.last;
+    if (!last.wasSkipped) return false;
+    final skippedIndex = _currentPhaseIndex - 1;
+    if (skippedIndex < 0) return false;
+    if (_statuses[skippedIndex] != PhaseStatus.skipped) return false;
+    _phaseResults.removeLast();
+    _currentPhaseIndex = skippedIndex;
+    _statuses[skippedIndex] = PhaseStatus.active;
+    _paused = false;
+    _currentPhaseStartedAt = DateTime.now();
+    _accumulatedPauseOnPhase = Duration.zero;
+    _pausedAt = null;
+    await _persist(storage);
+    notifyListeners();
+    return true;
+  }
+
   Future<void> pause({required StorageService storage}) async {
     _requireActive();
-    _paused = true;
+    if (!_paused) {
+      _paused = true;
+      _pausedAt = DateTime.now();
+    }
     _statuses[_currentPhaseIndex] = PhaseStatus.paused;
     await _persist(storage);
     notifyListeners();
@@ -178,6 +246,10 @@ abstract class MultiPhaseSessionProvider extends ChangeNotifier {
 
   Future<void> resume({required StorageService storage}) async {
     _requireActive();
+    if (_paused && _pausedAt != null) {
+      _accumulatedPauseOnPhase += DateTime.now().difference(_pausedAt!);
+      _pausedAt = null;
+    }
     _paused = false;
     _statuses[_currentPhaseIndex] = PhaseStatus.active;
     await _persist(storage);
@@ -269,6 +341,9 @@ abstract class MultiPhaseSessionProvider extends ChangeNotifier {
     _statuses = {};
     _paused = false;
     _startedAt = null;
+    _currentPhaseStartedAt = null;
+    _accumulatedPauseOnPhase = Duration.zero;
+    _pausedAt = null;
     _phaseResults.clear();
     _quitIntent = null;
   }
@@ -280,6 +355,9 @@ abstract class MultiPhaseSessionProvider extends ChangeNotifier {
       _statuses[_currentPhaseIndex] = PhaseStatus.active;
     }
     _paused = false;
+    _currentPhaseStartedAt = DateTime.now();
+    _accumulatedPauseOnPhase = Duration.zero;
+    _pausedAt = null;
   }
 
   void _requireActive() {

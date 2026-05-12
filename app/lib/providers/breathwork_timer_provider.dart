@@ -15,6 +15,23 @@ enum TimerState { idle, running, paused, completed }
 /// hung silently when the duration cap fired (no notifyListeners).
 enum BreathworkEndReason { none, naturalCompletion, userStopped, durationCap }
 
+/// How the timer decides when to stop.
+///
+/// S14-T6 / AMENDMENT-1 Decision C: cap semantics moved from mid-tick to
+/// cycle boundary — "always ≥ engine budget, never <". Cycle integrity is
+/// the UX contract; bookends may overshoot the budget by up to one cycle
+/// length.
+///
+/// * [protocolCycles] — standalone default. Runs the technique's full
+///   `protocol.cycles` count, then completes naturally.
+/// * [endless] — state-focus practice. Runs without a cap; user drives
+///   completion via the "I'm done" button (which calls [stop]). If the
+///   protocol cycle count is reached first, natural completion still fires.
+/// * [capped] — cross-pillar embedded bookend / centering. Runs until at
+///   least [maxDuration] has elapsed, then completes the in-progress cycle
+///   and stops. Always ≥ budget, never <.
+enum BreathworkMode { protocolCycles, endless, capped }
+
 class BreathworkPhase {
   final String type;
   final int duration;
@@ -54,6 +71,7 @@ class BreathworkTimerProvider extends ChangeNotifier {
   int _totalElapsedSeconds = 0;
   bool _sessionLogged = false;
   BreathworkEndReason _endReason = BreathworkEndReason.none;
+  BreathworkMode _mode = BreathworkMode.protocolCycles;
 
   Timer? _timer;
 
@@ -104,6 +122,7 @@ class BreathworkTimerProvider extends ChangeNotifier {
   int get secondsRemaining => _phaseSecondsRemaining;
 
   BreathworkEndReason get endReason => _endReason;
+  BreathworkMode get mode => _mode;
 
   /// True only for user-initiated stops (Stop button). Natural completion
   /// and duration-cap completion are NOT interruptions — they're the
@@ -162,10 +181,12 @@ class BreathworkTimerProvider extends ChangeNotifier {
     BreathworkTechnique technique, {
     int? durationCapSeconds,
     String? focusSlug,
+    BreathworkMode mode = BreathworkMode.protocolCycles,
   }) {
     _technique = technique;
     _durationCapSeconds = durationCapSeconds;
     _focusSlug = focusSlug;
+    _mode = mode;
     final protocol = technique.protocol;
     final rawPhases = (protocol['phases'] as List?) ?? const [];
     _phases = rawPhases
@@ -175,6 +196,49 @@ class BreathworkTimerProvider extends ChangeNotifier {
         .toList();
     _totalRounds = (protocol['cycles'] as num?)?.toInt() ?? 1;
     reset();
+  }
+
+  /// S14-T6 §6.5: configure + immediately start in capped mode. Cap fires
+  /// at the next cycle boundary once elapsed >= maxDuration (Decision C —
+  /// "always ≥ engine budget, never <"). Used by cross-pillar embedded
+  /// bookends and state-focus centering.
+  void startCapped({
+    required BreathworkTechnique technique,
+    required Duration maxDuration,
+    String? focusSlug,
+  }) {
+    if (maxDuration <= Duration.zero) {
+      throw ArgumentError.value(
+        maxDuration,
+        'maxDuration',
+        'must be > 0 (engine clamps via *_duration_min — defensive)',
+      );
+    }
+    setTechnique(
+      technique,
+      durationCapSeconds: maxDuration.inSeconds,
+      focusSlug: focusSlug,
+      mode: BreathworkMode.capped,
+    );
+    start();
+  }
+
+  /// S14-T6 §6.5: configure + immediately start in endless mode. No cap;
+  /// user drives completion via [stop]. If the protocol cycle count is
+  /// reached first, natural completion fires (the user is unlikely to
+  /// outlast 5+ cycles of a state-focus practice, but the path is honored
+  /// for cleanliness).
+  void startEndless({
+    required BreathworkTechnique technique,
+    String? focusSlug,
+  }) {
+    setTechnique(
+      technique,
+      durationCapSeconds: null,
+      focusSlug: focusSlug,
+      mode: BreathworkMode.endless,
+    );
+    start();
   }
 
   void reset() {
@@ -228,12 +292,9 @@ class BreathworkTimerProvider extends ChangeNotifier {
     if (_state != TimerState.running) return;
     _totalElapsedSeconds += 1;
     _phaseSecondsRemaining -= 1;
-    // S14-T4: duration cap (embedded mode honors engine's phase budget).
-    final cap = _durationCapSeconds;
-    if (cap != null && _totalElapsedSeconds >= cap) {
-      _completeSession(BreathworkEndReason.durationCap);
-      return;
-    }
+    // S14-T6 Decision C: the duration cap moved from mid-tick to the
+    // cycle-boundary branch of [_advancePhase]. Cycle integrity > exact
+    // budget compliance — bookends may overshoot by < one cycle length.
     if (_phaseSecondsRemaining <= 0) {
       _advancePhase();
       if (_state == TimerState.completed) return;
@@ -244,8 +305,26 @@ class BreathworkTimerProvider extends ChangeNotifier {
   void _advancePhase() {
     final nextIndex = _currentPhaseIndex + 1;
     if (nextIndex >= _phases.length) {
-      // End of round
-      if (_currentRound >= _totalRounds) {
+      // End of cycle. Decide whether to start another cycle or complete.
+      //
+      // S14-T6 Decision C: capped mode checks the budget here, AFTER the
+      // current cycle completed. "Always ≥ engine budget, never <" —
+      // overshoots up to one cycle length are acceptable; mid-cycle cuts
+      // feel jarring and broken.
+      final cap = _durationCapSeconds;
+      if (_mode == BreathworkMode.capped &&
+          cap != null &&
+          _totalElapsedSeconds >= cap) {
+        _completeSession(BreathworkEndReason.durationCap);
+        return;
+      }
+      // protocolCycles completes at totalRounds; endless does NOT auto-
+      // complete on the protocol count (user drives via stop()). If the
+      // user happens to ride a state-focus practice past its protocol
+      // count, endless keeps cycling — the round counter increments past
+      // _totalRounds; the endless UI shows the stopwatch instead.
+      if (_mode != BreathworkMode.endless &&
+          _currentRound >= _totalRounds) {
         _completeSession(BreathworkEndReason.naturalCompletion);
         return;
       }
@@ -293,6 +372,13 @@ class BreathworkTimerProvider extends ChangeNotifier {
     // a round boundary.
     if (_endReason == BreathworkEndReason.naturalCompletion) {
       return _totalRounds;
+    }
+    // S14-T6 Decision C: cap now fires at cycle boundary (after the in-
+    // progress cycle completes), so _currentRound reflects fully-completed
+    // cycles — no -1 needed. User-stop still subtracts 1 (user interrupted
+    // mid-round; the current round is in progress, not complete).
+    if (_endReason == BreathworkEndReason.durationCap) {
+      return _currentRound.clamp(0, _totalRounds);
     }
     return (_currentRound - 1).clamp(0, _totalRounds);
   }

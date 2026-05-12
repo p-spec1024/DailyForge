@@ -42,6 +42,11 @@ dependencies:
   # S14-T5 AMENDMENT-1 D12: hold screen on during active sessions.
   wakelock_plus: ^1.2.8
 
+  # S14-T6 §6.1.2: native share sheet for the post-session summary card.
+  share_plus: ^10.1.0
+  # Required by share_plus for the temp PNG paths.
+  path_provider: ^2.1.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

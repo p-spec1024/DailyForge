@@ -17,6 +17,7 @@ import {
   NotImplementedError,
 } from '../src/services/suggestionEngine.js';
 import { incrementSwap, setPromptState } from '../src/services/swapCounter.js';
+import { rankAlternatives } from '../src/services/substitutionLadder.js';
 import jwt from 'jsonwebtoken';
 import { createApp } from '../src/index.js';
 
@@ -3500,6 +3501,272 @@ async function main() {
       try { cpsServer.close(); } catch {}
       process.removeListener('SIGINT', cpsAbortHandler);
       process.removeListener('SIGTERM', cpsAbortHandler);
+    }
+  }
+
+  // ── S14-T6 BLOCK ─────────────────────────────────────────────────────
+  // Verifies the three engine-side T6 changes:
+  //   §A — pillar-pure yoga emits metadata.source per level (Decision A)
+  //   §B — substitutionLadder.rankAlternatives ordering + exclusion + cap
+  //   §C — GET /api/users/me/streaks shape (in-process server)
+  //   §D — recency-warning shape preservation (existing engine output)
+  //
+  // All mutations are restored in finally. Sentinel: notes='t6-s14-fixture'.
+  {
+    console.log('\n=== S14-T6 BLOCK ===');
+
+    // Snapshot user's yoga level so §A's per-level overrides restore cleanly.
+    const yogaLevelSnap = await pool.query(
+      `SELECT level FROM user_pillar_levels WHERE user_id = $1 AND pillar = 'yoga'`,
+      [user.id]
+    );
+    const yogaLevelOriginal = yogaLevelSnap.rows[0]?.level ?? null;
+
+    // Helper: set the user's yoga level (insert-or-update).
+    async function setYogaLevel(level) {
+      await pool.query(
+        `INSERT INTO user_pillar_levels (user_id, pillar, level, source)
+         VALUES ($1, 'yoga', $2, 'inferred')
+         ON CONFLICT (user_id, pillar)
+         DO UPDATE SET level = EXCLUDED.level, updated_at = NOW()`,
+        [user.id, level]
+      );
+    }
+
+    async function restoreYogaLevel() {
+      if (yogaLevelOriginal) {
+        await setYogaLevel(yogaLevelOriginal);
+      } else {
+        await pool.query(
+          `DELETE FROM user_pillar_levels WHERE user_id = $1 AND pillar = 'yoga'`,
+          [user.id]
+        );
+      }
+    }
+
+    const T6S14_FIXTURE_NOTE = 't6-s14-fixture';
+
+    try {
+      // ── §A: yoga metadata.source per level ─────────────────────────────
+      console.log('\n--- S14-T6/A yoga style emission per level ---');
+      const styleByLevel = {
+        beginner:     'hatha',
+        intermediate: 'vinyasa',
+        advanced:     'vinyasa',
+      };
+      // Pick a focus that has thick yoga coverage across styles. 'core' tends
+      // to have hatha + vinyasa rows; if it ever doesn't, swap to 'back'.
+      const styleTestFocus = 'core';
+      for (const [level, expectedStyle] of Object.entries(styleByLevel)) {
+        await setYogaLevel(level);
+        try {
+          const sess = await generateSession({
+            user_id: user.id,
+            focus_slug: styleTestFocus,
+            entry_point: 'yoga_tab',
+            time_budget_min: 30,
+          });
+          check(`S14-T6/A ${level}: metadata.source === ${expectedStyle}`,
+            sess.metadata?.source === expectedStyle,
+            `got ${sess.metadata?.source}`);
+          // Main-phase poses must carry the resolved style in practice_types.
+          const main = sess.phases.find((p) => p.phase === 'main');
+          if (main && main.items.length > 0) {
+            const mainIds = main.items.map((it) => it.content_id);
+            const { rows } = await pool.query(
+              `SELECT id, practice_types FROM exercises WHERE id = ANY($1::int[])`,
+              [mainIds]
+            );
+            const allMatch = rows.every((r) =>
+              Array.isArray(r.practice_types) && r.practice_types.includes(expectedStyle)
+            );
+            check(`S14-T6/A ${level}: main poses all carry style=${expectedStyle}`,
+              allMatch,
+              `pose styles: ${rows.map((r) => `${r.id}:${JSON.stringify(r.practice_types)}`).join(' / ')}`);
+          }
+        } catch (e) {
+          // Empty pool for this focus+style+level is a content-coverage gap,
+          // not an engine bug. Surface as a soft fail with context.
+          check(`S14-T6/A ${level}: generateSession did not throw`,
+            false,
+            `threw: ${e.message}`);
+        }
+      }
+
+      // ── §B: substitution ladder ─────────────────────────────────────────
+      console.log('\n--- S14-T6/B substitutionLadder.rankAlternatives ---');
+      // Pick a strength exercise the user can actually swap against (one with
+      // slot_alternatives rows). Find it dynamically — content varies by env.
+      const candidatePoolQuery = await pool.query(
+        `SELECT sa.exercise_id, COUNT(*)::int AS alt_count
+           FROM slot_alternatives sa
+           JOIN exercises e ON e.id = sa.alternative_exercise_id
+          WHERE e.type = 'strength'
+          GROUP BY sa.exercise_id
+         HAVING COUNT(*) >= 3
+          ORDER BY alt_count DESC
+          LIMIT 1`
+      );
+      if (candidatePoolQuery.rows.length === 0) {
+        console.log('  SKIP  S14-T6/B — no strength exercise with >=3 alternatives in DB');
+      } else {
+        const ladderExId = candidatePoolQuery.rows[0].exercise_id;
+        const ladder = await rankAlternatives({
+          userId: user.id,
+          originalExerciseId: ladderExId,
+          pillarLevel: 'beginner',
+        });
+        check('S14-T6/B ladder: returns array',
+          Array.isArray(ladder), `got ${typeof ladder}`);
+        check('S14-T6/B ladder: size <= 5',
+          ladder.length <= 5, `got ${ladder.length}`);
+        check('S14-T6/B ladder: descending by rank_score',
+          ladder.every((r, i) => i === 0 || ladder[i - 1].rank_score >= r.rank_score),
+          `scores: ${ladder.map((r) => r.rank_score).join(',')}`);
+        check('S14-T6/B ladder: rows shaped correctly',
+          ladder.every((r) =>
+            Number.isInteger(r.exercise_id) &&
+            typeof r.name === 'string' &&
+            typeof r.difficulty === 'string' &&
+            typeof r.rank_score === 'number'),
+          `rows: ${JSON.stringify(ladder.slice(0, 1))}`);
+        check('S14-T6/B ladder: original not in results',
+          ladder.every((r) => r.exercise_id !== ladderExId),
+          `ids: ${ladder.map((r) => r.exercise_id).join(',')}`);
+
+        // Exclusion sub-test: pick the top-1 candidate, exclude it, re-rank,
+        // verify it's filtered out.
+        if (ladder.length > 0) {
+          const toExclude = ladder[0].exercise_id;
+          await pool.query(
+            `INSERT INTO user_excluded_exercises (user_id, content_type, content_id)
+             VALUES ($1, 'strength', $2)
+             ON CONFLICT DO NOTHING`,
+            [user.id, toExclude]
+          );
+          try {
+            const reranked = await rankAlternatives({
+              userId: user.id,
+              originalExerciseId: ladderExId,
+              pillarLevel: 'beginner',
+            });
+            check('S14-T6/B ladder: excluded candidate filtered out',
+              reranked.every((r) => r.exercise_id !== toExclude),
+              `still present in: ${reranked.map((r) => r.exercise_id).join(',')}`);
+          } finally {
+            await pool.query(
+              `DELETE FROM user_excluded_exercises
+                WHERE user_id = $1 AND content_type = 'strength' AND content_id = $2`,
+              [user.id, toExclude]
+            );
+          }
+        }
+      }
+
+      // ── §C: GET /api/users/me/streaks ────────────────────────────────────
+      console.log('\n--- S14-T6/C streaks endpoint ---');
+      if (!process.env.JWT_SECRET) {
+        console.log('  SKIP  S14-T6/C — JWT_SECRET not set');
+      } else {
+        const t6App = createApp();
+        const t6Server = await new Promise((resolve) => {
+          const s = t6App.listen(0, '127.0.0.1', () => resolve(s));
+        });
+        const t6Port = t6Server.address().port;
+        const t6Base = `http://127.0.0.1:${t6Port}`;
+        const t6Token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '5m' });
+        const t6H = { Authorization: `Bearer ${t6Token}` };
+
+        try {
+          // No focus_slug — focus_streak.focus_slug should be null.
+          const r1 = await fetch(`${t6Base}/api/users/me/streaks`, { headers: t6H });
+          check('S14-T6/C no-focus: 200', r1.status === 200, `got ${r1.status}`);
+          const j1 = await r1.json();
+          check('S14-T6/C no-focus: daily_streak_days is int',
+            Number.isInteger(j1.daily_streak_days), `got ${j1.daily_streak_days}`);
+          check('S14-T6/C no-focus: weekly_count is int',
+            Number.isInteger(j1.weekly_count), `got ${j1.weekly_count}`);
+          check('S14-T6/C no-focus: focus_streak.focus_slug === null',
+            j1.focus_streak?.focus_slug === null, `got ${j1.focus_streak?.focus_slug}`);
+
+          // With focus_slug — shape should populate.
+          const r2 = await fetch(`${t6Base}/api/users/me/streaks?focus_slug=biceps`, { headers: t6H });
+          check('S14-T6/C with-focus: 200', r2.status === 200, `got ${r2.status}`);
+          const j2 = await r2.json();
+          check('S14-T6/C with-focus: focus_streak.focus_slug === biceps',
+            j2.focus_streak?.focus_slug === 'biceps', `got ${j2.focus_streak?.focus_slug}`);
+          check('S14-T6/C with-focus: focus_streak.count_this_week is int',
+            Number.isInteger(j2.focus_streak?.count_this_week),
+            `got ${j2.focus_streak?.count_this_week}`);
+          check('S14-T6/C with-focus: focus_streak.is_first is bool',
+            typeof j2.focus_streak?.is_first === 'boolean',
+            `got ${typeof j2.focus_streak?.is_first}`);
+        } finally {
+          try { t6Server.close(); } catch {}
+        }
+      }
+
+      // ── §D: recency-warning shape preservation ───────────────────────────
+      console.log('\n--- S14-T6/D recency-warning shape ---');
+      // Insert a fixture session for yesterday + 'chest', then request
+      // 'triceps' (overlapping muscle). Engine should return a warning.
+      const fixtureSessionInsert = await pool.query(
+        `INSERT INTO sessions (user_id, date, completed, focus_slug, type, notes)
+         VALUES ($1, CURRENT_DATE - INTERVAL '1 day', true, 'chest', 'strength', $2)
+         RETURNING id`,
+        [user.id, T6S14_FIXTURE_NOTE]
+      );
+      const fixtureSessionId = fixtureSessionInsert.rows[0].id;
+      try {
+        const recencyTest = await generateSession({
+          user_id: user.id,
+          focus_slug: 'triceps',
+          entry_point: 'home',
+          time_budget_min: 30,
+        });
+        check('S14-T6/D warnings is array',
+          Array.isArray(recencyTest.warnings),
+          `got ${typeof recencyTest.warnings}`);
+        // The warning may or may not fire depending on focus_overlaps seed
+        // state. When it fires, the shape must match spec §6.4.
+        const w = recencyTest.warnings.find((x) => x.type === 'recency_overlap');
+        if (w) {
+          check('S14-T6/D warning.type === recency_overlap',
+            w.type === 'recency_overlap');
+          check('S14-T6/D warning has yesterday_focus',
+            typeof w.yesterday_focus === 'string' && w.yesterday_focus.length > 0,
+            `got ${w.yesterday_focus}`);
+          check('S14-T6/D warning.current_focus === triceps',
+            w.current_focus === 'triceps', `got ${w.current_focus}`);
+          check('S14-T6/D warning has message',
+            typeof w.message === 'string' && w.message.length > 0,
+            `got ${w.message}`);
+          check('S14-T6/D warning.alternative_focus_slug === recover',
+            w.alternative_focus_slug === 'recover',
+            `got ${w.alternative_focus_slug}`);
+        } else {
+          console.log('  SKIP  S14-T6/D — no recency overlap fired (focus_overlaps seed gap?)');
+        }
+        // State-focus must always return warnings=[].
+        const stateTest = await generateSession({
+          user_id: user.id,
+          focus_slug: 'calm',
+          entry_point: 'breathwork_tab',
+          bracket: '0-10',
+        });
+        check('S14-T6/D state_focus: warnings === []',
+          Array.isArray(stateTest.warnings) && stateTest.warnings.length === 0,
+          `got ${JSON.stringify(stateTest.warnings)}`);
+      } finally {
+        await pool.query(`DELETE FROM sessions WHERE id = $1`, [fixtureSessionId]);
+      }
+    } finally {
+      await restoreYogaLevel();
+      // Defensive sentinel cleanup — catches any stray fixture inserts.
+      await pool.query(
+        `DELETE FROM sessions WHERE user_id = $1 AND notes = $2`,
+        [user.id, T6S14_FIXTURE_NOTE]
+      );
     }
   }
 

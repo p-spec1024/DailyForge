@@ -8,6 +8,7 @@ import '../../models/suggested_session.dart';
 import '../../providers/strength_provider.dart';
 import '../../providers/suggest_provider.dart';
 import '../../widgets/glass_card.dart';
+import '../../widgets/home/entry_point_warning_slot.dart';
 import 'widgets/exercise_browse_card.dart';
 import 'widgets/muscle_filter_chips.dart';
 import 'widgets/routine_card.dart';
@@ -107,6 +108,10 @@ class _StrengthPageState extends State<StrengthPage> {
                     ),
                   ),
 
+                  // S14-T6 §6.4: recency-overlap banner above today's card.
+                  const SliverToBoxAdapter(
+                    child: EntryPointWarningSlot(entryPoint: 'strength_tab'),
+                  ),
                   // S14-T1 reroute: Today's strength workout (engine-seeded).
                   SliverToBoxAdapter(
                     child: Padding(

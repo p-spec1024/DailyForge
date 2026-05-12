@@ -9,6 +9,7 @@ import '../../providers/suggest_provider.dart';
 import '../../providers/yoga_provider.dart';
 import '../../providers/yoga_session_provider.dart';
 import '../../widgets/glass_card.dart';
+import '../../widgets/home/entry_point_warning_slot.dart';
 import '../../widgets/yoga/practice_type_selector.dart';
 import '../../widgets/yoga/level_selector.dart';
 import '../../widgets/yoga/duration_selector.dart';
@@ -121,6 +122,10 @@ class _YogaPageState extends State<YogaPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            // S14-T6 §6.4: recency-overlap banner above
+                            // the engine-seeded card. Non-blocking — Start
+                            // stays enabled.
+                            const EntryPointWarningSlot(entryPoint: 'yoga_tab'),
                             // S14-T3: engine-seeded "TODAY'S YOGA" card.
                             _TodaysYogaCard(
                               onStart: _onTodaysYogaStart,

@@ -8,6 +8,7 @@ import '../../models/focus_area.dart';
 import '../../providers/home_provider.dart';
 import '../../providers/suggest_provider.dart';
 import '../../widgets/cards/state_focus_session_card.dart';
+import '../../widgets/home/entry_point_warning_slot.dart';
 import '../../widgets/sheets/half_pie_picker_sheet.dart';
 import 'widgets_v2/_tokens_v2.dart';
 import 'widgets_v2/focus_pie_picker.dart';
@@ -186,6 +187,10 @@ class _HomePageState extends State<HomePage> {
                       streakDays: home.stats?.streakDays ?? 0,
                     ),
                     const SizedBox(height: 14),
+                    // S14-T6 §6.4: recency-overlap banner above the session
+                    // card. Renders only when engine emits a `recency_overlap`
+                    // warning; collapses to zero-height otherwise.
+                    const EntryPointWarningSlot(entryPoint: 'home'),
                     _SessionSlot(
                       focus: selectedFocus,
                       suggest: suggest,

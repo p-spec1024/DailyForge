@@ -125,7 +125,12 @@ YogaSession yogaSessionFromEngine({
       : 'beginner';
 
   return YogaSession(
-    type: 'vinyasa',
+    // S14-T6 §6.6 / AMENDMENT-1 Decision B: 3-tier yoga style fallback.
+    // Engine-emitted `metadata.source` wins (Decision A); 'vinyasa' is the
+    // final hard fallback. The middle tier ("stored yoga_style on session
+    // object") collapses to the same field — engine output is the only
+    // store the client has access to at session-start time.
+    type: resolveSessionStyle(session),
     level: level,
     duration: totalMinutes,
     focus: [focusSlug],
@@ -133,4 +138,19 @@ YogaSession yogaSessionFromEngine({
     totalMinutes: totalMinutes,
     poseCount: poses.length,
   );
+}
+
+/// S14-T6 §6.6 / AMENDMENT-1 Decision B: 3-tier client-side yoga style
+/// fallback. Used by the adapter at session-construct time and (if needed)
+/// by the swap layer when re-resolving for a mid-session alternative.
+///
+/// Order:
+///   1. `session.metadata.source`     (engine-emitted; Decision A)
+///   2. session.metadata.* yoga style equivalents (none today — slot
+///      kept for forward-compat if the engine ever splits style out)
+///   3. `'vinyasa'`                   (hard fallback)
+String resolveSessionStyle(SuggestedSession session) {
+  final emitted = session.metadata.source;
+  if (emitted != null && emitted.isNotEmpty) return emitted;
+  return 'vinyasa';
 }

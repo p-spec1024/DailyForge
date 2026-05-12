@@ -53,6 +53,20 @@ const WARMUP_PRACTICE_STYLES   = ['vinyasa', 'sun_salutation', 'hatha']; // acti
 const MOBILITY_MAIN_STYLES     = ['hatha', 'yin', 'vinyasa'];            // broad mobility/flex; T4
 const COOLDOWN_PRACTICE_STYLES = ['restorative', 'yin', 'hatha'];        // held/restorative
 
+// S14-T6 Decision A: level-driven yoga style picked up-front, used to filter
+// the main-phase pool and emitted as `metadata.source` for the client's
+// swap-style fallback chain (see S14-T6-AMENDMENT-1 §2). Warmup/cooldown
+// pools are intentionally left multi-style — `metadata.source` describes the
+// session's yoga character, not every phase's style verbatim.
+const YOGA_SOURCE_BY_LEVEL = {
+  beginner:     'hatha',
+  intermediate: 'vinyasa',
+  advanced:     'vinyasa',
+};
+function resolveYogaSourceStyle(yogaLevel) {
+  return YOGA_SOURCE_BY_LEVEL[yogaLevel] ?? 'vinyasa';
+}
+
 const VALID_ENTRY_POINTS = new Set(['home', 'strength_tab', 'yoga_tab', 'breathwork_tab']);
 
 // Spec §Time Budget — main-phase minutes and total beginner sets per
@@ -594,6 +608,10 @@ async function generateCrossPillar({ userId, focus, levels, timeBudget }) {
       requested_budget_min: timeBudget,
       user_levels: levels,
       focus_slug: focus.slug,
+      // S14-T6 Decision A: descriptive yoga character of this cross-pillar
+      // session. Warmup/cooldown pools stay multi-style (preserves cooldown
+      // semantics for non-beginners); `source` is used by client swap fallback.
+      source: resolveYogaSourceStyle(levels.yoga),
     },
   };
 }
@@ -705,18 +723,25 @@ async function generateYogaOnly({ userId, focus, levels, timeBudget }) {
   }
 
   // Main allows poses to repeat from warmup (spec: cooldown excludes warmup+main, but
-  // main is unfiltered). Matters for tiny pools (e.g. biceps yoga has 1 candidate at
-  // beginner level — without this, main would always be empty after a warmup pick).
+  // main is unfiltered for dedup purposes). Matters for tiny pools (e.g. biceps yoga
+  // has 1 candidate at beginner level — without this, main would always be empty
+  // after a warmup pick).
+  //
+  // S14-T6 Decision A: filter main to the level-resolved yoga source style so the
+  // session commits to a single coherent yoga character. Source emitted in metadata.
+  const sourceStyle = resolveYogaSourceStyle(levels.yoga);
   const warmupIds = warmupRows.map((r) => r.id);
   const mainRows = await pickYoga({
     keywords,
     yogaLevel: levels.yoga,
     userExcludedIds: excludedYoga,
     limit: picks.main,
+    practiceStyles: [sourceStyle],
   });
   if (mainRows.length === 0) {
     throw new Error(
-      `No eligible yoga exercises for focus=${focus.slug}, level=${levels.yoga}, after exclusions`
+      `No eligible yoga exercises for focus=${focus.slug}, level=${levels.yoga}, ` +
+      `style=${sourceStyle}, after exclusions`
     );
   }
   const perMain = mainMin / mainRows.length;
@@ -751,6 +776,7 @@ async function generateYogaOnly({ userId, focus, levels, timeBudget }) {
       requested_budget_min: timeBudget,
       user_levels: levels,
       focus_slug: focus.slug,
+      source: sourceStyle,
     },
   };
 }
@@ -842,17 +868,21 @@ async function generateCrossPillarMobility({ userId, focus, levels, timeBudget }
 
   // main (yoga REPLACES strength-main; mobility-home is structural always-skip-strength).
   // Picked count absorbs strength-main's count per spec §Mobility home shape.
+  //
+  // S14-T6 Decision A: filter mobility yoga main to the level-resolved style.
+  // Replaces the broad MOBILITY_MAIN_STYLES pool — session commits to one style.
+  const sourceStyle = resolveYogaSourceStyle(levels.yoga);
   const warmupIds = warmupRows.map((r) => r.id);
   const mainRows = await pickYogaByStyles({
     yogaLevel: levels.yoga,
     userExcludedIds: excludedYoga,
     sessionExcludedIds: warmupIds,
     limit: picks.main,
-    practiceStyles: MOBILITY_MAIN_STYLES,
+    practiceStyles: [sourceStyle],
   });
   if (mainRows.length === 0) {
     throw new Error(
-      `No eligible mobility yoga main for level=${levels.yoga}, after exclusions`
+      `No eligible mobility yoga main for level=${levels.yoga}, style=${sourceStyle}, after exclusions`
     );
   }
   // Yoga-main runs in the strength-main minute slot; per-item duration sized accordingly.
@@ -912,6 +942,7 @@ async function generateCrossPillarMobility({ userId, focus, levels, timeBudget }
       requested_budget_min: timeBudget,
       user_levels: levels,
       focus_slug: focus.slug,
+      source: sourceStyle,
     },
   };
 }
@@ -1033,6 +1064,10 @@ async function generateCrossPillarFullBody({ userId, focus, levels, timeBudget }
       requested_budget_min: timeBudget,
       user_levels: levels,
       focus_slug: focus.slug,
+      // S14-T6 Decision A: descriptive yoga character of this cross-pillar
+      // session. Warmup/cooldown pools stay multi-style (preserves cooldown
+      // semantics for non-beginners); `source` is used by client swap fallback.
+      source: resolveYogaSourceStyle(levels.yoga),
     },
   };
 }
@@ -1108,16 +1143,20 @@ async function generateYogaOnlyMobility({ userId, focus, levels, timeBudget }) {
   // Main: per amendment, mobility yoga-tab main is style-driven (no muscle filter).
   // De-dup with warmup is NOT enforced (T2 convention: cooldown excludes warmup,
   // main can repeat warmup poses for tiny pools).
+  //
+  // S14-T6 Decision A: narrow from MOBILITY_MAIN_STYLES to the single level-
+  // resolved style — session commits to one yoga character end-to-end.
+  const sourceStyle = resolveYogaSourceStyle(levels.yoga);
   const warmupIds = warmupRows.map((r) => r.id);
   const mainRows = await pickYogaByStyles({
     yogaLevel: levels.yoga,
     userExcludedIds: excludedYoga,
     limit: picks.main,
-    practiceStyles: MOBILITY_MAIN_STYLES,
+    practiceStyles: [sourceStyle],
   });
   if (mainRows.length === 0) {
     throw new Error(
-      `No eligible mobility yoga main for level=${levels.yoga}, after exclusions`
+      `No eligible mobility yoga main for level=${levels.yoga}, style=${sourceStyle}, after exclusions`
     );
   }
   phases.push({
@@ -1149,6 +1188,7 @@ async function generateYogaOnlyMobility({ userId, focus, levels, timeBudget }) {
       requested_budget_min: timeBudget,
       user_levels: levels,
       focus_slug: focus.slug,
+      source: sourceStyle,
     },
   };
 }
@@ -1185,14 +1225,22 @@ async function generateYogaOnlyFullBody({ userId, focus, levels, timeBudget }) {
   }
 
   // Main: compound only.
+  //
+  // S14-T6 Decision A: add level-resolved style filter on top of the compound
+  // predicate. Session commits to one yoga character. If the compound∩style
+  // pool is empty (e.g. beginner + hatha with thin compound coverage), the
+  // pre-existing pool-empty throw triggers naturally — caller must seed more
+  // compound rows in that style.
+  const sourceStyle = resolveYogaSourceStyle(levels.yoga);
   const mainRows = await pickYogaCompound({
     yogaLevel: levels.yoga,
     userExcludedIds: excludedYoga,
     limit: picks.main,
+    practiceStyles: [sourceStyle],
   });
   if (mainRows.length === 0) {
     throw new Error(
-      `No eligible compound yoga for full_body main, level=${levels.yoga}, after exclusions`
+      `No eligible compound yoga for full_body main, level=${levels.yoga}, style=${sourceStyle}, after exclusions`
     );
   }
   phases.push({
@@ -1225,6 +1273,7 @@ async function generateYogaOnlyFullBody({ userId, focus, levels, timeBudget }) {
       requested_budget_min: timeBudget,
       user_levels: levels,
       focus_slug: focus.slug,
+      source: sourceStyle,
     },
   };
 }

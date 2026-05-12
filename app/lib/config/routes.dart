@@ -13,6 +13,7 @@ import '../pages/profile/profile_page.dart';
 import '../pages/progress/exercise_history_page.dart';
 import '../pages/progress/exercise_progress_page.dart';
 import '../pages/session/multi_phase_session_page.dart';
+import '../pages/session/session_summary_page.dart';
 import '../pages/workout_page.dart';
 import '../pages/yoga/yoga_session_page.dart';
 import '../pages/yoga/yoga_complete_page.dart';
@@ -110,6 +111,21 @@ GoRouter createRouter(AuthProvider authProvider) {
         path: '/session/state-focus',
         builder: (context, state) =>
             const MultiPhaseSessionPage(sessionShape: 'state_focus'),
+      ),
+      GoRoute(
+        path: '/session/summary',
+        builder: (context, state) {
+          final args = state.extra;
+          if (args is! SessionSummaryArgs) {
+            // Deep-link / refresh case — no args means the user landed
+            // here outside a finished-session flow. Bounce home.
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) context.go('/home');
+            });
+            return const SizedBox.shrink();
+          }
+          return SessionSummaryPage(args: args);
+        },
       ),
       GoRoute(
         path: '/exercise-history',
