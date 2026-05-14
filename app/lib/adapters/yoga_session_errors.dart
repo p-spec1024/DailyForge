@@ -20,18 +20,28 @@
 /// user-facing copy stays stable.
 sealed class YogaSessionException implements Exception {
   final String message;
-  YogaSessionException(this.message);
+
+  /// Original error this exception wraps (when applicable). Preserved so
+  /// crash reporters / debug logs can see the underlying transport or
+  /// parse failure rather than only the friendly wrapper. Commit 2.1 CR-1.
+  final Object? cause;
+  final StackTrace? stackTrace;
+
+  YogaSessionException(this.message, {this.cause, this.stackTrace});
 
   /// User-facing snackbar copy. Overridden by each subtype with the
   /// situation-appropriate string.
   String get userMessage;
 
   @override
-  String toString() => '$runtimeType: $message';
+  String toString() {
+    final base = '$runtimeType: $message';
+    return cause == null ? base : '$base (cause: $cause)';
+  }
 }
 
 class YogaContractException extends YogaSessionException {
-  YogaContractException(super.message);
+  YogaContractException(super.message, {super.cause, super.stackTrace});
 
   @override
   String get userMessage =>
@@ -39,7 +49,7 @@ class YogaContractException extends YogaSessionException {
 }
 
 class YogaHydrationException extends YogaSessionException {
-  YogaHydrationException(super.message);
+  YogaHydrationException(super.message, {super.cause, super.stackTrace});
 
   @override
   String get userMessage => "Couldn't load today's yoga — tap to retry.";

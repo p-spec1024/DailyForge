@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../adapters/yoga_session_adapter.dart';
+import '../adapters/yoga_session_errors.dart';
 import '../models/suggested_session.dart';
 import '../models/yoga_models.dart';
 import '../models/yoga_pose_details.dart';
@@ -237,10 +238,18 @@ class YogaSessionProvider extends ChangeNotifier {
 
   /// S14-T3: hydrate engine pose ids → run adapter → start session.
   ///
-  /// Strict-mode (Q3 lock): any failure throws [StateError]; the launcher's
-  /// snackbar wrapper translates user-facing copy. The player must not open
-  /// with placeholder pose names — partial hydration is rejected server-side
+  /// Strict-mode (Q3 lock): any failure throws a typed [YogaSessionException]
+  /// subclass; the launcher's snackbar wrapper switches on type to render
+  /// per-subclass user copy (`userMessage`). The player must not open with
+  /// placeholder pose names — partial hydration is rejected server-side
   /// (`/api/yoga/poses-by-ids` returns 404 if any id is missing).
+  ///
+  /// Commit 2.1 CR-1: the prior implementation wrapped failures in
+  /// [StateError], defeating the W2 type-based dispatch in the launcher and
+  /// surfacing the generic fallback snackbar instead of the typed
+  /// per-subclass copy. Now: rethrow [YogaSessionException] unchanged
+  /// (already carries `userMessage`); wrap everything else in
+  /// [YogaHydrationException] with the original error preserved as `cause`.
   Future<void> loadFromEngineSession(SuggestedSession session) async {
     final ids = <int>{};
     for (final phase in session.phases) {
@@ -250,19 +259,31 @@ class YogaSessionProvider extends ChangeNotifier {
       }
     }
     if (ids.isEmpty) {
-      throw StateError('yoga session has no poses');
+      throw YogaContractException('yoga session has no poses');
     }
 
     final List<YogaPoseDetails> details;
     try {
       details = await _yogaService.fetchPosesByIds(ids.toList());
-    } on ApiException catch (e) {
-      throw StateError('failed to hydrate poses: ${e.message}');
-    } catch (e) {
-      throw StateError('hydration network error: $e');
+    } on YogaSessionException {
+      // Typed shape violations from YogaPoseDetails.fromJson (malformed
+      // pose row) — pass through with their own userMessage intact.
+      rethrow;
+    } on ApiException catch (e, stack) {
+      throw YogaHydrationException(
+        'failed to hydrate poses: ${e.message}',
+        cause: e,
+        stackTrace: stack,
+      );
+    } catch (e, stack) {
+      throw YogaHydrationException(
+        'hydration network error: $e',
+        cause: e,
+        stackTrace: stack,
+      );
     }
     if (details.length != ids.length) {
-      throw StateError(
+      throw YogaHydrationException(
         'hydration incomplete: expected ${ids.length}, got ${details.length}',
       );
     }

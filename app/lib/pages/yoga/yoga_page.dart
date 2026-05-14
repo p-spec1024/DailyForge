@@ -19,8 +19,6 @@ import '../../widgets/yoga/recent_sessions.dart';
 import '../../widgets/yoga/yoga_start_button.dart';
 import '../../widgets/yoga/pose_preview_modal.dart';
 
-const int _kYogaTabTimeBudgetMin = 30;
-
 class YogaPage extends StatefulWidget {
   const YogaPage({super.key});
 
@@ -79,10 +77,13 @@ class _YogaPageState extends State<YogaPage> {
   Future<void> _fetchTodaysYoga(String focusSlug) async {
     if (!mounted) return;
     final suggest = context.read<SuggestProvider>();
+    // Commit 2.1 W-1: omit timeBudgetMin so refreshForEntryPoint falls
+    // back to the user's persisted budget — matches strength_page parity.
+    // Pre-fix, a hardcoded 30-min const here meant the same focus showed
+    // different durations on Yoga vs Strength tabs.
     await suggest.refreshForEntryPoint(
       entryPoint: 'yoga_tab',
       focusSlug: focusSlug,
-      timeBudgetMin: _kYogaTabTimeBudgetMin,
     );
   }
 
@@ -140,9 +141,21 @@ class _YogaPageState extends State<YogaPage> {
                             _TodaysYogaCard(
                               onStart: _onTodaysYogaStart,
                               onRetry: () {
-                                final last = _lastFetchedFocusSlug;
-                                if (last == null) return;
-                                _fetchTodaysYoga(last);
+                                // Commit 2.1 S-1: fall back to the provider's
+                                // current slug when no prior fetch has been
+                                // recorded. _lastFetchedFocusSlug is null on a
+                                // first-fetch-failed-before-store path; the
+                                // hasUserSelectedFocus gate guarantees
+                                // currentFocusSlug is a real user-confirmed
+                                // pick at this point.
+                                final suggest =
+                                    context.read<SuggestProvider>();
+                                final retry = _lastFetchedFocusSlug
+                                    ?? suggest.currentFocusSlug;
+                                if (retry.isEmpty || isStateFocus(retry)) {
+                                  return;
+                                }
+                                _fetchTodaysYoga(retry);
                               },
                             ),
                             const SizedBox(height: 20),

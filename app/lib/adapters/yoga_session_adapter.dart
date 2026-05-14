@@ -6,10 +6,27 @@
 // freeform messages and the launcher substring-matched them for friendly
 // copy. Post-fix, the launcher switches on exception type.
 
+import 'package:flutter/foundation.dart';
+
 import '../models/suggested_session.dart';
 import '../models/yoga_models.dart';
 import '../models/yoga_pose_details.dart';
 import 'yoga_session_errors.dart';
+
+/// Known yoga styles the player can render. Sourced from the engine's
+/// `yoga_sessions.type` enum (see backend `seeds/yoga_styles.ts`). If the
+/// engine adds a new style, add it here too — until then, unknown values
+/// fall back to 'vinyasa' with a debug-print warning rather than reaching
+/// the player as broken data.
+///
+/// Commit 2.1 S-2: validation gate for [resolveSessionStyle].
+const Set<String> _kKnownYogaStyles = <String>{
+  'vinyasa',
+  'hatha',
+  'yin',
+  'restorative',
+  'power',
+};
 
 const _enginePhaseToYogaPhase = {
   'warmup': 'warmup',
@@ -115,12 +132,21 @@ YogaSession yogaSessionFromEngine({
 /// by the swap layer when re-resolving for a mid-session alternative.
 ///
 /// Order:
-///   1. `session.metadata.source`     (engine-emitted; Decision A)
+///   1. `session.metadata.source`     (engine-emitted; Decision A) — gated
+///      against [_kKnownYogaStyles] so an unknown engine enum doesn't
+///      reach the player as broken data (Commit 2.1 S-2).
 ///   2. session.metadata.* yoga style equivalents (none today — slot
 ///      kept for forward-compat if the engine ever splits style out)
 ///   3. `'vinyasa'`                   (hard fallback)
 String resolveSessionStyle(SuggestedSession session) {
   final emitted = session.metadata.source;
-  if (emitted != null && emitted.isNotEmpty) return emitted;
+  if (emitted != null && emitted.isNotEmpty) {
+    if (_kKnownYogaStyles.contains(emitted)) return emitted;
+    debugPrint(
+      '[yoga adapter] resolveSessionStyle: unknown style "$emitted" — '
+      'falling back to vinyasa. Add to _kKnownYogaStyles in '
+      'yoga_session_adapter.dart if this is intentional.',
+    );
+  }
   return 'vinyasa';
 }

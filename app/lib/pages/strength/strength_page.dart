@@ -128,9 +128,14 @@ class _StrengthPageState extends State<StrengthPage> {
                       child: _TodaysStrengthCard(
                         onStart: _onTodaysStrengthStart,
                         onRetry: () {
-                          final last = _lastFetchedFocusSlug;
-                          if (last == null) return;
-                          _fetchTodaysStrength(last);
+                          // Commit 2.1 S-1: fall back to the provider's
+                          // current slug when no prior fetch has been
+                          // recorded — see yoga_page for rationale.
+                          final suggest = context.read<SuggestProvider>();
+                          final retry = _lastFetchedFocusSlug
+                              ?? suggest.currentFocusSlug;
+                          if (retry.isEmpty || isStateFocus(retry)) return;
+                          _fetchTodaysStrength(retry);
                         },
                       ),
                     ),
