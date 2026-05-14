@@ -51,6 +51,11 @@ class YogaContractException extends YogaSessionException {
 class YogaHydrationException extends YogaSessionException {
   YogaHydrationException(super.message, {super.cause, super.stackTrace});
 
+  /// Commit 3 W-2.1.1: dropped "tap to retry" — the launcher's catch
+  /// handler shows this in a plain SnackBar with no SnackBarAction, so the
+  /// prior copy promised an affordance that didn't exist. Locked down by
+  /// regression test in
+  /// `app/test/adapters/yoga_session_adapter_test.dart`.
   @override
-  String get userMessage => "Couldn't load today's yoga — tap to retry.";
+  String get userMessage => "Couldn't load today's yoga. Please try again.";
 }
