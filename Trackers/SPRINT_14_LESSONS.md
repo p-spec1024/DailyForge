@@ -150,6 +150,60 @@ Decide at sprint close based on how many contracts have accumulated.
 
 ---
 
+## Lesson 4 — Hot reload preserves long-lived `ChangeNotifier` instances; new fields read stale
+
+### What happened (S14-T6 Commit 2)
+
+Commit 2 added `bool _hasUserSelectedFocus = false` as a new field on `SuggestProvider` to gate Yoga/Strength tab auto-fetches (FS #224). After a device retest cycle (Calm focus → Biceps focus → open Yoga tab), the empty-state widget rendered even though `_runRequest` had set the flag `true` for both picks.
+
+Code trace and grep showed the flag *should* be `true`. Mutation sites were correct (`_runRequest`, `hydrate`, `clear`). No reset path could be found. Hours of speculation about Mode A (race), Mode B (intermediate reset), Mode C (lifecycle), Mode D (stale provider reference) — all ruled out by code reading.
+
+Resolution: `flutter clean && flutter run`. Symptom did not reproduce after a fresh build. Root cause was hot reload — Dart preserves the existing `SuggestProvider` instance across hot reloads, and the existing instance held stale state for the newly-added bool field. The flag *was* false at read time, but only because the running instance had been initialized before the field existed.
+
+Cost: ~2 hours of investigation, two `debugPrint` instrumentation passes, a wrong-mode hypothesis (Mode A/B/C/D framing assumed the bug was logical).
+
+### The fix going forward
+
+**When adding a new field to a long-lived `ChangeNotifier` provider — especially a nullable or bool with a default — do a full restart (`flutter clean && flutter run`) before device-testing.** Hot reload is not sufficient. The app has 8+ such providers; this hazard will recur.
+
+### How to apply this in Sprint 15+
+
+Filed as FS #229 — document the gotcha in `CONTRIBUTING.md` under a "Development gotchas" section. Trigger: Sprint 15 first ticket, OR when a second developer joins the project.
+
+When debugging a "flag should be true but reads false" symptom, the *first* hypothesis to test is hot-reload pollution, not logic bugs in the mutation sites. Re-running the repro after `flutter clean` distinguishes the two modes in seconds and saves the investigation cost.
+
+### Project Instructions patch (apply at sprint close)
+
+This is a Flutter-specific tooling hazard, not a general engineering principle. It belongs in `CONTRIBUTING.md` (per FS #229) rather than PI principles. No PI patch from this lesson.
+
+---
+
+## Sprint 14 retrospective — May 14, 2026
+
+### What went well
+
+- **Spec-first ticketing held up.** S14-T6 spec + AMENDMENT-1 carried through 8 commits without needing a second amendment. The amendment-on-drift pattern (Principle #16) correctly absorbed the engine pre-pick yoga style decision + client-side yoga swap fallback without polluting the v1 spec.
+- **Pre-flight discipline caught architect-side errors.** Multiple directives had errors that pre-flight grep surfaced before code was written: wrong `isBodyFocus` gate signal (would have done nothing because `_defaultFocusSlug = 'full_body'`); incorrect W3 attribution (bug pre-existed); wrong "3 call sites" count for `_capitalizeFocus` (actual 2).
+- **Honest commit messages and amendment-doc preservation paid off in `/review`.** Reviewer's grade on Commit 1.7 explicitly praised "forensic transparency that prevents the next engineer chasing the same ghost."
+- **Device-test discipline caught a critical bug before commit.** The state→body focus transition bug surfaced only via device retest (turned out to be hot-reload pollution per Lesson 4 — but the discipline of running the repro on a clean device was what surfaced it).
+
+### What didn't go well
+
+- **2-hour hot-reload-state-pollution detour during Commit 2 device test.** Newly-added `_hasUserSelectedFocus` field on long-lived `ChangeNotifier` produced ghost bug after Calm→Biceps transition. `flutter clean + flutter run` resolved. See Lesson 4 above.
+- **Architect-side directive errors required Claude Code corrections multiple times.** "3 call sites" for capitalizeFocus (actual 2), "Mode A/B/C/D" investigation framing (actual was hot-reload, not flag bug), original W3 attribution (bug pre-existed). Pattern: when writing pre-flight diagnostics, trust grep over architect-side counts.
+- **Commit count ballooned to 8 ticket commits.** Planned 3 (feature + bugs + polish), shipped 8 (feature + bugs + 4 review passes + adapter polish + review-on-polish + tests). Each iteration was justified by `/review` findings but the total is heavy. Sprint 15 should plan for `/review` budget upfront if the same pattern applies.
+- **Spec drift on commit-message precision** (smoke pass counts). Locked as FS #217 (deterministic smoke) for Sprint 15.
+
+### Patterns to lock for Sprint 15+
+
+1. **`flutter clean + flutter run` before device-testing any provider field addition.** Hot-reload state pollution is real (Lesson 4).
+2. **Trust pre-flight grep over architect-side counts.** When the directive says "3 sites" and grep says "2," grep is right.
+3. **Don't claim a fix exposed a bug without checking pre-fix code.** "W3 exposed this" was wrong; the bug pre-existed.
+4. **`/review` iteration cycles converge fast when grades are honest.** Commits 1.7 → 1.8 → 2 → 2.1 → 3 went B+ → A- → A- → A → A in 5 rounds. Each pass had concrete findings, not nitpicks.
+5. **Amendment docs are cheap.** S14-T6-AMENDMENT-1 codified mid-build drift without polluting v1 spec. Pattern should generalize to all non-trivial tickets.
+
+---
+
 ## Retirement plan
 
 At sprint-14 close (after T6 ships and all 6 tickets close):
