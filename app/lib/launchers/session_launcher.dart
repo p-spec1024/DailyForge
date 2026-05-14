@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../adapters/yoga_session_errors.dart';
 import '../models/suggested_session.dart';
 import '../providers/cross_pillar_session_provider.dart';
 import '../providers/state_focus_session_provider.dart';
@@ -158,9 +159,18 @@ class SessionLauncher {
   }
 
   /// S14-T3: hydrate yoga poses, run engine→YogaSession adapter, navigate.
-  /// Strict-mode (Q3 lock): any [StateError] from hydration/adapter blocks
-  /// navigation and surfaces a friendly snackbar — the player never opens
-  /// with placeholder names.
+  /// Strict-mode (Q3 lock): any [YogaSessionException] from hydration/adapter
+  /// blocks navigation and surfaces a friendly snackbar — the player never
+  /// opens with placeholder names.
+  ///
+  /// FS #203 W1: if the page unmounts between `loadFromEngineSession`
+  /// resolving and the navigation, reset the provider before bailing.
+  /// Otherwise the provider sits populated with stale data and the next
+  /// session attempt may pick up the wrong state.
+  ///
+  /// FS #203 W2: typed [YogaContractException] / [YogaHydrationException]
+  /// replace the prior [StateError] substring-matching. Each subtype owns
+  /// its own user-facing copy via `userMessage`.
   static Future<void> _launchPillarPureYoga(
     BuildContext context,
     SuggestedSession session,
@@ -168,20 +178,29 @@ class SessionLauncher {
     final provider = context.read<YogaSessionProvider>();
     try {
       await provider.loadFromEngineSession(session);
-    } on StateError catch (e) {
-      if (!context.mounted) return;
+    } on YogaSessionException catch (e) {
+      if (!context.mounted) {
+        provider.reset();
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_friendlyYogaError(e))),
+        SnackBar(content: Text(e.userMessage)),
       );
       return;
     } catch (_) {
-      if (!context.mounted) return;
+      if (!context.mounted) {
+        provider.reset();
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Couldn't load today's yoga.")),
       );
       return;
     }
-    if (!context.mounted) return;
+    if (!context.mounted) {
+      provider.reset();
+      return;
+    }
     context.go('/yoga/session');
   }
 
@@ -381,20 +400,6 @@ class SessionLauncher {
         ],
       ),
     );
-  }
-
-  /// S14-T3: translates yoga adapter [StateError] messages into user-facing
-  /// snackbar copy. The adapter is strict (Q3 lock) — any contract violation
-  /// throws; we don't want raw Dart errors reaching the user.
-  static String _friendlyYogaError(StateError e) {
-    final msg = e.message;
-    if (msg.contains('hydrat')) {
-      return "Couldn't load today's yoga — tap to retry.";
-    }
-    if (msg.contains('focus_slug')) {
-      return 'Could not start session — try picking a focus again.';
-    }
-    return "Couldn't load today's yoga.";
   }
 
   /// Maps server error codes (carried in [ApiException.message]) to

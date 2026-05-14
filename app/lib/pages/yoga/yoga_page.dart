@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../config/theme.dart';
-import '../../launchers/focus_utils.dart';
+import '../../constants/focus_categories.dart';
 import '../../launchers/session_launcher.dart';
 import '../../models/suggested_session.dart';
 import '../../providers/suggest_provider.dart';
 import '../../providers/yoga_provider.dart';
 import '../../providers/yoga_session_provider.dart';
+import '../../utils/focus_display.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/home/entry_point_warning_slot.dart';
 import '../../widgets/yoga/practice_type_selector.dart';
@@ -18,7 +19,6 @@ import '../../widgets/yoga/recent_sessions.dart';
 import '../../widgets/yoga/yoga_start_button.dart';
 import '../../widgets/yoga/pose_preview_modal.dart';
 
-const String _kYogaTabFallbackFocus = 'hamstrings';
 const int _kYogaTabTimeBudgetMin = 30;
 
 class YogaPage extends StatefulWidget {
@@ -50,14 +50,24 @@ class _YogaPageState extends State<YogaPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final suggest = context.read<SuggestProvider>();
+    // FS #224: cold-start gate. No confirmed pick yet → don't fetch. The
+    // pillar-pure suggest request only makes sense once the user has chosen
+    // a focus; firing with the provider default ('full_body') on first cold
+    // open used to surface a "Check your connection" card on engine
+    // timeout. Empty-state widget renders instead.
+    if (!suggest.hasUserSelectedFocus) return;
     if (isStateFocus(suggest.currentFocusSlug)) {
       // Q1 lock: card is hidden when home focus is a state focus. No fetch.
       return;
     }
-    final currentFocus = suggest.currentFocusSlug.isNotEmpty
-        ? suggest.currentFocusSlug
-        : _kYogaTabFallbackFocus;
-    if (_lastFetchedFocusSlug != currentFocus) {
+    final currentFocus = suggest.currentFocusSlug;
+    // FS #203 W3: re-fetch when sessionShape drifts away from pillar_pure.
+    // Pre-fix, this branch only re-fetched on focus-slug change — so if the
+    // user went Home → picked a body focus (cross_pillar shape) → switched
+    // to Yoga tab, the card showed stale yoga data because focus_slug
+    // matched and the cross_pillar shape was treated as "already fetched."
+    if (_lastFetchedFocusSlug != currentFocus
+        || suggest.currentSession?.sessionShape != 'pillar_pure') {
       _lastFetchedFocusSlug = currentFocus;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -129,10 +139,11 @@ class _YogaPageState extends State<YogaPage> {
                             // S14-T3: engine-seeded "TODAY'S YOGA" card.
                             _TodaysYogaCard(
                               onStart: _onTodaysYogaStart,
-                              onRetry: () => _fetchTodaysYoga(
-                                _lastFetchedFocusSlug ??
-                                    _kYogaTabFallbackFocus,
-                              ),
+                              onRetry: () {
+                                final last = _lastFetchedFocusSlug;
+                                if (last == null) return;
+                                _fetchTodaysYoga(last);
+                              },
                             ),
                             const SizedBox(height: 20),
                             PracticeTypeSelector(
@@ -259,6 +270,12 @@ class _TodaysYogaCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<SuggestProvider>(
       builder: (context, suggest, _) {
+        // FS #224: pre-pick state. Surface a thoughtful empty state instead
+        // of a doomed fetch's error card. State-focus check below still wins
+        // for the case where the user *has* picked, but picked a state focus.
+        if (!suggest.hasUserSelectedFocus) {
+          return const _YogaTabEmptyState();
+        }
         if (isStateFocus(suggest.currentFocusSlug)) {
           return const SizedBox.shrink();
         }
@@ -342,7 +359,7 @@ class _TodaysYogaCard extends StatelessWidget {
     final mins = session.metadata.estimatedTotalMin;
     final focusSlug = session.metadata.focusSlug ?? '';
     final focusDisplay =
-        focusSlug.isEmpty ? 'Yoga' : _capitalizeFocus(focusSlug);
+        focusSlug.isEmpty ? 'Yoga' : capitalizeFocus(focusSlug);
     final poseCount = session.phases
         .expand((p) => p.items)
         .where((i) => i.contentType == 'yoga')
@@ -412,10 +429,44 @@ class _TodaysYogaCard extends StatelessWidget {
     );
   }
 
-  String _capitalizeFocus(String slug) {
-    return slug
-        .split('_')
-        .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
-        .join(' ');
+}
+
+/// FS #224: pre-pick empty state shown above the Yoga tab's manual builder
+/// when the user hasn't actively picked a focus yet. Replaces the doomed
+/// `_TodaysYogaCard` fetch (which previously surfaced a misleading network
+/// error on cold-open). The rest of the tab — practice type / level /
+/// duration / focus chips — is still functional below, so the copy points
+/// the user at both Home and the manual picker.
+class _YogaTabEmptyState extends StatelessWidget {
+  const _YogaTabEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const GlassCard(
+      borderColor: AppColors.yoga,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'No focus selected',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: AppColors.primaryText,
+            ),
+          ),
+          SizedBox(height: 6),
+          Text(
+            'Pick a focus on Home, or use the picker below to start a '
+            'custom Yoga session.',
+            style: TextStyle(
+              fontSize: 13,
+              color: AppColors.secondaryText,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

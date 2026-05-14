@@ -47,10 +47,25 @@ class SuggestProvider extends ChangeNotifier {
   bool _isLoading = false;
   SuggestServiceException? _lastError;
 
+  /// S14-T6 FS #224: gates entry-point tab auto-fetches. True once the user
+  /// has actively confirmed a focus pick (via `selectBodyFocus` /
+  /// `selectStateFocus` / `refreshForEntryPoint`) in this app session, or
+  /// when `hydrate()` restored a non-empty stored slug from a prior session.
+  ///
+  /// `previewFocus` (picker hover) does NOT flip this — it's a visual seam,
+  /// not a confirmed choice. `clear()` (logout) resets it. The default-slug
+  /// initial state (`full_body`) does NOT count as a user pick.
+  ///
+  /// Yoga/Strength tabs read this in `didChangeDependencies` and skip their
+  /// cold-start fetch when false, avoiding the "Check your connection"
+  /// false-positive error card seen on first cold open before any pick.
+  bool _hasUserSelectedFocus = false;
+
   String get currentFocusSlug => _currentFocusSlug;
   SuggestedSession? get currentSession => _currentSession;
   bool get isLoading => _isLoading;
   SuggestServiceException? get lastError => _lastError;
+  bool get hasUserSelectedFocus => _hasUserSelectedFocus;
 
   /// Read persisted focus/budget so cold-start can resume from there.
   /// MUST be awaited on first home-page mount before the first
@@ -59,6 +74,9 @@ class SuggestProvider extends ChangeNotifier {
     final storedSlug = await _storage.getPreference(_kPrefLastFocusSlug);
     if (storedSlug is String && storedSlug.isNotEmpty) {
       _currentFocusSlug = storedSlug;
+      // FS #224: a restored slug from a prior session counts as a real
+      // user pick — tab auto-fetches should proceed on cold start.
+      _hasUserSelectedFocus = true;
     }
     notifyListeners();
   }
@@ -141,6 +159,10 @@ class SuggestProvider extends ChangeNotifier {
     Future<void> Function()? persistAfterSuccess,
   }) async {
     _currentFocusSlug = focusSlug;
+    // FS #224: any path through _runRequest (selectBodyFocus, selectStateFocus,
+    // refreshForEntryPoint) is user-initiated — flip the gate so future tab
+    // visits proceed normally.
+    _hasUserSelectedFocus = true;
     _isLoading = true;
     _lastError = null;
     notifyListeners();
@@ -206,6 +228,7 @@ class SuggestProvider extends ChangeNotifier {
     _lastError = null;
     _isLoading = false;
     _currentFocusSlug = _defaultFocusSlug;
+    _hasUserSelectedFocus = false;
     notifyListeners();
     await _storage.removePreference(_kPrefLastFocusSlug);
     await _storage.removePreference(_kPrefLastTimeBudgetMin);

@@ -1,5 +1,5 @@
-import '../launchers/yoga_session_adapter.dart';
 import '../models/yoga_models.dart';
+import '../models/yoga_pose_details.dart';
 import 'api_service.dart';
 
 class YogaService {

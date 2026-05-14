@@ -3,17 +3,17 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import '../../config/theme.dart';
+import '../../constants/focus_categories.dart';
 import '../../launchers/session_launcher.dart';
 import '../../models/suggested_session.dart';
 import '../../providers/strength_provider.dart';
 import '../../providers/suggest_provider.dart';
+import '../../utils/focus_display.dart';
 import '../../widgets/glass_card.dart';
 import '../../widgets/home/entry_point_warning_slot.dart';
 import 'widgets/exercise_browse_card.dart';
 import 'widgets/muscle_filter_chips.dart';
 import 'widgets/routine_card.dart';
-
-const String _kStrengthTabFallbackFocus = 'biceps';
 
 class StrengthPage extends StatefulWidget {
   const StrengthPage({super.key});
@@ -46,10 +46,19 @@ class _StrengthPageState extends State<StrengthPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final suggest = context.read<SuggestProvider>();
-    final currentFocus = suggest.currentFocusSlug.isNotEmpty
-        ? suggest.currentFocusSlug
-        : _kStrengthTabFallbackFocus;
-    if (_lastFetchedFocusSlug != currentFocus) {
+    // FS #224: cold-start gate — see yoga_page for full rationale. Symmetric
+    // fix; without it, opening the Strength tab on a cold app launch (with
+    // no Home pick yet) would fire a doomed pillar-pure fetch and surface
+    // a misleading network-error card.
+    if (!suggest.hasUserSelectedFocus) return;
+    if (isStateFocus(suggest.currentFocusSlug)) return;
+    final currentFocus = suggest.currentFocusSlug;
+    // FS #203 W3: re-fetch when sessionShape drifts away from pillar_pure
+    // (e.g. user went Home → picked a body focus that produced a
+    // cross_pillar shape → returned to Strength tab). Same root cause as
+    // yoga_page; same fix.
+    if (_lastFetchedFocusSlug != currentFocus
+        || suggest.currentSession?.sessionShape != 'pillar_pure') {
       _lastFetchedFocusSlug = currentFocus;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -118,9 +127,11 @@ class _StrengthPageState extends State<StrengthPage> {
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                       child: _TodaysStrengthCard(
                         onStart: _onTodaysStrengthStart,
-                        onRetry: () => _fetchTodaysStrength(
-                          _lastFetchedFocusSlug ?? _kStrengthTabFallbackFocus,
-                        ),
+                        onRetry: () {
+                          final last = _lastFetchedFocusSlug;
+                          if (last == null) return;
+                          _fetchTodaysStrength(last);
+                        },
                       ),
                     ),
                   ),
@@ -427,6 +438,13 @@ class _TodaysStrengthCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<SuggestProvider>(
       builder: (context, suggest, _) {
+        // FS #224: pre-pick empty state; mirrors the yoga_page treatment.
+        if (!suggest.hasUserSelectedFocus) {
+          return const _StrengthTabEmptyState();
+        }
+        if (isStateFocus(suggest.currentFocusSlug)) {
+          return const SizedBox.shrink();
+        }
         final isLoading = suggest.isLoading;
         final session = suggest.currentSession;
         final error = suggest.lastError;
@@ -498,7 +516,7 @@ class _TodaysStrengthCard extends StatelessWidget {
     final mins = session.metadata.estimatedTotalMin;
     final focusSlug = session.metadata.focusSlug ?? '';
     final focusDisplay =
-        focusSlug.isEmpty ? 'Strength' : _capitalizeFocus(focusSlug);
+        focusSlug.isEmpty ? 'Strength' : capitalizeFocus(focusSlug);
     final exerciseCount = session.phases
         .expand((p) => p.items)
         .where((i) => i.contentType == 'strength')
@@ -568,10 +586,43 @@ class _TodaysStrengthCard extends StatelessWidget {
     );
   }
 
-  String _capitalizeFocus(String slug) {
-    return slug
-        .split('_')
-        .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
-        .join(' ');
+}
+
+/// FS #224: pre-pick empty state shown above the Strength tab body when the
+/// user hasn't actively picked a focus yet. Strength tab below — Empty
+/// Workout / Routines / Exercise Library — stays fully functional. Copy is
+/// intentionally narrower than the Yoga tab's because Strength has no
+/// "custom session builder" picker analogue on this page.
+class _StrengthTabEmptyState extends StatelessWidget {
+  const _StrengthTabEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const GlassCard(
+      borderColor: AppColors.strength,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'No focus selected',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: AppColors.primaryText,
+            ),
+          ),
+          SizedBox(height: 6),
+          Text(
+            'Pick a focus on Home to see today\'s suggested Strength '
+            'workout.',
+            style: TextStyle(
+              fontSize: 13,
+              color: AppColors.secondaryText,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

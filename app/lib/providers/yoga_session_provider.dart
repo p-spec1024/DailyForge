@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import '../launchers/yoga_session_adapter.dart';
+import '../adapters/yoga_session_adapter.dart';
 import '../models/suggested_session.dart';
 import '../models/yoga_models.dart';
+import '../models/yoga_pose_details.dart';
 import '../services/api_service.dart';
 import '../services/yoga_service.dart';
 

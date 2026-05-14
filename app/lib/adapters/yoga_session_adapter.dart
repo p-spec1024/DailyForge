@@ -1,46 +1,15 @@
+// FS #203 A2: relocated from launchers/ to adapters/ as part of the yoga
+// adapter polish bundle. `YogaPoseDetails` moved to models/.
+//
+// FS #203 W2: typed exception hierarchy (YogaContractException +
+// YogaHydrationException). Pre-fix, the adapter threw StateError with
+// freeform messages and the launcher substring-matched them for friendly
+// copy. Post-fix, the launcher switches on exception type.
+
 import '../models/suggested_session.dart';
 import '../models/yoga_models.dart';
-
-/// Lightweight view of a yoga pose row, populated by the
-/// `POST /api/yoga/poses-by-ids` hydration endpoint. The adapter combines
-/// engine output (phase placement, hold duration) with these details to
-/// produce the [YogaPose] objects the player consumes.
-class YogaPoseDetails {
-  final int id;
-  final String name;
-  final String? sanskritName;
-  final String? description;
-  final String? targetMuscles;
-  final String difficulty;
-
-  const YogaPoseDetails({
-    required this.id,
-    required this.name,
-    this.sanskritName,
-    this.description,
-    this.targetMuscles,
-    required this.difficulty,
-  });
-
-  factory YogaPoseDetails.fromJson(Map<String, dynamic> json) {
-    final id = json['id'];
-    final name = json['name'];
-    if (id is! int) {
-      throw StateError('YogaPoseDetails: id must be int, got ${id.runtimeType}');
-    }
-    if (name is! String || name.isEmpty) {
-      throw StateError('YogaPoseDetails: name must be non-empty string');
-    }
-    return YogaPoseDetails(
-      id: id,
-      name: name,
-      sanskritName: json['sanskrit_name'] as String?,
-      description: json['description'] as String?,
-      targetMuscles: json['target_muscles'] as String?,
-      difficulty: (json['difficulty'] as String?) ?? 'beginner',
-    );
-  }
-}
+import '../models/yoga_pose_details.dart';
+import 'yoga_session_errors.dart';
 
 const _enginePhaseToYogaPhase = {
   'warmup': 'warmup',
@@ -51,24 +20,25 @@ const _enginePhaseToYogaPhase = {
 /// Pure function: convert an engine `pillar_pure` yoga session + a hydration
 /// map to a [YogaSession] the player can consume.
 ///
-/// Throws [StateError] on any contract violation. Strict-mode is locked
-/// (S14-T3 spec §4.5) — every violation is surfaced; the launcher's friendly
-/// snackbar wrapper translates user-facing copy.
+/// Throws [YogaContractException] on engine-shape violations and
+/// [YogaHydrationException] on missing pose-lookup entries. Strict-mode is
+/// locked (S14-T3 spec §4.5) — every violation is surfaced; the launcher's
+/// friendly snackbar wrapper translates user-facing copy.
 YogaSession yogaSessionFromEngine({
   required SuggestedSession session,
   required Map<int, YogaPoseDetails> hydratedById,
 }) {
   if (session.sessionShape != 'pillar_pure') {
-    throw StateError(
+    throw YogaContractException(
       'yoga adapter requires pillar_pure shape, got ${session.sessionShape}',
     );
   }
   if (session.phases.isEmpty) {
-    throw StateError('yoga session has no phases');
+    throw YogaContractException('yoga session has no phases');
   }
   final focusSlug = session.metadata.focusSlug;
   if (focusSlug == null || focusSlug.isEmpty) {
-    throw StateError('yoga session metadata.focus_slug is required');
+    throw YogaContractException('yoga session metadata.focus_slug is required');
   }
 
   final poses = <YogaPose>[];
@@ -77,7 +47,7 @@ YogaSession yogaSessionFromEngine({
   for (final phase in session.phases) {
     final mappedPhase = _enginePhaseToYogaPhase[phase.phase];
     if (mappedPhase == null) {
-      throw StateError('unknown yoga phase token: ${phase.phase}');
+      throw YogaContractException('unknown yoga phase token: ${phase.phase}');
     }
     if (phase.items.isEmpty) {
       // Skip silently per spec §4.5 — surface as engine bug elsewhere if needed.
@@ -85,21 +55,21 @@ YogaSession yogaSessionFromEngine({
     }
     for (final item in phase.items) {
       if (item.contentType != 'yoga') {
-        throw StateError(
+        throw YogaContractException(
           'yoga adapter received non-yoga item: ${item.contentType}#${item.contentId}',
         );
       }
       final id = item.contentId;
       if (id == null) {
-        throw StateError('yoga item missing content_id');
+        throw YogaContractException('yoga item missing content_id');
       }
       final durationMin = item.durationMinutes;
       if (durationMin == null || durationMin <= 0) {
-        throw StateError('yoga item has non-positive duration');
+        throw YogaContractException('yoga item has non-positive duration');
       }
       final details = hydratedById[id];
       if (details == null) {
-        throw StateError('hydration incomplete: missing pose id $id');
+        throw YogaHydrationException('hydration incomplete: missing pose id $id');
       }
       poses.add(YogaPose(
         id: id,
@@ -116,7 +86,7 @@ YogaSession yogaSessionFromEngine({
   }
 
   if (poses.isEmpty) {
-    throw StateError('yoga session has no poses');
+    throw YogaContractException('yoga session has no poses');
   }
 
   final yogaLevel = session.metadata.userLevels['yoga'];

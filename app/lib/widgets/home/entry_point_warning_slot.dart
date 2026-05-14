@@ -1,21 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../constants/focus_categories.dart';
 import '../../providers/suggest_provider.dart';
 import 'recency_warning_banner.dart';
-
-/// S14-T6 §6.4 / Commit 1.5 (retest #1): state-focus slugs the engine may
-/// surface as `alternative_focus_slug`. Used by the banner to route the
-/// "Switch to ..." action through [SuggestProvider.selectStateFocus]
-/// (bracket-based) instead of [selectBodyFocus] (time-budget-based) which
-/// the engine rejects for state focuses.
-const Set<String> _kStateFocusSlugs = <String>{
-  'calm',
-  'energize',
-  'focus',
-  'sleep',
-  'recover',
-};
 
 /// Default bracket when switching to a state-focus alternative. The engine
 /// returns `recover` today; '10-20' is a gentle middle ground that suits a
@@ -86,7 +74,7 @@ class _EntryPointWarningSlotState extends State<EntryPointWarningSlot> {
         // focuses route through selectStateFocus(bracket), not the body-
         // focus path — the engine rejects body-focus requests for state
         // slugs and the user sees "Something went wrong" on first tap.
-        if (_kStateFocusSlugs.contains(altSlug)) {
+        if (kStateFocusSlugs.contains(altSlug)) {
           await suggest.selectStateFocus(altSlug, _kStateFocusDefaultBracket);
           return;
         }
