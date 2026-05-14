@@ -17,6 +17,7 @@ import {
   NotImplementedError,
 } from '../src/services/suggestionEngine.js';
 import { incrementSwap, setPromptState } from '../src/services/swapCounter.js';
+import { rankAlternatives } from '../src/services/substitutionLadder.js';
 import jwt from 'jsonwebtoken';
 import { createApp } from '../src/index.js';
 
@@ -115,6 +116,13 @@ async function assertSession(label, session, levels, exclusions, expectedShape, 
   check(`${label}: metadata.user_levels matches user`,
     JSON.stringify(session.metadata?.user_levels) === JSON.stringify(levels),
     `got ${JSON.stringify(session.metadata?.user_levels)} expected ${JSON.stringify(levels)}`);
+
+  // S14-T1: metadata.focus_slug round-trips the request slug. Label format is
+  // `<focus_slug>/<entry>/<budget>` across all callers.
+  const expectedFocusSlug = label.split('/')[0];
+  check(`${label}: metadata.focus_slug == ${expectedFocusSlug}`,
+    session.metadata?.focus_slug === expectedFocusSlug,
+    `got ${session.metadata?.focus_slug}`);
 
   // metadata.estimated_total_min: tight ±10% (≥30 budget) or ±20% (15 budget)
   // when the session is fully populated. Skip the strict check (sanity-only)
@@ -779,6 +787,9 @@ async function main() {
             session.metadata?.is_endless === cfg.is_endless);
           check(`${label}: metadata.user_levels.breathwork == ${level}`,
             session.metadata?.user_levels?.breathwork === level);
+          check(`${label}: metadata.focus_slug == ${focus_slug}`,
+            session.metadata?.focus_slug === focus_slug,
+            `got ${session.metadata?.focus_slug}`);
 
           // Duration assertions
           const total = session.metadata?.estimated_total_min;
@@ -1669,6 +1680,8 @@ async function main() {
         check('T7/1 suggest body home: phases is array', Array.isArray(body.phases));
         check('T7/1 suggest body home: metadata.source=engine_v1',
           body.metadata?.source === 'engine_v1', `got ${body.metadata?.source}`);
+        check('T7/1 suggest body home: metadata.focus_slug=biceps',
+          body.metadata?.focus_slug === 'biceps', `got ${body.metadata?.focus_slug}`);
         check('T7/1 suggest body home: warnings is array', Array.isArray(body.warnings));
         const hasMain = (body.phases || []).some((p) => p.phase === 'main' && (p.items || []).length > 0);
         check('T7/1 suggest body home: has main phase with items', hasMain);
@@ -1690,6 +1703,8 @@ async function main() {
           `got ${JSON.stringify(phaseNames)}`);
         check('T7/2 suggest state: metadata.source=engine_v1',
           body.metadata?.source === 'engine_v1');
+        check('T7/2 suggest state: metadata.focus_slug=calm',
+          body.metadata?.focus_slug === 'calm', `got ${body.metadata?.focus_slug}`);
       }
 
       // Sub-block 3: /suggest validation matrix — 9 error cases (criteria #4–#12)
@@ -2803,6 +2818,1154 @@ async function main() {
       try { t5Server.close(); } catch {}
       process.removeListener('SIGINT', t5AbortHandler);
       process.removeListener('SIGTERM', t5AbortHandler);
+    }
+  }
+
+  // ── Phase 3i: T1 START-FROM-LIST BLOCK (S14-T1) ──────────────────────
+  // ≥18 assertions across 8 groups exercising POST /api/sessions/start-from-list.
+  // Uses createApp() in-process listener + jwt for auth (matches T1/T2/T5 patterns).
+  // Sentinel: tags all created sessions with notes='s14-t1-smoke-fixture' via
+  // UPDATE-after-insert so cleanup deletes them deterministically. ON DELETE
+  // CASCADE on session_exercises.session_id auto-removes child rows.
+  {
+    console.log('\n=== T1 START-FROM-LIST BLOCK ===');
+    if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET not set — required for T1 START-FROM-LIST block');
+
+    const SFL_SENTINEL = 's14-t1-smoke-fixture';
+
+    // Idempotent pre-clean (covers a previous run that died before its own cleanup).
+    await pool.query(`DELETE FROM sessions WHERE notes = $1`, [SFL_SENTINEL]);
+
+    // Resolve a 3-strength-exercise sample + 1 yoga exercise for pillar-mismatch test.
+    const { rows: strengthRows } = await pool.query(
+      `SELECT id FROM exercises WHERE type = 'strength' ORDER BY id LIMIT 3`
+    );
+    const { rows: yogaRows } = await pool.query(
+      `SELECT id FROM exercises WHERE type = 'yoga' ORDER BY id LIMIT 1`
+    );
+    if (strengthRows.length < 3 || yogaRows.length < 1) {
+      throw new Error('SFL block: insufficient exercise rows for fixtures');
+    }
+    const strengthIds = strengthRows.map((r) => r.id);
+    const yogaExerciseId = yogaRows[0].id;
+    // A reliably-non-existent exercise id.
+    const FAKE_EXERCISE_ID = 999999999;
+
+    const sflApp = createApp();
+    const sflServer = await new Promise((resolve) => {
+      const s = sflApp.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const sflPort = sflServer.address().port;
+    const sflBase = `http://127.0.0.1:${sflPort}`;
+    const sflToken = jwt.sign(
+      { id: user.id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '5m' }
+    );
+    const sflH = { 'Content-Type': 'application/json', Authorization: `Bearer ${sflToken}` };
+    const sflCreatedSessionIds = [];
+
+    async function sflPost(body) {
+      return await fetch(`${sflBase}/api/sessions/start-from-list`, {
+        method: 'POST', headers: sflH, body: JSON.stringify(body),
+      });
+    }
+    async function sflTagSession(sessionId) {
+      // Mark with sentinel so cleanup is independent of the local tracker.
+      await pool.query(`UPDATE sessions SET notes = $1 WHERE id = $2`,
+        [SFL_SENTINEL, sessionId]);
+      sflCreatedSessionIds.push(sessionId);
+    }
+
+    async function sflCleanup() {
+      // CASCADE on session_exercises.session_id removes child rows automatically.
+      await pool.query(`DELETE FROM sessions WHERE notes = $1`, [SFL_SENTINEL]);
+    }
+    const sflAbortHandler = async () => {
+      try { await sflCleanup(); } catch (e) { console.error('[SFL abort cleanup]', e); }
+      try { sflServer.close(); } catch {}
+      process.exit(130);
+    };
+    process.once('SIGINT', sflAbortHandler);
+    process.once('SIGTERM', sflAbortHandler);
+
+    try {
+      // Group 1 (×3): missing top-level required fields.
+      {
+        let r = await sflPost({ focus_slug: 'biceps', exercises: [{ exercise_id: strengthIds[0], sort_order: 0, default_sets: 3, default_reps: 10 }] });
+        let b = await r.json();
+        check('SFL/1a missing type → 400 invalid_session_type',
+          r.status === 400 && b.error === 'invalid_session_type', `got ${r.status} ${b.error}`);
+
+        r = await sflPost({ type: 'strength', exercises: [{ exercise_id: strengthIds[0], sort_order: 0, default_sets: 3, default_reps: 10 }] });
+        b = await r.json();
+        check('SFL/1b missing focus_slug → 400 invalid_focus_slug',
+          r.status === 400 && b.error === 'invalid_focus_slug', `got ${r.status} ${b.error}`);
+
+        r = await sflPost({ type: 'strength', focus_slug: 'biceps' });
+        b = await r.json();
+        check('SFL/1c missing exercises → 400 invalid_exercises',
+          r.status === 400 && b.error === 'invalid_exercises', `got ${r.status} ${b.error}`);
+      }
+
+      // Group 2 (×2): exercises array boundary cases.
+      {
+        let r = await sflPost({ type: 'strength', focus_slug: 'biceps', exercises: [] });
+        let b = await r.json();
+        check('SFL/2a empty exercises → 400 invalid_exercises',
+          r.status === 400 && b.error === 'invalid_exercises', `got ${r.status} ${b.error}`);
+
+        const tooMany = Array.from({ length: 21 }, (_, i) => ({
+          exercise_id: strengthIds[0], sort_order: i, default_sets: 3, default_reps: 10,
+        }));
+        r = await sflPost({ type: 'strength', focus_slug: 'biceps', exercises: tooMany });
+        b = await r.json();
+        check('SFL/2b 21 exercises → 400 too_many_exercises',
+          r.status === 400 && b.error === 'too_many_exercises', `got ${r.status} ${b.error}`);
+      }
+
+      // Group 3 (×3): invalid item shape.
+      {
+        let r = await sflPost({ type: 'strength', focus_slug: 'biceps',
+          exercises: [{ sort_order: 0, default_sets: 3, default_reps: 10 }] });
+        let b = await r.json();
+        check('SFL/3a item missing exercise_id → 400 invalid_exercise_item',
+          r.status === 400 && b.error === 'invalid_exercise_item', `got ${r.status} ${b.error}`);
+
+        r = await sflPost({ type: 'strength', focus_slug: 'biceps',
+          exercises: [{ exercise_id: strengthIds[0], sort_order: 'zero', default_sets: 3, default_reps: 10 }] });
+        b = await r.json();
+        check('SFL/3b non-int sort_order → 400 invalid_exercise_item',
+          r.status === 400 && b.error === 'invalid_exercise_item', `got ${r.status} ${b.error}`);
+
+        r = await sflPost({ type: 'strength', focus_slug: 'biceps',
+          exercises: [{ exercise_id: strengthIds[0], sort_order: 0, default_sets: 'three', default_reps: 10 }] });
+        b = await r.json();
+        check('SFL/3c non-int default_sets → 400 invalid_exercise_item',
+          r.status === 400 && b.error === 'invalid_exercise_item', `got ${r.status} ${b.error}`);
+      }
+
+      // Group 4 (×2): exercise existence + pillar-correctness.
+      {
+        let r = await sflPost({ type: 'strength', focus_slug: 'biceps',
+          exercises: [{ exercise_id: FAKE_EXERCISE_ID, sort_order: 0, default_sets: 3, default_reps: 10 }] });
+        let b = await r.json();
+        check('SFL/4a non-existent exercise_id → 400 unknown_exercise_id',
+          r.status === 400 && b.error === 'unknown_exercise_id', `got ${r.status} ${b.error}`);
+
+        r = await sflPost({ type: 'strength', focus_slug: 'biceps',
+          exercises: [{ exercise_id: yogaExerciseId, sort_order: 0, default_sets: 3, default_reps: 10 }] });
+        b = await r.json();
+        check('SFL/4b yoga exercise_id with type=strength → 400 wrong_pillar_exercise',
+          r.status === 400 && b.error === 'wrong_pillar_exercise', `got ${r.status} ${b.error}`);
+      }
+
+      // Group 5 (×2): unsupported pillar (T2 widens this).
+      {
+        const r = await sflPost({ type: 'yoga', focus_slug: 'biceps',
+          exercises: [{ exercise_id: strengthIds[0], sort_order: 0, default_sets: 3, default_reps: 10 }] });
+        const b = await r.json();
+        check('SFL/5a type=yoga → 400 status', r.status === 400, `got ${r.status}`);
+        check('SFL/5b type=yoga → unsupported_session_type code',
+          b.error === 'unsupported_session_type', `got ${b.error}`);
+      }
+
+      // Group 6 (×4): happy path 3-exercise strength session response shape.
+      let happyBody;
+      {
+        const exercisesPayload = strengthIds.map((id, i) => ({
+          exercise_id: id, sort_order: i, default_sets: 3, default_reps: 10,
+        }));
+        const r = await sflPost({ type: 'strength', focus_slug: 'biceps', exercises: exercisesPayload });
+        check('SFL/6 happy path: status 200', r.status === 200, `got ${r.status}`);
+        happyBody = await r.json();
+        const sessionId = happyBody?.session?.id;
+        if (Number.isInteger(sessionId)) await sflTagSession(sessionId);
+
+        check('SFL/6a session.id is positive integer',
+          Number.isInteger(happyBody?.session?.id) && happyBody.session.id > 0,
+          `got ${happyBody?.session?.id}`);
+        check('SFL/6b session.workout_id === null',
+          happyBody?.session?.workout_id === null, `got ${happyBody?.session?.workout_id}`);
+        check('SFL/6c session.focus_slug === biceps',
+          happyBody?.session?.focus_slug === 'biceps', `got ${happyBody?.session?.focus_slug}`);
+        const allHaveMuscles = Array.isArray(happyBody?.exercises)
+          && happyBody.exercises.length === 3
+          && happyBody.exercises.every((e) => typeof e.target_muscles === 'string');
+        check('SFL/6d exercises[3] populated with target_muscles strings',
+          allHaveMuscles,
+          `got ${JSON.stringify(happyBody?.exercises?.map((e) => e.target_muscles))}`);
+      }
+
+      // Group 7 (×1): DB invariant — N rows in sort_order.
+      {
+        const sessionId = happyBody?.session?.id;
+        const { rows: seRows } = await pool.query(
+          `SELECT exercise_id, sort_order FROM session_exercises
+            WHERE session_id = $1 ORDER BY sort_order ASC`,
+          [sessionId]
+        );
+        const seOk = seRows.length === 3
+          && seRows.every((r, i) => r.sort_order === i)
+          && seRows.map((r) => r.exercise_id).join(',') === strengthIds.join(',');
+        check('SFL/7 session_exercises has 3 rows in sort_order with matching ids',
+          seOk,
+          `got ${JSON.stringify(seRows)}`);
+      }
+
+      // Group 8 (×1): metadata.focus_slug round-trip via /suggest (engine→endpoint
+      // integration, complementary to the in-helper assertion added in Step 2).
+      {
+        const r = await fetch(`${sflBase}/api/sessions/suggest`, {
+          method: 'POST', headers: sflH,
+          body: JSON.stringify({ focus_slug: 'biceps', entry_point: 'home', time_budget_min: 30 }),
+        });
+        const b = await r.json();
+        check('SFL/8 /suggest body home: metadata.focus_slug === biceps',
+          r.status === 200 && b.metadata?.focus_slug === 'biceps',
+          `got status=${r.status} focus_slug=${b.metadata?.focus_slug}`);
+      }
+    } finally {
+      await sflCleanup();
+      try { sflServer.close(); } catch {}
+      process.removeListener('SIGINT', sflAbortHandler);
+      process.removeListener('SIGTERM', sflAbortHandler);
+    }
+  }
+
+  // ── Phase 3j: T3 YOGA-ADAPTER BLOCK (S14-T3) ─────────────────────────
+  // Engine emission shape + POST /api/yoga/poses-by-ids round-trip.
+  // Uses inline sentinel pattern (matches T1 block above; the originally
+  // referenced scripts/lib/smoke-fixtures.mjs helper does not exist).
+  {
+    console.log('\n=== T3 YOGA-ADAPTER BLOCK ===');
+    if (!process.env.JWT_SECRET) {
+      throw new Error('JWT_SECRET not set — required for T3 YOGA-ADAPTER block');
+    }
+
+    // Group A (×4): engine emits pillar_pure yoga for the cold-start tuple.
+    {
+      const yogaSession = await generateSession({
+        user_id: user.id,
+        focus_slug: 'hamstrings',
+        entry_point: 'yoga_tab',
+        time_budget_min: 30,
+      });
+      check('YA/A1 yoga_tab/hamstrings/30: session_shape=pillar_pure',
+        yogaSession.session_shape === 'pillar_pure',
+        `got ${yogaSession.session_shape}`);
+      const allItems = (yogaSession.phases || []).flatMap((p) => p.items || []);
+      check('YA/A2 all items have content_type=yoga',
+        allItems.length > 0 && allItems.every((i) => i.content_type === 'yoga'),
+        `got types ${[...new Set(allItems.map((i) => i.content_type))].join(',')}`);
+      const phaseTokens = (yogaSession.phases || []).map((p) => p.phase);
+      const allowed = new Set(['warmup', 'main', 'cooldown']);
+      check('YA/A3 phase tokens subset of {warmup, main, cooldown}',
+        phaseTokens.length > 0 && phaseTokens.every((p) => allowed.has(p)),
+        `got ${phaseTokens.join(',')}`);
+      check('YA/A4 metadata.focus_slug present and non-empty',
+        typeof yogaSession.metadata?.focus_slug === 'string'
+          && yogaSession.metadata.focus_slug.length > 0,
+        `got ${yogaSession.metadata?.focus_slug}`);
+    }
+
+    // Sentinel yoga pose for endpoint round-trip + missing-id assertions.
+    const YA_SENTINEL_NAME = 's14-t3-smoke-fixture-pose';
+    await pool.query(`DELETE FROM exercises WHERE name = $1 AND type = 'yoga'`,
+      [YA_SENTINEL_NAME]);
+
+    const { rows: insertedRows } = await pool.query(
+      `INSERT INTO exercises (name, sanskrit_name, description, target_muscles,
+                              difficulty, type, category)
+       VALUES ($1, $2, $3, $4, $5, 'yoga', 'standing')
+       RETURNING id`,
+      [YA_SENTINEL_NAME, 'Sentinel Pose', 'smoke-fixture pose for s14-t3',
+       'hamstrings, calves', 'beginner']
+    );
+    const sentinelPoseId = insertedRows[0].id;
+
+    const yaApp = createApp();
+    const yaServer = await new Promise((resolve) => {
+      const s = yaApp.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const yaPort = yaServer.address().port;
+    const yaBase = `http://127.0.0.1:${yaPort}`;
+    const yaToken = jwt.sign(
+      { id: user.id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '5m' }
+    );
+    const yaH = { 'Content-Type': 'application/json', Authorization: `Bearer ${yaToken}` };
+
+    async function yaPost(body, opts = {}) {
+      return await fetch(`${yaBase}/api/yoga/poses-by-ids`, {
+        method: 'POST',
+        headers: opts.noAuth ? { 'Content-Type': 'application/json' } : yaH,
+        body: JSON.stringify(body),
+      });
+    }
+    async function yaCleanup() {
+      await pool.query(`DELETE FROM exercises WHERE id = $1`, [sentinelPoseId]);
+    }
+    const yaAbortHandler = async () => {
+      try { await yaCleanup(); } catch (e) { console.error('[YA abort cleanup]', e); }
+      try { yaServer.close(); } catch {}
+      process.exit(130);
+    };
+    process.once('SIGINT', yaAbortHandler);
+    process.once('SIGTERM', yaAbortHandler);
+
+    try {
+      // Group B (×6): /poses-by-ids happy-path round-trip.
+      {
+        const r = await yaPost({ ids: [sentinelPoseId] });
+        check('YA/B happy: status 200', r.status === 200, `got ${r.status}`);
+        const b = await r.json();
+        const pose = Array.isArray(b.poses) && b.poses[0];
+        check('YA/B1 poses[0].id === sentinel id',
+          pose && pose.id === sentinelPoseId,
+          `got ${pose && pose.id}`);
+        check('YA/B2 poses[0].name === sentinel name',
+          pose && pose.name === YA_SENTINEL_NAME,
+          `got ${pose && pose.name}`);
+        check('YA/B3 poses[0].sanskrit_name populated',
+          pose && pose.sanskrit_name === 'Sentinel Pose',
+          `got ${pose && pose.sanskrit_name}`);
+        check('YA/B4 poses[0].target_muscles is comma-separated string',
+          pose && typeof pose.target_muscles === 'string'
+            && pose.target_muscles.includes(','),
+          `got ${pose && JSON.stringify(pose.target_muscles)}`);
+        check('YA/B5 poses[0].difficulty === beginner',
+          pose && pose.difficulty === 'beginner',
+          `got ${pose && pose.difficulty}`);
+      }
+
+      // Group C (×4): validation errors.
+      {
+        let r = await yaPost({ ids: [] });
+        let b = await r.json();
+        check('YA/C1 empty ids → 400 invalid_ids',
+          r.status === 400 && b.error === 'invalid_ids',
+          `got ${r.status} ${b.error}`);
+
+        const tooMany = Array.from({ length: 51 }, (_, i) => i + 1);
+        r = await yaPost({ ids: tooMany });
+        b = await r.json();
+        check('YA/C2 51 ids → 400 too_many_ids',
+          r.status === 400 && b.error === 'too_many_ids',
+          `got ${r.status} ${b.error}`);
+
+        r = await yaPost({ ids: ['abc'] });
+        b = await r.json();
+        check('YA/C3 non-int id → 400 invalid_id',
+          r.status === 400 && b.error === 'invalid_id',
+          `got ${r.status} ${b.error}`);
+
+        r = await yaPost({ ids: [sentinelPoseId] }, { noAuth: true });
+        check('YA/C4 no auth → 401',
+          r.status === 401, `got ${r.status}`);
+      }
+
+      // Group D (×2): partial-success rejection (Q3 lock).
+      {
+        const FAKE_POSE_ID = 999999999;
+        const r = await yaPost({ ids: [sentinelPoseId, FAKE_POSE_ID] });
+        const b = await r.json();
+        check('YA/D1 partial success → 404 some_poses_missing',
+          r.status === 404 && b.error === 'some_poses_missing',
+          `got ${r.status} ${b.error}`);
+        check('YA/D2 missing_ids contains the fake id',
+          Array.isArray(b.missing_ids) && b.missing_ids.includes(FAKE_POSE_ID),
+          `got ${JSON.stringify(b.missing_ids)}`);
+      }
+    } finally {
+      await yaCleanup();
+      try { yaServer.close(); } catch {}
+      process.removeListener('SIGINT', yaAbortHandler);
+      process.removeListener('SIGTERM', yaAbortHandler);
+    }
+  }
+
+  // ── Phase 3k: T4+T5 MULTI-PHASE SESSIONS BLOCK (S14-T4, extended S14-T5) ──
+  // Exercises POST /api/multi-phase-sessions (renamed S14-T5 from
+  // /api/cross-pillar-sessions). Verifies happy-path FK fan across BOTH
+  // sessions and breathwork_sessions (T4 AMENDMENT-1 D3 dual-FK), AND that
+  // both session_shape values ('cross_pillar', 'state_focus') round-trip
+  // through the endpoint. Uses inline sentinel pattern (T1/T3 precedent —
+  // the originally referenced smoke-fixtures.mjs helper does not exist).
+  // Sentinels: sessions.notes = 's14-t4-smoke-fixture',
+  //            breathwork_sessions.focus_slug = 's14_t4_smoke',
+  //            multi_phase_sessions.focus_slug = 's14_t4_smoke' or
+  //            's14_t5_smoke' (state-focus block).
+  {
+    console.log('\n=== T4+T5 MULTI-PHASE SESSIONS BLOCK ===');
+    if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET not set');
+
+    const CPS_SENTINEL_NOTES = 's14-t4-smoke-fixture';
+    const CPS_SENTINEL_FOCUS = 's14_t4_smoke';
+    const T5_SENTINEL_FOCUS  = 's14_t5_smoke';
+
+    // Pre-clean from any previous aborted run. Order matters: child rows
+    // first (sessions / breathwork_sessions FK back to multi_phase_sessions),
+    // then multi_phase_sessions.
+    await pool.query(`DELETE FROM sessions WHERE notes = $1`, [CPS_SENTINEL_NOTES]);
+    await pool.query(
+      `DELETE FROM breathwork_sessions WHERE focus_slug = ANY($1::text[])`,
+      [[CPS_SENTINEL_FOCUS, T5_SENTINEL_FOCUS]]
+    );
+    await pool.query(
+      `DELETE FROM multi_phase_sessions WHERE focus_slug = ANY($1::text[])`,
+      [[CPS_SENTINEL_FOCUS, T5_SENTINEL_FOCUS]]
+    );
+
+    // Need one technique id for breathwork_sessions FK; reuse any green-tier.
+    const { rows: btRows } = await pool.query(
+      `SELECT id FROM breathwork_techniques WHERE safety_level = 'green' LIMIT 1`
+    );
+    if (btRows.length === 0) {
+      throw new Error('CPS block: no green-tier breathwork technique available');
+    }
+    const bwTechniqueId = btRows[0].id;
+
+    const cpsApp = createApp();
+    const cpsServer = await new Promise((resolve) => {
+      const s = cpsApp.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const cpsPort = cpsServer.address().port;
+    const cpsBase = `http://127.0.0.1:${cpsPort}`;
+    const cpsToken = jwt.sign(
+      { id: user.id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '5m' }
+    );
+    const cpsH = { 'Content-Type': 'application/json', Authorization: `Bearer ${cpsToken}` };
+
+    async function cpsPost(body, opts = {}) {
+      return await fetch(`${cpsBase}/api/multi-phase-sessions`, {
+        method: 'POST',
+        headers: opts.noAuth ? { 'Content-Type': 'application/json' } : cpsH,
+        body: JSON.stringify(body),
+      });
+    }
+
+    async function cpsCleanup() {
+      await pool.query(`DELETE FROM sessions WHERE notes = $1`, [CPS_SENTINEL_NOTES]);
+      await pool.query(
+        `DELETE FROM breathwork_sessions WHERE focus_slug = ANY($1::text[])`,
+        [[CPS_SENTINEL_FOCUS, T5_SENTINEL_FOCUS]]
+      );
+      await pool.query(
+        `DELETE FROM multi_phase_sessions WHERE focus_slug = ANY($1::text[])`,
+        [[CPS_SENTINEL_FOCUS, T5_SENTINEL_FOCUS]]
+      );
+    }
+    const cpsAbortHandler = async () => {
+      try { await cpsCleanup(); } catch (e) { console.error('[CPS abort cleanup]', e); }
+      try { cpsServer.close(); } catch {}
+      process.exit(130);
+    };
+    process.once('SIGINT', cpsAbortHandler);
+    process.once('SIGTERM', cpsAbortHandler);
+
+    try {
+      // Seed two pre-existing per-pillar session rows (one in `sessions` for
+      // the strength/yoga side, one in `breathwork_sessions` for the breath
+      // side) tagged with the sentinel so cleanup catches them.
+      const { rows: sRows } = await pool.query(
+        `INSERT INTO sessions (user_id, type, date, started_at, completed_at,
+                               completed, duration, focus_slug, notes)
+         VALUES ($1, 'yoga', CURRENT_DATE, NOW() - INTERVAL '10 minutes', NOW(),
+                 true, 600, $2, $3)
+         RETURNING id`,
+        [user.id, CPS_SENTINEL_FOCUS, CPS_SENTINEL_NOTES]
+      );
+      const seedSessionId = sRows[0].id;
+
+      const { rows: bRows } = await pool.query(
+        `INSERT INTO breathwork_sessions (user_id, technique_id, duration_seconds,
+                                          rounds_completed, completed, focus_slug)
+         VALUES ($1, $2, 300, 5, true, $3)
+         RETURNING id`,
+        [user.id, bwTechniqueId, CPS_SENTINEL_FOCUS]
+      );
+      const seedBreathId = bRows[0].id;
+
+      // T4/A — happy path: valid POST creates multi_phase_sessions row and
+      // fans FK to both sessions + breathwork_sessions.
+      const happyBody = {
+        focus_slug: CPS_SENTINEL_FOCUS,
+        session_shape: 'cross_pillar',
+        started_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        completed_at: new Date().toISOString(),
+        phases_completed: 2,
+        total_phases: 5,
+        end_intent: 'completed',
+        strength_yoga_session_ids: [seedSessionId],
+        breathwork_session_ids: [seedBreathId],
+      };
+      const r = await cpsPost(happyBody);
+      check('T4/A happy: status 201', r.status === 201, `got ${r.status}`);
+      const body = await r.json();
+      check('T4/A happy: returns positive integer id',
+        Number.isInteger(body?.id) && body.id > 0, `got ${body?.id}`);
+
+      // T4/B — row in multi_phase_sessions has expected fields + session_shape.
+      const { rows: cpsRows } = await pool.query(
+        `SELECT focus_slug, session_shape, phases_completed, total_phases, end_intent
+           FROM multi_phase_sessions WHERE id = $1`,
+        [body.id]
+      );
+      check('T4/B multi_phase_sessions row populated (cross_pillar shape)',
+        cpsRows.length === 1
+          && cpsRows[0].focus_slug === CPS_SENTINEL_FOCUS
+          && cpsRows[0].session_shape === 'cross_pillar'
+          && cpsRows[0].phases_completed === 2
+          && cpsRows[0].total_phases === 5
+          && cpsRows[0].end_intent === 'completed',
+        JSON.stringify(cpsRows[0] || null));
+
+      // T4/C — sessions FK populated.
+      const { rows: sCheck } = await pool.query(
+        `SELECT multi_phase_session_id FROM sessions WHERE id = $1`,
+        [seedSessionId]
+      );
+      check('T4/C sessions.multi_phase_session_id set',
+        sCheck[0]?.multi_phase_session_id === body.id,
+        `got ${sCheck[0]?.multi_phase_session_id}`);
+
+      // T4/D — breathwork_sessions FK populated.
+      const { rows: bCheck } = await pool.query(
+        `SELECT multi_phase_session_id FROM breathwork_sessions WHERE id = $1`,
+        [seedBreathId]
+      );
+      check('T4/D breathwork_sessions.multi_phase_session_id set',
+        bCheck[0]?.multi_phase_session_id === body.id,
+        `got ${bCheck[0]?.multi_phase_session_id}`);
+
+      // T4/E — validation: invalid_focus_slug.
+      {
+        const r2 = await cpsPost({ ...happyBody, focus_slug: 'X' });
+        const b2 = await r2.json();
+        check('T4/E invalid focus_slug → 400 invalid_focus_slug',
+          r2.status === 400 && b2.error === 'invalid_focus_slug',
+          `got ${r2.status} ${b2.error}`);
+      }
+
+      // T4/F — validation: invalid_end_intent.
+      {
+        const r2 = await cpsPost({ ...happyBody, end_intent: 'bogus' });
+        const b2 = await r2.json();
+        check('T4/F invalid end_intent → 400 invalid_end_intent',
+          r2.status === 400 && b2.error === 'invalid_end_intent',
+          `got ${r2.status} ${b2.error}`);
+      }
+
+      // T4/G — validation: phases_completed > total_phases.
+      {
+        const r2 = await cpsPost({ ...happyBody, phases_completed: 6 });
+        const b2 = await r2.json();
+        check('T4/G phases_completed>total → 400 phases_completed_exceeds_total',
+          r2.status === 400 && b2.error === 'phases_completed_exceeds_total',
+          `got ${r2.status} ${b2.error}`);
+      }
+
+      // T4/H — no auth → 401.
+      {
+        const r2 = await cpsPost(happyBody, { noAuth: true });
+        check('T4/H no auth → 401', r2.status === 401, `got ${r2.status}`);
+      }
+
+      // ── S14-T5 ADDITIONS ──────────────────────────────────────────────
+      // Seed a state-focus-flavored breathwork_sessions pair (centering +
+      // practice phases; reflection writes NO row per spec §16). Then POST
+      // a state_focus session and verify the row + FK fanout + shape.
+
+      const { rows: bRows2 } = await pool.query(
+        `INSERT INTO breathwork_sessions (user_id, technique_id, duration_seconds,
+                                          rounds_completed, completed, focus_slug)
+         VALUES
+           ($1, $2, 120, 3, true, $3),
+           ($1, $2, 480, 8, true, $3)
+         RETURNING id`,
+        [user.id, bwTechniqueId, T5_SENTINEL_FOCUS]
+      );
+      const centeringId = bRows2[0].id;
+      const practiceId  = bRows2[1].id;
+
+      // T5/A — happy path: state_focus shape accepted, row written with
+      // session_shape='state_focus'.
+      const t5Body = {
+        focus_slug: T5_SENTINEL_FOCUS,
+        session_shape: 'state_focus',
+        started_at: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+        completed_at: new Date().toISOString(),
+        phases_completed: 3,
+        total_phases: 3,
+        end_intent: 'completed',
+        strength_yoga_session_ids: [],
+        breathwork_session_ids: [centeringId, practiceId],
+      };
+      const r5 = await cpsPost(t5Body);
+      check('T5/A state_focus happy: status 201', r5.status === 201, `got ${r5.status}`);
+      const t5Resp = await r5.json();
+      check('T5/A state_focus happy: returns positive integer id',
+        Number.isInteger(t5Resp?.id) && t5Resp.id > 0, `got ${t5Resp?.id}`);
+
+      // T5/B — row written with session_shape='state_focus'.
+      const { rows: t5Rows } = await pool.query(
+        `SELECT focus_slug, session_shape, phases_completed, total_phases, end_intent
+           FROM multi_phase_sessions WHERE id = $1`,
+        [t5Resp.id]
+      );
+      check('T5/B multi_phase_sessions row populated (state_focus shape)',
+        t5Rows.length === 1
+          && t5Rows[0].focus_slug === T5_SENTINEL_FOCUS
+          && t5Rows[0].session_shape === 'state_focus'
+          && t5Rows[0].phases_completed === 3
+          && t5Rows[0].total_phases === 3
+          && t5Rows[0].end_intent === 'completed',
+        JSON.stringify(t5Rows[0] || null));
+
+      // T5/C — both breathwork_sessions rows (centering + practice) FK
+      // back to the new multi_phase_sessions row.
+      const { rows: t5Bfks } = await pool.query(
+        `SELECT id, multi_phase_session_id
+           FROM breathwork_sessions
+          WHERE id = ANY($1::int[])
+          ORDER BY id`,
+        [[centeringId, practiceId]]
+      );
+      check('T5/C centering breathwork FK → multi_phase_sessions',
+        t5Bfks[0]?.multi_phase_session_id === t5Resp.id,
+        `got ${t5Bfks[0]?.multi_phase_session_id}`);
+      check('T5/C practice breathwork FK → multi_phase_sessions',
+        t5Bfks[1]?.multi_phase_session_id === t5Resp.id,
+        `got ${t5Bfks[1]?.multi_phase_session_id}`);
+
+      // T5/D — validation: invalid session_shape → 400.
+      {
+        const r2 = await cpsPost({ ...t5Body, session_shape: 'pillar_pure' });
+        const b2 = await r2.json();
+        check('T5/D invalid session_shape → 400 invalid_session_shape',
+          r2.status === 400 && b2.error === 'invalid_session_shape',
+          `got ${r2.status} ${b2.error}`);
+      }
+
+      // T5/E — validation: missing session_shape → 400.
+      {
+        const noShape = { ...t5Body };
+        delete noShape.session_shape;
+        const r2 = await cpsPost(noShape);
+        const b2 = await r2.json();
+        check('T5/E missing session_shape → 400 invalid_session_shape',
+          r2.status === 400 && b2.error === 'invalid_session_shape',
+          `got ${r2.status} ${b2.error}`);
+      }
+
+      // T5/F — engine emission: state_focus sessions have phases.length===3,
+      // reflection has content_id===null, centering+practice have non-null
+      // content_id. This is a direct engine assertion (not HTTP), covering
+      // the contract the launcher's _validateStateFocusShape relies on.
+      {
+        const eng = await generateSession({
+          user_id: user.id,
+          focus_slug: 'calm',
+          entry_point: 'breathwork_tab',
+          bracket: '10-20',
+        });
+        check('T5/F engine state_focus: session_shape', eng.session_shape === 'state_focus');
+        check('T5/F engine state_focus: 3 phases', eng.phases.length === 3);
+        check('T5/F engine state_focus: reflection content_id===null',
+          eng.phases[2]?.items[0]?.content_id === null,
+          `got ${eng.phases[2]?.items[0]?.content_id}`);
+        check('T5/F engine state_focus: centering content_id is int',
+          Number.isInteger(eng.phases[0]?.items[0]?.content_id));
+        check('T5/F engine state_focus: practice content_id is int',
+          Number.isInteger(eng.phases[1]?.items[0]?.content_id));
+      }
+
+      // T5/G — engine emission: endless bracket sets metadata.is_endless.
+      {
+        const eng = await generateSession({
+          user_id: user.id,
+          focus_slug: 'calm',
+          entry_point: 'breathwork_tab',
+          bracket: 'endless',
+        });
+        check('T5/G engine endless: metadata.is_endless===true',
+          eng.metadata?.is_endless === true,
+          `got ${eng.metadata?.is_endless}`);
+      }
+    } finally {
+      await cpsCleanup();
+      try { cpsServer.close(); } catch {}
+      process.removeListener('SIGINT', cpsAbortHandler);
+      process.removeListener('SIGTERM', cpsAbortHandler);
+    }
+  }
+
+  // ── S14-T6 BLOCK ─────────────────────────────────────────────────────
+  // Verifies the three engine-side T6 changes:
+  //   §A — pillar-pure yoga emits metadata.source per level (Decision A)
+  //   §B — substitutionLadder.rankAlternatives ordering + exclusion + cap
+  //   §C — GET /api/users/me/streaks shape (in-process server)
+  //   §D — recency-warning shape preservation (existing engine output)
+  //
+  // All mutations are restored in finally. Sentinel: notes='t6-s14-fixture'.
+  {
+    console.log('\n=== S14-T6 BLOCK ===');
+
+    // Snapshot user's yoga level so §A's per-level overrides restore cleanly.
+    const yogaLevelSnap = await pool.query(
+      `SELECT level FROM user_pillar_levels WHERE user_id = $1 AND pillar = 'yoga'`,
+      [user.id]
+    );
+    const yogaLevelOriginal = yogaLevelSnap.rows[0]?.level ?? null;
+
+    // Helper: set the user's yoga level (insert-or-update).
+    async function setYogaLevel(level) {
+      await pool.query(
+        `INSERT INTO user_pillar_levels (user_id, pillar, level, source)
+         VALUES ($1, 'yoga', $2, 'inferred')
+         ON CONFLICT (user_id, pillar)
+         DO UPDATE SET level = EXCLUDED.level, updated_at = NOW()`,
+        [user.id, level]
+      );
+    }
+
+    async function restoreYogaLevel() {
+      if (yogaLevelOriginal) {
+        await setYogaLevel(yogaLevelOriginal);
+      } else {
+        await pool.query(
+          `DELETE FROM user_pillar_levels WHERE user_id = $1 AND pillar = 'yoga'`,
+          [user.id]
+        );
+      }
+    }
+
+    const T6S14_FIXTURE_NOTE = 't6-s14-fixture';
+
+    try {
+      // ── §A: yoga metadata.source per level ─────────────────────────────
+      console.log('\n--- S14-T6/A yoga style emission per level ---');
+      const styleByLevel = {
+        beginner:     'hatha',
+        intermediate: 'vinyasa',
+        advanced:     'vinyasa',
+      };
+      // Pick a focus that has thick yoga coverage across styles. 'core' tends
+      // to have hatha + vinyasa rows; if it ever doesn't, swap to 'back'.
+      const styleTestFocus = 'core';
+      for (const [level, expectedStyle] of Object.entries(styleByLevel)) {
+        await setYogaLevel(level);
+        try {
+          const sess = await generateSession({
+            user_id: user.id,
+            focus_slug: styleTestFocus,
+            entry_point: 'yoga_tab',
+            time_budget_min: 30,
+          });
+          check(`S14-T6/A ${level}: metadata.source === ${expectedStyle}`,
+            sess.metadata?.source === expectedStyle,
+            `got ${sess.metadata?.source}`);
+          // Main-phase poses must carry the resolved style in practice_types.
+          const main = sess.phases.find((p) => p.phase === 'main');
+          if (main && main.items.length > 0) {
+            const mainIds = main.items.map((it) => it.content_id);
+            const { rows } = await pool.query(
+              `SELECT id, practice_types FROM exercises WHERE id = ANY($1::int[])`,
+              [mainIds]
+            );
+            const allMatch = rows.every((r) =>
+              Array.isArray(r.practice_types) && r.practice_types.includes(expectedStyle)
+            );
+            check(`S14-T6/A ${level}: main poses all carry style=${expectedStyle}`,
+              allMatch,
+              `pose styles: ${rows.map((r) => `${r.id}:${JSON.stringify(r.practice_types)}`).join(' / ')}`);
+          }
+        } catch (e) {
+          // Empty pool for this focus+style+level is a content-coverage gap,
+          // not an engine bug. Surface as a soft fail with context.
+          check(`S14-T6/A ${level}: generateSession did not throw`,
+            false,
+            `threw: ${e.message}`);
+        }
+      }
+
+      // ── §B: substitution ladder ─────────────────────────────────────────
+      console.log('\n--- S14-T6/B substitutionLadder.rankAlternatives ---');
+      // Pick a strength exercise the user can actually swap against (one with
+      // slot_alternatives rows). Find it dynamically — content varies by env.
+      const candidatePoolQuery = await pool.query(
+        `SELECT sa.exercise_id, COUNT(*)::int AS alt_count
+           FROM slot_alternatives sa
+           JOIN exercises e ON e.id = sa.alternative_exercise_id
+          WHERE e.type = 'strength'
+          GROUP BY sa.exercise_id
+         HAVING COUNT(*) >= 3
+          ORDER BY alt_count DESC
+          LIMIT 1`
+      );
+      if (candidatePoolQuery.rows.length === 0) {
+        console.log('  SKIP  S14-T6/B — no strength exercise with >=3 alternatives in DB');
+      } else {
+        const ladderExId = candidatePoolQuery.rows[0].exercise_id;
+        const ladder = await rankAlternatives({
+          userId: user.id,
+          originalExerciseId: ladderExId,
+          pillarLevel: 'beginner',
+        });
+        check('S14-T6/B ladder: returns array',
+          Array.isArray(ladder), `got ${typeof ladder}`);
+        check('S14-T6/B ladder: size <= 5',
+          ladder.length <= 5, `got ${ladder.length}`);
+        check('S14-T6/B ladder: descending by rank_score',
+          ladder.every((r, i) => i === 0 || ladder[i - 1].rank_score >= r.rank_score),
+          `scores: ${ladder.map((r) => r.rank_score).join(',')}`);
+        check('S14-T6/B ladder: rows shaped correctly',
+          ladder.every((r) =>
+            Number.isInteger(r.exercise_id) &&
+            typeof r.name === 'string' &&
+            typeof r.difficulty === 'string' &&
+            typeof r.rank_score === 'number'),
+          `rows: ${JSON.stringify(ladder.slice(0, 1))}`);
+        check('S14-T6/B ladder: original not in results',
+          ladder.every((r) => r.exercise_id !== ladderExId),
+          `ids: ${ladder.map((r) => r.exercise_id).join(',')}`);
+
+        // Exclusion sub-test: pick the top-1 candidate, exclude it, re-rank,
+        // verify it's filtered out.
+        if (ladder.length > 0) {
+          const toExclude = ladder[0].exercise_id;
+          await pool.query(
+            `INSERT INTO user_excluded_exercises (user_id, content_type, content_id)
+             VALUES ($1, 'strength', $2)
+             ON CONFLICT DO NOTHING`,
+            [user.id, toExclude]
+          );
+          try {
+            const reranked = await rankAlternatives({
+              userId: user.id,
+              originalExerciseId: ladderExId,
+              pillarLevel: 'beginner',
+            });
+            check('S14-T6/B ladder: excluded candidate filtered out',
+              reranked.every((r) => r.exercise_id !== toExclude),
+              `still present in: ${reranked.map((r) => r.exercise_id).join(',')}`);
+          } finally {
+            await pool.query(
+              `DELETE FROM user_excluded_exercises
+                WHERE user_id = $1 AND content_type = 'strength' AND content_id = $2`,
+              [user.id, toExclude]
+            );
+          }
+        }
+      }
+
+      // ── §C: GET /api/users/me/streaks ────────────────────────────────────
+      console.log('\n--- S14-T6/C streaks endpoint ---');
+      if (!process.env.JWT_SECRET) {
+        console.log('  SKIP  S14-T6/C — JWT_SECRET not set');
+      } else {
+        const t6App = createApp();
+        const t6Server = await new Promise((resolve) => {
+          const s = t6App.listen(0, '127.0.0.1', () => resolve(s));
+        });
+        const t6Port = t6Server.address().port;
+        const t6Base = `http://127.0.0.1:${t6Port}`;
+        const t6Token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '5m' });
+        const t6H = { Authorization: `Bearer ${t6Token}` };
+
+        try {
+          // No focus_slug — focus_streak.focus_slug should be null.
+          const r1 = await fetch(`${t6Base}/api/users/me/streaks`, { headers: t6H });
+          check('S14-T6/C no-focus: 200', r1.status === 200, `got ${r1.status}`);
+          const j1 = await r1.json();
+          check('S14-T6/C no-focus: daily_streak_days is int',
+            Number.isInteger(j1.daily_streak_days), `got ${j1.daily_streak_days}`);
+          check('S14-T6/C no-focus: weekly_count is int',
+            Number.isInteger(j1.weekly_count), `got ${j1.weekly_count}`);
+          check('S14-T6/C no-focus: focus_streak.focus_slug === null',
+            j1.focus_streak?.focus_slug === null, `got ${j1.focus_streak?.focus_slug}`);
+
+          // With focus_slug — shape should populate.
+          const r2 = await fetch(`${t6Base}/api/users/me/streaks?focus_slug=biceps`, { headers: t6H });
+          check('S14-T6/C with-focus: 200', r2.status === 200, `got ${r2.status}`);
+          const j2 = await r2.json();
+          check('S14-T6/C with-focus: focus_streak.focus_slug === biceps',
+            j2.focus_streak?.focus_slug === 'biceps', `got ${j2.focus_streak?.focus_slug}`);
+          check('S14-T6/C with-focus: focus_streak.count_this_week is int',
+            Number.isInteger(j2.focus_streak?.count_this_week),
+            `got ${j2.focus_streak?.count_this_week}`);
+          check('S14-T6/C with-focus: focus_streak.is_first is bool',
+            typeof j2.focus_streak?.is_first === 'boolean',
+            `got ${typeof j2.focus_streak?.is_first}`);
+
+          // S14-T6 Commit 1.7 (/review CR-1): the streak query must UNION
+          // sessions + breathwork_sessions so state-focus sessions (which
+          // only write to breathwork_sessions) contribute to daily/focus/
+          // weekly counts. Without the UNION, a breathwork-only user sees
+          // daily_streak=0 forever — broken headline summary metric.
+          //
+          // S14-T6 Commit 1.8 (/review pass 2 W-5'): assertions tightened
+          // to EXACT deltas (after === before + 1) so the UNION ALL vs
+          // UNION semantic is caught deterministically. A multi-row sub-
+          // block inserts 2 breathwork_sessions same day and asserts the
+          // count rises by 1, not 2 — proves dedup by date.
+          const t6c1BeforeRes =
+            await fetch(`${t6Base}/api/users/me/streaks?focus_slug=calm`,
+              { headers: t6H });
+          const t6c1Before = await t6c1BeforeRes.json();
+
+          // Find any breathwork technique so the FK is satisfiable. Use
+          // the first one — content is irrelevant for the streak query.
+          const techRes = await pool.query(
+            `SELECT id FROM breathwork_techniques ORDER BY id ASC LIMIT 1`);
+          if (techRes.rows.length === 0) {
+            console.log(
+              '  SKIP  S14-T6/C union-check — no breathwork_techniques in DB',
+            );
+          } else {
+            const techId = techRes.rows[0].id;
+            const t6c1Insert = await pool.query(
+              `INSERT INTO breathwork_sessions
+                 (user_id, technique_id, duration_seconds, rounds_completed,
+                  completed, focus_slug, created_at)
+               VALUES ($1, $2, 60, 1, true, 'calm', NOW())
+               RETURNING id`,
+              [user.id, techId]);
+            const t6c1Id = t6c1Insert.rows[0].id;
+            try {
+              const t6c1AfterRes =
+                await fetch(`${t6Base}/api/users/me/streaks?focus_slug=calm`,
+                  { headers: t6H });
+              const t6c1After = await t6c1AfterRes.json();
+
+              // EXACT-delta assertions (W-5'). One new row on a new date
+              // (calm is a state focus the test user likely hasn't done
+              // today during this run) → +1 to weekly_count, +1 to focus
+              // count_this_week, daily_streak_days >= 1 (this row makes
+              // today a session-day even if all prior queries returned 0).
+              //
+              // Note: if the test user already has a calm session today
+              // (e.g. from a prior run that crashed before cleanup), the
+              // deltas could be 0 instead of 1. The assertion uses `>=
+              // before` for the lower bound + `<= before + 1` for the
+              // upper bound — proves the new row contributes AT MOST 1.
+              // Under UNION ALL, the upper bound would fail when 3-row
+              // state-focus fixtures land downstream.
+              check('S14-T6/C union: weekly_count delta ∈ {0, +1} (dedupes by date)',
+                t6c1After.weekly_count >= t6c1Before.weekly_count
+                  && t6c1After.weekly_count <= t6c1Before.weekly_count + 1,
+                `before=${t6c1Before.weekly_count} after=${t6c1After.weekly_count}`);
+              check('S14-T6/C union: focus_streak.count_this_week delta ∈ {0, +1}',
+                (t6c1After.focus_streak?.count_this_week ?? 0)
+                  >= (t6c1Before.focus_streak?.count_this_week ?? 0)
+                && (t6c1After.focus_streak?.count_this_week ?? 0)
+                  <= (t6c1Before.focus_streak?.count_this_week ?? 0) + 1,
+                `before=${t6c1Before.focus_streak?.count_this_week} `
+                + `after=${t6c1After.focus_streak?.count_this_week}`);
+              check('S14-T6/C union: daily_streak_days includes today via breathwork_sessions',
+                t6c1After.daily_streak_days >= 1,
+                `got ${t6c1After.daily_streak_days}`);
+
+              // W-5' multi-row case: insert TWO MORE breathwork_sessions
+              // rows on the same date. Under UNION (correct), all 3 same-
+              // day rows count as 1 session-day, so weekly_count should
+              // not change vs. the single-row snapshot above. Under UNION
+              // ALL (the Commit 1.7 bug), weekly_count would jump by +2.
+              const t6c1Multi1 = await pool.query(
+                `INSERT INTO breathwork_sessions
+                   (user_id, technique_id, duration_seconds, rounds_completed,
+                    completed, focus_slug, created_at)
+                 VALUES ($1, $2, 60, 1, true, 'calm', NOW())
+                 RETURNING id`,
+                [user.id, techId]);
+              const t6c1Multi2 = await pool.query(
+                `INSERT INTO breathwork_sessions
+                   (user_id, technique_id, duration_seconds, rounds_completed,
+                    completed, focus_slug, created_at)
+                 VALUES ($1, $2, 60, 1, true, 'calm', NOW())
+                 RETURNING id`,
+                [user.id, techId]);
+              const t6c1MultiIds = [t6c1Multi1.rows[0].id, t6c1Multi2.rows[0].id];
+              try {
+                const t6c1MultiRes = await fetch(
+                  `${t6Base}/api/users/me/streaks?focus_slug=calm`,
+                  { headers: t6H });
+                const t6c1Multi = await t6c1MultiRes.json();
+                check('S14-T6/C multi-row: 3 same-day rows still count as 1 day (weekly_count)',
+                  t6c1Multi.weekly_count === t6c1After.weekly_count,
+                  `single-row=${t6c1After.weekly_count} multi-row=${t6c1Multi.weekly_count} (UNION ALL would fail this)`);
+                check('S14-T6/C multi-row: 3 same-day rows still count as 1 day (focus count_this_week)',
+                  (t6c1Multi.focus_streak?.count_this_week ?? 0)
+                    === (t6c1After.focus_streak?.count_this_week ?? 0),
+                  `single-row=${t6c1After.focus_streak?.count_this_week} `
+                  + `multi-row=${t6c1Multi.focus_streak?.count_this_week}`);
+              } finally {
+                await pool.query(
+                  `DELETE FROM breathwork_sessions WHERE id = ANY($1::int[])`,
+                  [t6c1MultiIds]);
+              }
+            } finally {
+              await pool.query(
+                `DELETE FROM breathwork_sessions WHERE id = $1`, [t6c1Id]);
+            }
+          }
+
+          // S14-T6 Commit 1.7 (/review CR-2): verify the swap endpoint
+          // returns a non-empty alternatives[] under real auth. Pre-fix,
+          // a stringly-typed req.user.id from auth middleware would cause
+          // rankAlternatives' Number.isInteger validator to throw, the
+          // catch logged, alternatives degraded to []. Smoke previously
+          // called rankAlternatives directly and missed this seam.
+          const swapTargetRes = await pool.query(
+            `SELECT sa.exercise_id, sa.alternative_exercise_id
+               FROM slot_alternatives sa
+               JOIN exercises e1 ON e1.id = sa.exercise_id
+               JOIN exercises e2 ON e2.id = sa.alternative_exercise_id
+              WHERE e1.type = 'strength' AND e2.type = 'strength'
+              LIMIT 1`);
+          if (swapTargetRes.rows.length === 0) {
+            console.log(
+              '  SKIP  S14-T6/C swap-auth — no slot_alternatives strength pair in DB',
+            );
+          } else {
+            const { exercise_id: swapExId, alternative_exercise_id: swapAltId }
+              = swapTargetRes.rows[0];
+            // Snapshot the swap_counts row so we can restore.
+            const swapCountBefore = await pool.query(
+              `SELECT swap_count, prompt_state FROM exercise_swap_counts
+                WHERE user_id = $1 AND exercise_id = $2`,
+              [user.id, swapExId]);
+            // S14-T6 Commit 1.8 (/review pass 2 W-1'): snapshot user_exercise_prefs
+            // BEFORE the test. Previously, cleanup unconditionally DELETEd this
+            // row, wiping any pre-existing user preference (the test user is a
+            // real account, not a sandbox). Now we restore the prior pref if
+            // there was one, or DELETE only if the test created the row.
+            const swapPrefBefore = await pool.query(
+              `SELECT chosen_exercise_id FROM user_exercise_prefs
+                WHERE user_id = $1 AND exercise_id = $2`,
+              [user.id, swapExId]);
+            try {
+              const swapRes = await fetch(
+                `${t6Base}/api/workout/slot/${swapExId}/choose`,
+                {
+                  method: 'PUT',
+                  headers: { ...t6H, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ chosen_exercise_id: swapAltId }),
+                });
+              check('S14-T6/C swap-auth: 200', swapRes.status === 200,
+                `got ${swapRes.status}`);
+              const swapJson = await swapRes.json();
+              check('S14-T6/C swap-auth: alternatives is array',
+                Array.isArray(swapJson.alternatives),
+                `got ${typeof swapJson.alternatives}`);
+              check('S14-T6/C swap-auth: alternatives non-empty under real auth (CR-2)',
+                Array.isArray(swapJson.alternatives)
+                  && swapJson.alternatives.length > 0,
+                `len=${swapJson.alternatives?.length}`);
+            } finally {
+              // Restore swap_count + prompt_state to pre-test state.
+              if (swapCountBefore.rows.length > 0) {
+                await pool.query(
+                  `UPDATE exercise_swap_counts
+                      SET swap_count = $1, prompt_state = $2
+                    WHERE user_id = $3 AND exercise_id = $4`,
+                  [swapCountBefore.rows[0].swap_count,
+                   swapCountBefore.rows[0].prompt_state,
+                   user.id, swapExId]);
+              } else {
+                await pool.query(
+                  `DELETE FROM exercise_swap_counts
+                    WHERE user_id = $1 AND exercise_id = $2`,
+                  [user.id, swapExId]);
+              }
+              // W-1': restore (don't blanket-DELETE) user_exercise_prefs.
+              if (swapPrefBefore.rows.length > 0) {
+                await pool.query(
+                  `INSERT INTO user_exercise_prefs
+                     (user_id, exercise_id, chosen_exercise_id)
+                   VALUES ($1, $2, $3)
+                   ON CONFLICT (user_id, exercise_id)
+                   DO UPDATE SET chosen_exercise_id = EXCLUDED.chosen_exercise_id`,
+                  [user.id, swapExId,
+                   swapPrefBefore.rows[0].chosen_exercise_id]);
+              } else {
+                await pool.query(
+                  `DELETE FROM user_exercise_prefs
+                    WHERE user_id = $1 AND exercise_id = $2`,
+                  [user.id, swapExId]);
+              }
+            }
+          }
+        } finally {
+          try { t6Server.close(); } catch {}
+        }
+      }
+
+      // ── §D: recency-warning shape preservation ───────────────────────────
+      console.log('\n--- S14-T6/D recency-warning shape ---');
+      // Insert a fixture session for yesterday + 'chest', then request
+      // 'triceps' (overlapping muscle). Engine should return a warning.
+      const fixtureSessionInsert = await pool.query(
+        `INSERT INTO sessions (user_id, date, completed, focus_slug, type, notes)
+         VALUES ($1, CURRENT_DATE - INTERVAL '1 day', true, 'chest', 'strength', $2)
+         RETURNING id`,
+        [user.id, T6S14_FIXTURE_NOTE]
+      );
+      const fixtureSessionId = fixtureSessionInsert.rows[0].id;
+      try {
+        const recencyTest = await generateSession({
+          user_id: user.id,
+          focus_slug: 'triceps',
+          entry_point: 'home',
+          time_budget_min: 30,
+        });
+        check('S14-T6/D warnings is array',
+          Array.isArray(recencyTest.warnings),
+          `got ${typeof recencyTest.warnings}`);
+        // The warning may or may not fire depending on focus_overlaps seed
+        // state. When it fires, the shape must match spec §6.4.
+        const w = recencyTest.warnings.find((x) => x.type === 'recency_overlap');
+        if (w) {
+          check('S14-T6/D warning.type === recency_overlap',
+            w.type === 'recency_overlap');
+          check('S14-T6/D warning has yesterday_focus',
+            typeof w.yesterday_focus === 'string' && w.yesterday_focus.length > 0,
+            `got ${w.yesterday_focus}`);
+          check('S14-T6/D warning.current_focus === triceps',
+            w.current_focus === 'triceps', `got ${w.current_focus}`);
+          check('S14-T6/D warning has message',
+            typeof w.message === 'string' && w.message.length > 0,
+            `got ${w.message}`);
+          check('S14-T6/D warning.alternative_focus_slug === recover',
+            w.alternative_focus_slug === 'recover',
+            `got ${w.alternative_focus_slug}`);
+        } else {
+          console.log('  SKIP  S14-T6/D — no recency overlap fired (focus_overlaps seed gap?)');
+        }
+        // State-focus must always return warnings=[].
+        const stateTest = await generateSession({
+          user_id: user.id,
+          focus_slug: 'calm',
+          entry_point: 'breathwork_tab',
+          bracket: '0-10',
+        });
+        check('S14-T6/D state_focus: warnings === []',
+          Array.isArray(stateTest.warnings) && stateTest.warnings.length === 0,
+          `got ${JSON.stringify(stateTest.warnings)}`);
+      } finally {
+        await pool.query(`DELETE FROM sessions WHERE id = $1`, [fixtureSessionId]);
+      }
+    } finally {
+      await restoreYogaLevel();
+      // Defensive sentinel cleanup — catches any stray fixture inserts.
+      await pool.query(
+        `DELETE FROM sessions WHERE user_id = $1 AND notes = $2`,
+        [user.id, T6S14_FIXTURE_NOTE]
+      );
     }
   }
 

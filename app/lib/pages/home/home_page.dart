@@ -3,10 +3,12 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
+import '../../launchers/session_launcher.dart';
 import '../../models/focus_area.dart';
 import '../../providers/home_provider.dart';
 import '../../providers/suggest_provider.dart';
 import '../../widgets/cards/state_focus_session_card.dart';
+import '../../widgets/home/entry_point_warning_slot.dart';
 import '../../widgets/sheets/half_pie_picker_sheet.dart';
 import 'widgets_v2/_tokens_v2.dart';
 import 'widgets_v2/focus_pie_picker.dart';
@@ -127,17 +129,14 @@ class _HomePageState extends State<HomePage> {
     await _onChipTap(focus);
   }
 
-  void _onStart() {
-    // T6 wires the session player handoff. Until then surface a clear
-    // placeholder so device-tests don't silently swallow the tap.
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          "Session start lands in Sprint 14 — full handoff is being scoped properly.",
-        ),
-        duration: Duration(seconds: 2),
-      ),
-    );
+  void _onStart() async {
+    final suggest = context.read<SuggestProvider>();
+    final session = suggest.currentSession;
+    if (session == null) return;
+    // Anomaly #10 (T1): the launcher reads focus_slug from
+    // session.metadata.focusSlug, NOT from suggest.currentFocusSlug, so a
+    // chip-tap that races with a Start tap can't ship the wrong slug.
+    await SessionLauncher.launch(context, session);
   }
 
   Future<void> _refreshAll() async {
@@ -188,6 +187,10 @@ class _HomePageState extends State<HomePage> {
                       streakDays: home.stats?.streakDays ?? 0,
                     ),
                     const SizedBox(height: 14),
+                    // S14-T6 §6.4: recency-overlap banner above the session
+                    // card. Renders only when engine emits a `recency_overlap`
+                    // warning; collapses to zero-height otherwise.
+                    const EntryPointWarningSlot(entryPoint: 'home'),
                     _SessionSlot(
                       focus: selectedFocus,
                       suggest: suggest,

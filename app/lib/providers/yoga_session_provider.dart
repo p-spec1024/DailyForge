@@ -1,9 +1,18 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import '../adapters/yoga_session_adapter.dart';
+import '../adapters/yoga_session_errors.dart';
+import '../models/suggested_session.dart';
 import '../models/yoga_models.dart';
+import '../models/yoga_pose_details.dart';
 import '../services/api_service.dart';
+import '../services/yoga_service.dart';
 
 class YogaSessionProvider extends ChangeNotifier {
+  final YogaService _yogaService;
+
+  YogaSessionProvider(ApiService api) : _yogaService = YogaService(api);
+
   // Session data
   List<YogaPose> _poses = [];
   int _currentIndex = 0;
@@ -179,12 +188,14 @@ class YogaSessionProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Log session to API
-  Future<void> logSession(ApiService api) async {
-    if (_sessionLogged || _originalSession == null) return;
+  // Log session to API. Returns the server-side `sessions.id` on success so
+  // callers (S14-T4 embedded mode) can FK it on `cross_pillar_sessions`.
+  // null when not seeded, already logged, or on transport failure.
+  Future<int?> logSession(ApiService api, {String? focusSlug}) async {
+    if (_sessionLogged || _originalSession == null) return null;
     _sessionLogged = true;
     try {
-      await api.post('/yoga/session', {
+      final body = <String, dynamic>{
         'type': _originalSession!.type,
         'level': _originalSession!.level,
         'duration': _originalSession!.duration,
@@ -193,10 +204,19 @@ class YogaSessionProvider extends ChangeNotifier {
         'completed_poses': _posesCompleted,
         'skipped_poses': _skippedPoseIds,
         'total_duration_seconds': elapsedSeconds,
-      });
+      };
+      if (focusSlug != null && focusSlug.isNotEmpty) {
+        body['focus_slug'] = focusSlug;
+      }
+      final response = await api.post('/yoga/session', body);
+      final id = response['id'];
+      if (id is int) return id;
+      if (id is num) return id.toInt();
+      return null;
     } catch (e) {
       debugPrint('[YogaSessionProvider] logSession error: $e');
       // Don't block UI on logging failure
+      return null;
     }
   }
 
@@ -214,6 +234,65 @@ class YogaSessionProvider extends ChangeNotifier {
     _originalSession = null;
     _sessionLogged = false;
     notifyListeners();
+  }
+
+  /// S14-T3: hydrate engine pose ids → run adapter → start session.
+  ///
+  /// Strict-mode (Q3 lock): any failure throws a typed [YogaSessionException]
+  /// subclass; the launcher's snackbar wrapper switches on type to render
+  /// per-subclass user copy (`userMessage`). The player must not open with
+  /// placeholder pose names — partial hydration is rejected server-side
+  /// (`/api/yoga/poses-by-ids` returns 404 if any id is missing).
+  ///
+  /// Commit 2.1 CR-1: the prior implementation wrapped failures in
+  /// [StateError], defeating the W2 type-based dispatch in the launcher and
+  /// surfacing the generic fallback snackbar instead of the typed
+  /// per-subclass copy. Now: rethrow [YogaSessionException] unchanged
+  /// (already carries `userMessage`); wrap everything else in
+  /// [YogaHydrationException] with the original error preserved as `cause`.
+  Future<void> loadFromEngineSession(SuggestedSession session) async {
+    final ids = <int>{};
+    for (final phase in session.phases) {
+      for (final item in phase.items) {
+        final id = item.contentId;
+        if (id != null) ids.add(id);
+      }
+    }
+    if (ids.isEmpty) {
+      throw YogaContractException('yoga session has no poses');
+    }
+
+    final List<YogaPoseDetails> details;
+    try {
+      details = await _yogaService.fetchPosesByIds(ids.toList());
+    } on YogaSessionException {
+      // Typed shape violations from YogaPoseDetails.fromJson (malformed
+      // pose row) — pass through with their own userMessage intact.
+      rethrow;
+    } on ApiException catch (e, stack) {
+      throw YogaHydrationException(
+        'failed to hydrate poses: ${e.message}',
+        cause: e,
+        stackTrace: stack,
+      );
+    } catch (e, stack) {
+      throw YogaHydrationException(
+        'hydration network error: $e',
+        cause: e,
+        stackTrace: stack,
+      );
+    }
+    if (details.length != ids.length) {
+      throw YogaHydrationException(
+        'hydration incomplete: expected ${ids.length}, got ${details.length}',
+      );
+    }
+    final byId = {for (final d in details) d.id: d};
+    final yogaSession = yogaSessionFromEngine(
+      session: session,
+      hydratedById: byId,
+    );
+    startSession(yogaSession);
   }
 
   @override

@@ -10,6 +10,12 @@ const String _kPrefLastTimeBudgetMin = 'last_time_budget_min';
 const String _defaultFocusSlug = 'full_body';
 const int _defaultTimeBudgetMin = 30;
 const String _entryPointHome = 'home';
+const String _entryPointStrengthTab = 'strength_tab';
+const String _entryPointYogaTab = 'yoga_tab';
+const Set<String> _kSupportedRefreshEntryPoints = {
+  _entryPointStrengthTab,
+  _entryPointYogaTab,
+};
 
 /// Holds the home-page suggested-session state and the user's last-viewed
 /// focus / time-budget preferences. T4 will drive this provider.
@@ -41,10 +47,25 @@ class SuggestProvider extends ChangeNotifier {
   bool _isLoading = false;
   SuggestServiceException? _lastError;
 
+  /// S14-T6 FS #224: gates entry-point tab auto-fetches. True once the user
+  /// has actively confirmed a focus pick (via `selectBodyFocus` /
+  /// `selectStateFocus` / `refreshForEntryPoint`) in this app session, or
+  /// when `hydrate()` restored a non-empty stored slug from a prior session.
+  ///
+  /// `previewFocus` (picker hover) does NOT flip this — it's a visual seam,
+  /// not a confirmed choice. `clear()` (logout) resets it. The default-slug
+  /// initial state (`full_body`) does NOT count as a user pick.
+  ///
+  /// Yoga/Strength tabs read this in `didChangeDependencies` and skip their
+  /// cold-start fetch when false, avoiding the "Check your connection"
+  /// false-positive error card seen on first cold open before any pick.
+  bool _hasUserSelectedFocus = false;
+
   String get currentFocusSlug => _currentFocusSlug;
   SuggestedSession? get currentSession => _currentSession;
   bool get isLoading => _isLoading;
   SuggestServiceException? get lastError => _lastError;
+  bool get hasUserSelectedFocus => _hasUserSelectedFocus;
 
   /// Read persisted focus/budget so cold-start can resume from there.
   /// MUST be awaited on first home-page mount before the first
@@ -53,6 +74,9 @@ class SuggestProvider extends ChangeNotifier {
     final storedSlug = await _storage.getPreference(_kPrefLastFocusSlug);
     if (storedSlug is String && storedSlug.isNotEmpty) {
       _currentFocusSlug = storedSlug;
+      // FS #224: a restored slug from a prior session counts as a real
+      // user pick — tab auto-fetches should proceed on cold start.
+      _hasUserSelectedFocus = true;
     }
     notifyListeners();
   }
@@ -83,6 +107,41 @@ class SuggestProvider extends ChangeNotifier {
     );
   }
 
+  /// S14-T1 reroute: fetch a suggested session for an explicit entry-point.
+  ///
+  /// Used by entry-point-specific surfaces (Strength tab, future Yoga tab)
+  /// where the caller knows the entry-point at compile time and wants the
+  /// engine to produce a pillar-pure session shape rather than the home
+  /// page's cross_pillar default.
+  ///
+  /// Mirrors [selectBodyFocus] structurally: race-tracks via [_runRequest],
+  /// persists `last_time_budget_min` on success. Body-focus only — state
+  /// focus retains [selectStateFocus] which carries the bracket parameter.
+  Future<void> refreshForEntryPoint({
+    required String entryPoint,
+    required String focusSlug,
+    int? timeBudgetMin,
+  }) async {
+    // S14-T1 shipped strength_tab; S14-T3 widens to yoga_tab. T5 will widen
+    // again if state-focus surfaces grow this entry seam.
+    assert(
+      _kSupportedRefreshEntryPoints.contains(entryPoint),
+      'refreshForEntryPoint: $entryPoint not supported '
+      '(allowed: $_kSupportedRefreshEntryPoints)',
+    );
+    final budget = timeBudgetMin ?? await getPersistedTimeBudgetMin();
+    await _runRequest(
+      focusSlug: focusSlug,
+      request: () => _service.requestBodyFocusSession(
+        focusSlug: focusSlug,
+        timeBudgetMin: budget,
+        entryPoint: entryPoint,
+      ),
+      persistAfterSuccess: () =>
+          _storage.setPreference(_kPrefLastTimeBudgetMin, budget),
+    );
+  }
+
   Future<void> selectStateFocus(String focusSlug, String bracket) async {
     await _runRequest(
       focusSlug: focusSlug,
@@ -100,6 +159,10 @@ class SuggestProvider extends ChangeNotifier {
     Future<void> Function()? persistAfterSuccess,
   }) async {
     _currentFocusSlug = focusSlug;
+    // FS #224: any path through _runRequest (selectBodyFocus, selectStateFocus,
+    // refreshForEntryPoint) is user-initiated — flip the gate so future tab
+    // visits proceed normally.
+    _hasUserSelectedFocus = true;
     _isLoading = true;
     _lastError = null;
     notifyListeners();
@@ -165,6 +228,7 @@ class SuggestProvider extends ChangeNotifier {
     _lastError = null;
     _isLoading = false;
     _currentFocusSlug = _defaultFocusSlug;
+    _hasUserSelectedFocus = false;
     notifyListeners();
     await _storage.removePreference(_kPrefLastFocusSlug);
     await _storage.removePreference(_kPrefLastTimeBudgetMin);

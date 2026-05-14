@@ -8,7 +8,13 @@ class SetRow extends StatefulWidget {
   final SetData setData;
   final PreviousData? previousData;
   final void Function(double weight, int reps) onComplete;
-  final bool locked;
+
+  /// S14-T1 fix-up #2: this row is the next un-logged set. Only the active
+  /// row gets the engine's default-reps pre-fill, accepts input, and has an
+  /// interactive ✓ button. Logged sets are identified via [setData.completed]
+  /// (orthogonal to this flag — a logged row is never active). Future
+  /// un-logged sets are `!isActive && !setData.completed`.
+  final bool isActive;
 
   const SetRow({
     super.key,
@@ -16,7 +22,7 @@ class SetRow extends StatefulWidget {
     required this.setData,
     this.previousData,
     required this.onComplete,
-    this.locked = false,
+    this.isActive = false,
   });
 
   @override
@@ -52,10 +58,14 @@ class _SetRowState extends State<SetRow> {
   }
 
   String _formatWeight() {
-    if (widget.setData.weight > 0) {
+    // Logged sets always show the user's saved value.
+    if (widget.setData.completed && widget.setData.weight > 0) {
       final w = widget.setData.weight;
       return w == w.truncateToDouble() ? w.toInt().toString() : w.toString();
     }
+    // Inactive un-logged sets stay empty (placeholder only).
+    if (!widget.isActive) return '';
+    // Active set: previous-performance pre-fill if available.
     if (widget.previousData?.weight != null) {
       final w = widget.previousData!.weight!;
       return w == w.truncateToDouble() ? w.toInt().toString() : w.toString();
@@ -64,6 +74,14 @@ class _SetRowState extends State<SetRow> {
   }
 
   String _formatReps() {
+    // Logged sets always show the user's saved value.
+    if (widget.setData.completed && widget.setData.reps > 0) {
+      return widget.setData.reps.toString();
+    }
+    // Inactive un-logged sets stay empty (placeholder only).
+    if (!widget.isActive) return '';
+    // Active set: provider-seeded engine default (SetData.reps from
+    // _initializeDefaultSets), then previous-performance fallback.
     if (widget.setData.reps > 0) return widget.setData.reps.toString();
     if (widget.previousData?.reps != null) {
       return widget.previousData!.reps.toString();
@@ -109,10 +127,10 @@ class _SetRowState extends State<SetRow> {
   }
 
   void _handleComplete() {
-    if (widget.locked) {
-      _showWarning('Complete previous sets first');
-      return;
-    }
+    // Defensive: the InkWell is non-interactive on inactive rows, so this
+    // shouldn't be reachable. Keep the guard so a bug elsewhere (e.g. tap
+    // through a transparent overlay) can't log out-of-order.
+    if (!widget.isActive) return;
     final weight = double.tryParse(_weightController.text) ?? 0;
     final reps = int.tryParse(_repsController.text) ?? 0;
     if (weight <= 0 || reps <= 0) {
@@ -151,10 +169,11 @@ class _SetRowState extends State<SetRow> {
   @override
   Widget build(BuildContext context) {
     final completed = widget.setData.completed;
-    final locked = widget.locked && !completed;
+    // Inactive un-logged rows render greyed; active and logged stay full.
+    final dimmed = !completed && !widget.isActive;
 
     return Opacity(
-      opacity: locked ? 0.4 : 1.0,
+      opacity: dimmed ? 0.4 : 1.0,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(
@@ -190,7 +209,7 @@ class _SetRowState extends State<SetRow> {
               height: 36,
               child: TextField(
                 controller: _weightController,
-                enabled: !completed && !locked,
+                enabled: widget.isActive,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
                 textAlign: TextAlign.center,
@@ -232,7 +251,7 @@ class _SetRowState extends State<SetRow> {
               height: 36,
               child: TextField(
                 controller: _repsController,
-                enabled: !completed && !locked,
+                enabled: widget.isActive,
                 keyboardType: TextInputType.number,
                 textAlign: TextAlign.center,
                 style: monoStyle.copyWith(
@@ -275,7 +294,10 @@ class _SetRowState extends State<SetRow> {
                 color: completed ? AppColors.success : Colors.transparent,
                 borderRadius: BorderRadius.circular(8),
                 child: InkWell(
-                  onTap: completed ? null : _handleComplete,
+                  // Active is the only interactive state; logged + inactive
+                  // both pass null. Lock icon retired — visual gating is the
+                  // row's Opacity wrapper.
+                  onTap: widget.isActive ? _handleComplete : null,
                   borderRadius: BorderRadius.circular(8),
                   child: Container(
                     decoration: BoxDecoration(
@@ -285,9 +307,7 @@ class _SetRowState extends State<SetRow> {
                           : Border.all(color: AppColors.cardBorder),
                     ),
                     child: Icon(
-                      locked
-                          ? LucideIcons.lock
-                          : LucideIcons.check,
+                      LucideIcons.check,
                       size: 18,
                       color: completed ? Colors.white : AppColors.secondaryText,
                     ),

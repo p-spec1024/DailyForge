@@ -7,6 +7,13 @@
 
 ---
 
+> **Amendment 1 — May 7, 2026.** T1 device test surfaced that home `_onStart`
+> produces `cross_pillar` sessions, not `pillar_pure` strength. Hybrid reroute
+> chosen: T1 ships strength via Strength tab; cross_pillar promoted to T2; yoga
+> slides to T3. Rationale: `Trackers/SPRINT_14_PLAN_AMENDMENT_1.md`.
+
+---
+
 ## Why this sprint exists
 
 Sprint 13's T6 pre-flight diagnostic revealed three independent sprint-sized builds hiding inside one ticket:
@@ -44,49 +51,82 @@ class SessionLauncher {
 
 Home `_onStart` → `SessionLauncher.launch(context, currentSession)`. No per-shape conditionals at the call site. All adapter logic lives in the launcher and its sub-modules.
 
-This abstraction lands in T1 and grows organically across the sprint. T1 ships pillar-pure strength_only; T2 adds yoga_only; T3+T4 add cross-pillar; T5 adds state-focus.
+This abstraction lands in T1 and grows organically across the sprint. T1 ships pillar-pure strength via the Strength tab; T2 adds cross-pillar (5-phase) and wires home Start; T3 adds pillar-pure yoga via the Yoga tab; T4 refactors the players for embedding; T5 adds state-focus.
 
 ---
 
 ## Ticket plan
 
-### S14-T1 — Launcher + strength `startFromList` + pillar-pure strength
+### S14-T1 — Session Launcher + strength pillar_pure end-to-end (Strength tab)
 
 **Scope:**
-- Create `SessionLauncher` (new file: `app/lib/services/session_launcher.dart` or similar; locate per repo convention).
-- Wire home `_onStart` to call the launcher. Remove the placeholder snackbar.
-- Server-side: extend `POST /api/sessions/start` to accept `workout_id: null` + `exercises[]` payload and seed exercises atomically into the new session.
-- Client-side: add `WorkoutSessionProvider.startFromList(List<Exercise> exercises)` that posts to the extended endpoint and navigates to `/workout` with the returned session.
-- Map engine `phase.items[]` (where `content_type == 'strength'`) → `Exercise` records with the field renames (`content_id` → `id`, `sets` → `default_sets`, `reps` ignored on player but preserved on send).
-- Pillar-pure strength_only end-to-end working: home Start → strength player loaded with engine exercises.
-- Fix `_onStart` race condition (Anomaly #10): read `currentSession.metadata.bracket` not `suggest.currentFocusSlug`.
-- SuggestedSession model strictness (Anomaly #2): enum-validate `session_shape` against `{pillar_pure, cross_pillar, state_focus}` and throw on unknowns. Same for `content_type`.
+- `SessionLauncher` abstraction (`app/lib/launchers/session_launcher.dart`) — `pillar_pure` strength branch implemented; `cross_pillar` and `state_focus` throw with sprint hand-off messages.
+- New server endpoint `POST /api/sessions/start-from-list` (transactional; JOINs `target_muscles` for the player's chips).
+- `WorkoutSessionProvider.startFromList(...)` posts to the new endpoint and hydrates state.
+- Engine `metadata.focus_slug` added to all 9 recipe sites; `SessionMetadata.focusSlug` parsed strict-mode.
+- `ExerciseSessionCard` "target: N" hint when the session is engine-seeded.
+- **Call site: Strength tab "Today's strength workout" card** — not home Start. Home Start awaits T2's cross_pillar.
+- `SuggestProvider` gains an explicit entry-point parameter (`_entryPointStrengthTab = 'strength_tab'`) so the Strength tab card can request the right shape.
 
-**Out of scope:** yoga, cross-pillar, state-focus — all stubbed in launcher with `throw UnimplementedError('lands in S14-T2/T3/T5')`.
+**Out of scope:** yoga, cross-pillar, state-focus — all stubbed in launcher with `throw UnimplementedError('lands in S14-T2/T3/T5')`. Home `_onStart` reverts to a placeholder snackbar pointing users to the Strength tab until T2 ships.
 
-**Spec required:** yes, before prompt dispatch.
+**Spec required:** yes — `Trackers/S14-T1-spec.md` (committed). Reroute amendment: `Trackers/S14-T1-AMENDMENT-1-strength-tab-reroute.md` (committed at fix-forward).
 
-**Pre-flight diagnostic required:** yes — verify `ApiConfig.sessionStart` route shape on the server, verify `WorkoutPage` constructor still matches what the launcher will pass, verify session-start response shape matches what `startFromList` will read.
+**Pre-flight diagnostic required:** yes — verified `sessions.workout_id` nullability + `focus_slug` column, `WorkoutPage._initSession` re-entry guard, engine `metadata: {` recipe sites, and `flutter analyze` baseline.
 
 **Size:** M.
 
 **Definition of done:**
-- Pick a body focus that produces strength-only (e.g. biceps + 30 min) → tap Start → strength player opens with engine exercises pre-loaded → complete workout → returns home → session logged.
+- From the Strength tab "Today's strength workout" card, tap Start → strength player opens with engine exercises pre-loaded → complete workout → returns home → session logged.
+- Home Start surfaces a placeholder snackbar pointing users to the Strength tab.
 - Pillar-pure yoga / cross-pillar / state-focus all show "coming in S14-T2/T3/T5" snackbar (no crash).
-- `_onStart` reads from `currentSession.metadata.bracket` (race-condition fix verified).
-- Model throws on unknown `session_shape` or `content_type`.
+- Model parses `metadata.focus_slug` in strict mode.
 
 ---
 
-### S14-T2 — Yoga adapter + pillar-pure yoga
+### S14-T2 — Cross_pillar 5-phase orchestrator + home Start
+
+Promoted from original T3.
 
 **Scope:**
-- Engine→yoga adapter module inside the launcher: takes engine `phase.items[]` (where `content_type == 'yoga'`) and produces `YogaSession` for the existing yoga player.
+- `cross_pillar` branch added to `SessionLauncher` switch.
+- 5-phase orchestrator: bookend_open[breath] → warmup[yoga] → main[strength] → cooldown[yoga] → bookend_close[breath].
+- Phase persistence, phase transitions, skip / shorten phase UX.
+- Home `_onStart` wired to the launcher (replaces the T1-era placeholder snackbar).
+
+**Inherits:** launcher pattern proven by T1.
+
+**Out of scope:** real embedded players (T4 lands those — T2 may use stubbed phase content), state-focus (T5), polish (T6).
+
+**Spec required:** yes.
+
+**Pre-flight diagnostic required:** **HIGH.** The 5-phase orchestrator has known unknowns (phase transitions, persistence schema, what-if-user-quits-mid-phase, embedded yoga inside strength session). Pre-flight runs deeper than T1's.
+
+**Size:** L.
+
+**Definition of done:**
+- Home Start with a body focus that produces cross_pillar (e.g. full-body + 45 min) → orchestrator opens with all 5 phases → user advances through every phase → completes session.
+- Pause-during-phase + resume works.
+- Background app + foreground works (state restored).
+- Skip phase works.
+- Phase preview modal shows correct phase list.
+
+---
+
+### S14-T3 — Yoga adapter + Yoga tab Start
+
+Demoted from original T2.
+
+**Scope:**
+- Yoga branch added to `SessionLauncher` (currently throws).
+- Engine→yoga adapter inside the launcher: takes engine `phase.items[]` (where `content_type == 'yoga'`) and produces `YogaSession` for the existing yoga player.
 - Phase remap: engine `warmup` → player `warmup`, engine `main` → player `peak`, engine `cooldown` → player `cooldown`. Engine never emits `savasana` — leave that gap documented but don't synthesize it in v1.
 - Field conversions: `content_id` → `YogaPose.id`, `duration_minutes` → `YogaPose.holdSeconds` (×60).
 - Defaults for fields the engine doesn't emit: `YogaPose.difficulty` defaults to `'beginner'`, `YogaSession.type` defaults to `'vinyasa'`, `YogaSession.level` defaults from `metadata.userLevels.yoga`.
 - Hydrate optional fields from `/yoga/generate` if needed (open question for spec — does the existing yoga service `getPosesByIds` exist? If not, add it).
-- Pillar-pure yoga_only end-to-end: pick a yoga focus (e.g. hips + 25 min) → tap Start → yoga player runs with engine poses.
+- New "Today's yoga session" card on `YogaPage` (the bottom-nav Yoga tab). Mirrors T1's Strength tab pattern.
+
+**Inherits:** T1's launcher pattern + any cross-cuts surfaced by T2.
 
 **Out of scope:** swap-from-engine — `YogaSession.type` defaults to `'vinyasa'` in v1, swap will use that filter. Document as known limitation.
 
@@ -97,40 +137,10 @@ This abstraction lands in T1 and grows organically across the sprint. T1 ships p
 **Size:** M.
 
 **Definition of done:**
-- Yoga focus end-to-end works.
+- Yoga tab "Today's yoga session" card → tap Start → yoga player runs with engine poses → session logged.
 - Phase remap correct (engine `main` shows as `peak` in player).
 - Hold seconds match the engine's per-pose budget.
 - Swap-from-engine works with vinyasa-default style.
-
----
-
-### S14-T3 — Five-phase orchestrator skeleton
-
-**Scope:**
-- New page `FivePhaseSessionPage` (locate per repo convention, e.g. `app/lib/pages/session/five_phase_session_page.dart`).
-- Phase state machine: tracks `currentPhaseIndex`, `phasesCompleted`, `phaseStartTime`, `totalElapsedSeconds`. Persists to `StorageService` so app-background-then-resume restores correct state.
-- Phase indicator UI: header showing "Phase 2 of 5: Yoga warmup", time elapsed in current phase, total session time elapsed, time remaining (estimated).
-- Phase transition UX: smooth animation between phases. Brief "Up next: strength main" preview screen when one phase completes (2-second auto-advance with skip).
-- Pause / resume: works mid-phase. Resumes from same point in same phase.
-- Skip phase: power-user gesture (e.g. long-press the phase header) → confirms → advances to next phase.
-- Mid-session phase preview: tap header → modal showing all 5 phases with time estimates, current position, can't change order.
-- Embedded players: stubbed in this ticket. Each phase shows `Center(child: Text('Phase N: <name> (player embeds in T4)'))` with a "Phase complete" button to advance.
-- Launcher branch: `_launchCrossPillar` opens `FivePhaseSessionPage` with the engine's `phases[]` passed in.
-
-**Out of scope:** real embedded players (T4), state-focus (T5), polish (T6).
-
-**Spec required:** yes — this is the largest ticket of the sprint and needs the most design attention. Consider a separate planning chat session before spec authoring (use the "personalization algorithm planning"-style mode for this).
-
-**Pre-flight diagnostic required:** yes — verify the engine's `phase.items[]` structure within `cross_pillar` shape across all three recipes (in-scope, mobility, full-body), verify `metadata.estimatedTotalMin` is reliable for the time budget UI.
-
-**Size:** L.
-
-**Definition of done:**
-- Cross-pillar focus (e.g. full-body + 45 min) → tap Start → orchestrator opens with 5 stubbed phases → can advance through all phases → completes session.
-- Pause-during-phase + resume works.
-- Background app + foreground works (state restored).
-- Skip phase works.
-- Phase preview modal shows correct phase list.
 
 ---
 
@@ -163,7 +173,7 @@ This abstraction lands in T1 and grows organically across the sprint. T1 ships p
 ### S14-T5 — State-focus 3-leg chain
 
 **Scope:**
-- Leg manager service: tracks current leg (centering / practice / reflection), what's next, what's behind. Persists state for app-background recovery (similar pattern to T3 phase state machine).
+- Leg manager service: tracks current leg (centering / practice / reflection), what's next, what's behind. Persists state for app-background recovery (similar pattern to T2 phase state machine).
 - Breathwork player extended with optional `onLegComplete` callback. When a leg finishes, calls the manager instead of returning home.
 - New `ReflectionTimerPage` for the reflection leg (where `content_id == null`): countdown timer with "Breathe naturally" prompt, soft chime at end. No protocol cycles, no inhale/hold/exhale display — just a quiet, gentle screen.
 - Skip leg: power-user gesture → confirms → advances to next leg.
@@ -192,7 +202,7 @@ This abstraction lands in T1 and grows organically across the sprint. T1 ships p
 **Scope:**
 - Multi-phase completion summary: post-session screen showing all phases completed, time per phase, total time, focus area, level impact (uses `metadata.userLevels` from engine response).
 - Skip-phase / shorten-phase UX polish: confirm dialog wording, undo grace period, post-session note when phases were skipped.
-- Mid-session phase preview polish: T3's modal gets visual treatment (icons per phase, progress bar, estimated time remaining).
+- Mid-session phase preview polish: T2's modal gets visual treatment (icons per phase, progress bar, estimated time remaining).
 - Recency-warning surfacing: T5/S12 wired warnings into the engine response (`session.warnings[]`). Surface them at session start ("You did legs yesterday — proceed?") with options to proceed, swap exercises, or pick a different focus.
 - Honor engine `duration_minutes` for breathwork bookends (Anomaly #11): cap the breathwork player at the engine's budget instead of running full protocol cycles. Introduces a "max duration" mode in `BreathworkTimerProvider`.
 - Yoga swap-from-engine fix: when swapping a pose mid-session, scope the alternatives query to the engine's actual style if present in `metadata.source` or fall back to `vinyasa`.
@@ -230,14 +240,14 @@ This abstraction lands in T1 and grows organically across the sprint. T1 ships p
 ## Dependencies + critical path
 
 ```
-T1 (launcher + strength) ─────┬──→ T3 (orchestrator skeleton) ──→ T4 (embed players) ──→ T6 (polish)
-                              │                                                          ↑
-                              ├──→ T2 (yoga adapter) ──────────────────────────────────┤
-                              │                                                          │
-                              └──→ T5 (state-focus chain) ──────────────────────────────┘
+T1 (launcher + strength) ─────┬──→ T2 (cross_pillar + home Start) ─┬──→ T4 (embed players) ──→ T6 (polish)
+                              │                                    │                           ↑
+                              ├──→ T3 (yoga adapter) ──────────────┘                           │
+                              │                                                                │
+                              └──→ T5 (state-focus chain) ─────────────────────────────────────┘
 ```
 
-T1 unblocks everything. T2 and T5 are independent of T3/T4 and can run in parallel if architect time permits (single developer = sequential).
+T1 unblocks all of T2, T3, T5. T4 depends on both T2 (orchestrator) and T3 (yoga adapter) — both must land before embedded players ship. T5 is independent of T2/T3/T4 and can run in parallel (single developer = sequential).
 
 T6 depends on T1–T5 all landing.
 
@@ -263,3 +273,11 @@ T6 depends on T1–T5 all landing.
 - Recency warnings surface at session start.
 - `sprint-14-close` annotated tag on `main`.
 - App stats snapshot in Project Instructions refreshed.
+
+---
+
+## Amendment trail
+
+| # | Date | Change | Doc |
+|---|---|---|---|
+| 1 | 2026-05-07 | Hybrid reroute — T1 to Strength tab, T2/T3 swap (cross_pillar promoted, yoga demoted) | `Trackers/SPRINT_14_PLAN_AMENDMENT_1.md` |

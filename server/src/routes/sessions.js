@@ -354,4 +354,168 @@ router.post('/save-as-routine', async (req, res) => {
   }
 });
 
+// ── POST /api/sessions/start-from-list ─────────────────────────────────
+//
+// S14-T1: seed an ad-hoc strength session from an engine-supplied exercise list.
+// `workout_id` is NULL (no routine row); per-exercise display defaults
+// (`default_sets`, `default_reps`) ride the response only — they are NOT
+// persisted on `session_exercises` (Pattern A; spec §10).
+//
+// Validation: 9 cases in spec §4.1. Validation runs before BEGIN so we never
+// open a transaction we have to roll back on a 400.
+const VALID_START_FROM_LIST_TYPES = new Set(['strength', 'yoga', 'breathwork']);
+const SUPPORTED_START_FROM_LIST_TYPES = new Set(['strength']);
+const MAX_START_FROM_LIST_EXERCISES = 20;
+
+router.post('/start-from-list', async (req, res) => {
+  const { type, focus_slug, exercises } = req.body || {};
+
+  // 1. type
+  if (typeof type !== 'string' || !VALID_START_FROM_LIST_TYPES.has(type)) {
+    return res.status(400).json({ error: 'invalid_session_type' });
+  }
+  if (!SUPPORTED_START_FROM_LIST_TYPES.has(type)) {
+    return res.status(400).json({ error: 'unsupported_session_type' });
+  }
+
+  // 2. focus_slug
+  if (typeof focus_slug !== 'string'
+      || focus_slug.length === 0
+      || focus_slug.length > 40) {
+    return res.status(400).json({ error: 'invalid_focus_slug' });
+  }
+
+  // 3. exercises array
+  if (!Array.isArray(exercises) || exercises.length === 0) {
+    return res.status(400).json({ error: 'invalid_exercises' });
+  }
+  if (exercises.length > MAX_START_FROM_LIST_EXERCISES) {
+    return res.status(400).json({ error: 'too_many_exercises' });
+  }
+
+  // 4. each exercise item shape
+  for (const item of exercises) {
+    if (!item || typeof item !== 'object') {
+      return res.status(400).json({ error: 'invalid_exercise_item' });
+    }
+    if (!Number.isInteger(item.exercise_id) || item.exercise_id <= 0) {
+      return res.status(400).json({ error: 'invalid_exercise_item' });
+    }
+    if (!Number.isInteger(item.sort_order) || item.sort_order < 0) {
+      return res.status(400).json({ error: 'invalid_exercise_item' });
+    }
+    if (!Number.isInteger(item.default_sets) || item.default_sets <= 0) {
+      return res.status(400).json({ error: 'invalid_exercise_item' });
+    }
+    // default_reps may be null (engine emits int for strength but model is
+    // tolerant); when present, must be a positive int.
+    if (item.default_reps != null
+        && (!Number.isInteger(item.default_reps) || item.default_reps <= 0)) {
+      return res.status(400).json({ error: 'invalid_exercise_item' });
+    }
+  }
+
+  // 5. Verify every exercise_id exists and is the right pillar.
+  // Spec §4.1 mentioned an `is_active` gate; the column does not exist on the
+  // `exercises` table in this codebase. Existence + type check is sufficient
+  // defense against malformed engine output.
+  const exerciseIds = exercises.map((e) => e.exercise_id);
+  const { rows: foundExercises } = await pool.query(
+    `SELECT id, type FROM exercises WHERE id = ANY($1::int[])`,
+    [exerciseIds]
+  );
+  const foundById = new Map(foundExercises.map((r) => [r.id, r]));
+  for (const id of exerciseIds) {
+    const row = foundById.get(id);
+    if (!row) {
+      return res.status(400).json({ error: 'unknown_exercise_id' });
+    }
+    if (row.type !== type) {
+      return res.status(400).json({ error: 'wrong_pillar_exercise' });
+    }
+  }
+
+  // 6. Persist (single transaction). `tx` may be undefined if pool.connect()
+  // itself throws; guard catch/finally accordingly.
+  let tx;
+  try {
+    tx = await pool.connect();
+    await tx.query('BEGIN');
+
+    const sessionResult = await tx.query(
+      `INSERT INTO sessions (user_id, workout_id, type, focus_slug, started_at, completed)
+       VALUES ($1, NULL, $2, $3, NOW(), false)
+       RETURNING id, user_id, workout_id, type, focus_slug, started_at, completed_at, completed`,
+      [req.user.id, type, focus_slug]
+    );
+    const session = sessionResult.rows[0];
+
+    // Bulk insert via jsonb_to_recordset — matches /save-as-routine pattern.
+    const recordsetPayload = JSON.stringify(
+      exercises.map((e) => ({
+        exercise_id: e.exercise_id,
+        sort_order: e.sort_order,
+      }))
+    );
+    await tx.query(
+      `INSERT INTO session_exercises (session_id, exercise_id, sort_order)
+       SELECT $1, x.exercise_id, x.sort_order
+         FROM jsonb_to_recordset($2::jsonb) AS x(exercise_id int, sort_order int)`,
+      [session.id, recordsetPayload]
+    );
+
+    // JOIN exercise display data for the response (target_muscles, equipment,
+    // difficulty). Includes the inserted session_exercise row id so the player
+    // can later log against a specific row.
+    // Note: `exercises` table has no `equipment` column in this schema; the
+    // response shape from spec §4.1 omits it for that reason. Player UX uses
+    // `target_muscles` for chips today.
+    const exerciseRows = await tx.query(
+      `SELECT e.id, e.name, e.target_muscles, e.difficulty,
+              se.sort_order, se.id AS session_exercise_id
+         FROM session_exercises se
+         JOIN exercises e ON e.id = se.exercise_id
+        WHERE se.session_id = $1
+        ORDER BY se.sort_order ASC`,
+      [session.id]
+    );
+
+    await tx.query('COMMIT');
+
+    // Re-attach the engine's default_sets / default_reps to each row.
+    // These are NOT persisted (Pattern A) — they're returned to the client
+    // purely as the player's display hints.
+    const defaultsByExerciseId = new Map(
+      exercises.map((e) => [e.exercise_id, {
+        default_sets: e.default_sets,
+        default_reps: e.default_reps ?? null,
+      }])
+    );
+
+    const hydratedExercises = exerciseRows.rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      target_muscles: r.target_muscles ?? '',
+      difficulty: r.difficulty ?? null,
+      sort_order: r.sort_order,
+      session_exercise_id: r.session_exercise_id,
+      default_sets: defaultsByExerciseId.get(r.id)?.default_sets ?? 3,
+      default_reps: defaultsByExerciseId.get(r.id)?.default_reps ?? null,
+    }));
+
+    return res.json({
+      session,
+      exercises: hydratedExercises,
+    });
+  } catch (err) {
+    if (tx) {
+      try { await tx.query('ROLLBACK'); } catch { /* swallow rollback error */ }
+    }
+    console.error('[T1] /start-from-list error:', err);
+    return res.status(500).json({ error: 'internal_error' });
+  } finally {
+    if (tx) tx.release();
+  }
+});
+
 export default router;

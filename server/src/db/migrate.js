@@ -318,6 +318,46 @@ CREATE TABLE IF NOT EXISTS user_pillar_levels (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(user_id, pillar)
 );
+
+-- S14-T4 (renamed S14-T5): multi-phase session header. One row per
+-- orchestrator session — covers both 5-phase cross_pillar (T4) and 3-stage
+-- state_focus (T5). Per-pillar phase rows in sessions / breathwork_sessions
+-- carry a FK back via multi_phase_session_id. See T4 AMENDMENT-1 D3 for the
+-- dual-table FK; S14-T5 added session_shape.
+--
+-- Rename block runs first so prod DBs migrated from T4 swap names before
+-- the idempotent CREATE no-ops. Fresh DBs: rename is no-op, CREATE creates
+-- the new-name table directly.
+DO $migrate_t5_rename$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+     WHERE table_name = 'cross_pillar_sessions'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.tables
+     WHERE table_name = 'multi_phase_sessions'
+  ) THEN
+    ALTER TABLE cross_pillar_sessions RENAME TO multi_phase_sessions;
+  END IF;
+END $migrate_t5_rename$;
+
+CREATE TABLE IF NOT EXISTS multi_phase_sessions (
+  id               SERIAL PRIMARY KEY,
+  user_id          INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  focus_slug       VARCHAR(40) NOT NULL,
+  session_shape    TEXT NOT NULL DEFAULT 'cross_pillar',
+  started_at       TIMESTAMPTZ NOT NULL,
+  completed_at     TIMESTAMPTZ,
+  phases_completed INT NOT NULL DEFAULT 0,
+  total_phases     INT NOT NULL,
+  end_intent       VARCHAR(20) CHECK (end_intent IN ('completed', 'end_early', 'abandoned'))
+);
+
+-- For prod DBs that just got renamed above, add the new column if missing.
+-- DEFAULT backfills existing T4 rows as 'cross_pillar'; new inserts must
+-- pass session_shape explicitly (DROP DEFAULT after backfill).
+ALTER TABLE multi_phase_sessions
+  ADD COLUMN IF NOT EXISTS session_shape TEXT NOT NULL DEFAULT 'cross_pillar';
+ALTER TABLE multi_phase_sessions ALTER COLUMN session_shape DROP DEFAULT;
 `;
 
 const s11t4Functions = `
@@ -705,6 +745,43 @@ ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS advanced_duration_max
 -- (sessions.focus_slug was added by S12-T1 directly to prod DB out-of-band;
 --  not duplicated here. T1 schema reconciliation tracked separately.)
 ALTER TABLE breathwork_sessions ADD COLUMN IF NOT EXISTS focus_slug VARCHAR(40);
+
+-- S14-T4 (renamed S14-T5): multi-phase FK on per-pillar session rows. The
+-- dual ALTER (sessions AND breathwork_sessions) is required because
+-- breathwork uses its own table (see T4 AMENDMENT-1 D3). POST
+-- /api/multi-phase-sessions fans the FK update across both tables in one
+-- transaction.
+--
+-- Rename DO blocks first so T4-era cross_pillar_session_id columns are
+-- migrated to multi_phase_session_id; ADD COLUMN IF NOT EXISTS then covers
+-- fresh DBs.
+DO $migrate_t5_sessions_fk$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'sessions' AND column_name = 'cross_pillar_session_id'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'sessions' AND column_name = 'multi_phase_session_id'
+  ) THEN
+    ALTER TABLE sessions RENAME COLUMN cross_pillar_session_id TO multi_phase_session_id;
+  END IF;
+END $migrate_t5_sessions_fk$;
+ALTER TABLE sessions
+  ADD COLUMN IF NOT EXISTS multi_phase_session_id INT REFERENCES multi_phase_sessions(id);
+
+DO $migrate_t5_breathwork_fk$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'breathwork_sessions' AND column_name = 'cross_pillar_session_id'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_name = 'breathwork_sessions' AND column_name = 'multi_phase_session_id'
+  ) THEN
+    ALTER TABLE breathwork_sessions RENAME COLUMN cross_pillar_session_id TO multi_phase_session_id;
+  END IF;
+END $migrate_t5_breathwork_fk$;
+ALTER TABLE breathwork_sessions
+  ADD COLUMN IF NOT EXISTS multi_phase_session_id INT REFERENCES multi_phase_sessions(id);
 `;
 
 const indexes = `
@@ -765,6 +842,31 @@ CREATE INDEX IF NOT EXISTS idx_upl_user
 CREATE INDEX IF NOT EXISTS idx_breathwork_sessions_user_focus_created
   ON breathwork_sessions(user_id, focus_slug, created_at)
   WHERE completed = true;
+
+-- S14-T4 (renamed S14-T5): multi-phase indexes.
+DO $migrate_t5_index_renames$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_cps_user')
+     AND NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_mps_user') THEN
+    ALTER INDEX idx_cps_user RENAME TO idx_mps_user;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_sessions_cps')
+     AND NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_sessions_mps') THEN
+    ALTER INDEX idx_sessions_cps RENAME TO idx_sessions_mps;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_breathwork_sessions_cps')
+     AND NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_breathwork_sessions_mps') THEN
+    ALTER INDEX idx_breathwork_sessions_cps RENAME TO idx_breathwork_sessions_mps;
+  END IF;
+END $migrate_t5_index_renames$;
+
+CREATE INDEX IF NOT EXISTS idx_mps_user
+  ON multi_phase_sessions(user_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_mps
+  ON sessions(multi_phase_session_id)
+  WHERE multi_phase_session_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_breathwork_sessions_mps
+  ON breathwork_sessions(multi_phase_session_id)
+  WHERE multi_phase_session_id IS NOT NULL;
 `;
 
 async function migrate() {

@@ -336,6 +336,56 @@ router.get('/generate', authenticate, async (req, res, next) => {
   }
 });
 
+// POST /api/yoga/poses-by-ids — hydrate yoga pose details for a list of ids.
+// Used by the S14-T3 engine→player adapter to fill in name/description/etc.
+// the engine doesn't carry. Strict-mode (Q3 lock): returns 404 if any
+// requested id is missing — partial-success is rejected so the player never
+// opens with placeholder pose names.
+const POSES_BY_IDS_MAX = 50;
+router.post('/poses-by-ids', authenticate, async (req, res, next) => {
+  try {
+    const ids = req.body && req.body.ids;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'invalid_ids' });
+    }
+    if (ids.length > POSES_BY_IDS_MAX) {
+      return res.status(400).json({ error: 'too_many_ids' });
+    }
+    const cleanIds = [];
+    for (const raw of ids) {
+      if (!Number.isInteger(raw) || raw <= 0) {
+        return res.status(400).json({ error: 'invalid_id' });
+      }
+      cleanIds.push(raw);
+    }
+    const uniqueIds = Array.from(new Set(cleanIds));
+
+    // target_muscles is a comma-separated TEXT column (not text[]) — return
+    // as-is. Adapter accepts a nullable string. difficulty defaults to
+    // 'beginner' via COALESCE for legacy rows that pre-date the column.
+    const { rows } = await pool.query(
+      `SELECT id, name, sanskrit_name, description, target_muscles,
+              COALESCE(difficulty, 'beginner') AS difficulty
+         FROM exercises
+        WHERE type = 'yoga' AND id = ANY($1::int[])`,
+      [uniqueIds]
+    );
+
+    if (rows.length !== uniqueIds.length) {
+      const found = new Set(rows.map((r) => r.id));
+      const missingIds = uniqueIds.filter((id) => !found.has(id));
+      return res.status(404).json({
+        error: 'some_poses_missing',
+        missing_ids: missingIds,
+      });
+    }
+
+    res.json({ poses: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/yoga/alternatives — alternative poses for mid-session swap
 router.get('/alternatives', authenticate, async (req, res, next) => {
   try {
@@ -425,9 +475,12 @@ router.post('/session', authenticate, async (req, res, next) => {
   try {
     const { type, level, duration, focus, poses, focus_slug } = req.body;
     const dur = parseInt(duration, 10);
-    if (isNaN(dur) || dur < 5 || dur > 120) {
-      client.release();
-      return res.status(400).json({ error: 'Duration must be between 5 and 120 minutes' });
+    // AMENDMENT-1 D11: floor lowered from 5 → 1 to admit embedded cross-pillar
+    // sub-phases (engine emits warmup_total / cooldown_total as low as 3 min).
+    // No client.release() here — the finally block at end of handler is the
+    // single release site. Double-release crashed the pool prior to this fix.
+    if (isNaN(dur) || dur < 1 || dur > 120) {
+      return res.status(400).json({ error: 'Duration must be between 1 and 120 minutes' });
     }
     const validType = VALID_TYPES.includes(type) ? type : 'vinyasa';
     const validLevel = VALID_LEVELS.includes(level) ? level : 'intermediate';

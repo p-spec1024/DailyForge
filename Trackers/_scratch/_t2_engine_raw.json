@@ -1,0 +1,883 @@
+{
+  "user_id": 1,
+  "results": [
+    {
+      "entry_point": "home",
+      "focus_slug": "chest",
+      "time_budget_min": 30,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 3
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "chest",
+      "estimated_total_min": 37
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "chest",
+      "time_budget_min": 60,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 5
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "chest",
+      "estimated_total_min": 67
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "back",
+      "time_budget_min": 30,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 3
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "back",
+      "estimated_total_min": 37
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "back",
+      "time_budget_min": 60,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 5
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "back",
+      "estimated_total_min": 67
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "shoulders",
+      "time_budget_min": 30,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 3
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "shoulders",
+      "estimated_total_min": 37
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "shoulders",
+      "time_budget_min": 60,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 5
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "shoulders",
+      "estimated_total_min": 67
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "biceps",
+      "time_budget_min": 30,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 4,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 3
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "biceps",
+      "estimated_total_min": 34
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "biceps",
+      "time_budget_min": 60,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 4,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 5
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "biceps",
+      "estimated_total_min": 60
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "triceps",
+      "time_budget_min": 30,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 3
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "triceps",
+      "estimated_total_min": 37
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "triceps",
+      "time_budget_min": 60,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 5
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "triceps",
+      "estimated_total_min": 67
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "core",
+      "time_budget_min": 30,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 3
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "core",
+      "estimated_total_min": 37
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "core",
+      "time_budget_min": 60,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 5
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "core",
+      "estimated_total_min": 67
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "glutes",
+      "time_budget_min": 30,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 3
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "glutes",
+      "estimated_total_min": 37
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "glutes",
+      "time_budget_min": 60,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 5
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "glutes",
+      "estimated_total_min": 67
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "quads",
+      "time_budget_min": 30,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 3
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "quads",
+      "estimated_total_min": 37
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "quads",
+      "time_budget_min": 60,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 5
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "quads",
+      "estimated_total_min": 67
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "hamstrings",
+      "time_budget_min": 30,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 3
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "hamstrings",
+      "estimated_total_min": 37
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "hamstrings",
+      "time_budget_min": 60,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 5
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "hamstrings",
+      "estimated_total_min": 67
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "calves",
+      "time_budget_min": 30,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 3
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "calves",
+      "estimated_total_min": 37
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "calves",
+      "time_budget_min": 60,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 5
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "calves",
+      "estimated_total_min": 67
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "mobility",
+      "time_budget_min": 30,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "main",
+          "content_type": "yoga",
+          "item_count": 3
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "mobility",
+      "estimated_total_min": 37
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "mobility",
+      "time_budget_min": 60,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "main",
+          "content_type": "yoga",
+          "item_count": 5
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "mobility",
+      "estimated_total_min": 67
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "full_body",
+      "time_budget_min": 30,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 3
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 1
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "full_body",
+      "estimated_total_min": 37
+    },
+    {
+      "entry_point": "home",
+      "focus_slug": "full_body",
+      "time_budget_min": 60,
+      "ok": true,
+      "session_shape": "cross_pillar",
+      "phase_count": 5,
+      "phases": [
+        {
+          "phase": "bookend_open",
+          "content_type": "breathwork",
+          "item_count": 1
+        },
+        {
+          "phase": "warmup",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "main",
+          "content_type": "strength",
+          "item_count": 5
+        },
+        {
+          "phase": "cooldown",
+          "content_type": "yoga",
+          "item_count": 2
+        },
+        {
+          "phase": "bookend_close",
+          "content_type": "breathwork",
+          "item_count": 1
+        }
+      ],
+      "focus_slug_metadata": "full_body",
+      "estimated_total_min": 67
+    }
+  ]
+}

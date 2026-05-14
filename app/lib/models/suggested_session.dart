@@ -52,6 +52,13 @@ class SuggestedSession {
       metadata: SessionMetadata.fromJson(rawMetadata),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'session_shape': sessionShape,
+        'phases': phases.map((p) => p.toJson()).toList(),
+        'warnings': warnings,
+        'metadata': metadata.toJson(),
+      };
 }
 
 class SessionPhase {
@@ -78,6 +85,11 @@ class SessionPhase {
       items: _strictMap(rawItems, 'items', SessionItem.fromJson),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'phase': phase,
+        'items': items.map((i) => i.toJson()).toList(),
+      };
 }
 
 class SessionItem {
@@ -154,12 +166,28 @@ class SessionItem {
       reps: reps == null ? null : (reps as num).toInt(),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'content_type': contentType,
+        'content_id': contentId,
+        'name': name,
+        'duration_minutes': durationMinutes,
+        'tier_badge': tierBadge,
+        'sets': sets,
+        'reps': reps,
+      };
 }
 
 class SessionMetadata {
   final int estimatedTotalMin;
   final Map<String, String> userLevels;
-  final String source;
+
+  /// S14-T6 §6.6 / AMENDMENT-1 Decision A: yoga style the engine committed
+  /// to (`'hatha'` / `'vinyasa'`). Emitted on all yoga-bearing recipes
+  /// (pillar-pure yoga + cross-pillar with yoga warmup/cooldown). Null on
+  /// pillar-pure-strength and state-focus responses, which have no yoga
+  /// phase. Consumed by the client-side yoga swap fallback chain.
+  final String? source;
 
   /// State-focus only (S13-T5): true when the engine generated an
   /// open-ended practice (no upper duration bound). null on body-focus
@@ -172,12 +200,19 @@ class SessionMetadata {
   /// null on body-focus responses.
   final String? bracket;
 
+  /// S14-T1: the focus_slug the engine resolved the session to. Always
+  /// non-null in practice once both server and client ship the T1 changes;
+  /// kept nullable in the model to tolerate staged-deploy windows where the
+  /// client may receive a pre-T1 response.
+  final String? focusSlug;
+
   const SessionMetadata({
     required this.estimatedTotalMin,
     required this.userLevels,
-    required this.source,
     required this.isEndless,
     required this.bracket,
+    required this.focusSlug,
+    this.source,
   });
 
   factory SessionMetadata.fromJson(Map<String, dynamic> json) {
@@ -187,10 +222,10 @@ class SessionMetadata {
         'SessionMetadata: expected `estimated_total_min` to be a number, got ${est.runtimeType}',
       );
     }
-    final source = json['source'];
-    if (source is! String) {
+    final sourceRaw = json['source'];
+    if (sourceRaw != null && sourceRaw is! String) {
       throw FormatException(
-        'SessionMetadata: expected `source` to be a string, got ${source.runtimeType}',
+        'SessionMetadata: expected `source` to be a string or absent, got ${sourceRaw.runtimeType}',
       );
     }
     final rawLevels = json['user_levels'];
@@ -220,14 +255,30 @@ class SessionMetadata {
         'SessionMetadata: expected `bracket` to be a string or absent, got ${bracketRaw.runtimeType}',
       );
     }
+    final focusSlugRaw = json['focus_slug'];
+    if (focusSlugRaw != null && focusSlugRaw is! String) {
+      throw FormatException(
+        'SessionMetadata: expected `focus_slug` to be a string or absent, got ${focusSlugRaw.runtimeType}',
+      );
+    }
     return SessionMetadata(
       estimatedTotalMin: est.toInt(),
       userLevels: Map.unmodifiable(levels),
-      source: source,
+      source: sourceRaw as String?,
       isEndless: endlessRaw as bool?,
       bracket: bracketRaw as String?,
+      focusSlug: focusSlugRaw as String?,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'estimated_total_min': estimatedTotalMin,
+        'user_levels': userLevels,
+        'source': source,
+        'is_endless': isEndless,
+        'bracket': bracket,
+        'focus_slug': focusSlug,
+      };
 }
 
 List<T> _strictMap<T>(
