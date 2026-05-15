@@ -3,7 +3,10 @@
 **Sprints 1-6 shipped (28 tickets, React PWA, archived).**
 **Sprints 7-10 shipped (Flutter rebuild). Sprint 10 closed Apr 25, 2026.**
 **Sprint 11 closed Apr 27, 2026 (Approach 5 data layer; `sprint-11-close` tag on `main`).**
-**Sprint 12 in progress (suggestion engine; sprint-chained off `main`, see Sprint 12 section).**
+**Sprint 12 closed Apr 30, 2026 (suggestion engine; in-line on `main`, no tag).**
+**Sprint 13 closed May 6, 2026 (Approach 5 home page; `sprint-13-close` tag on `main`).**
+**Sprint 14 closed May 14, 2026 (session start handoff; `sprint-14-close` tag on `main`).**
+**Sprint 15 PLANNED — Stabilization: Foundation (kicks off May 15+, 2026). See `Trackers/SPRINT_15_PLAN.md`.**
 
 ---
 
@@ -368,6 +371,59 @@ landed as commits `f4bfef5` + `012d69f` + `d5bd3fd` + `2905af7`.
 | 6 | Polish + edge cases | ✅ Shipped May 14, 2026 | Flutter + server. Branch `s14-t6`, sprint-chained off `s14-t5` HEAD. **Sprint 14 closed: May 14, 2026, tag `sprint-14-close`.** Eight ticket commits across 4 `/review` passes (B+ → A- → A- → A → A) plus this chore. **Commit history:** `19e9727` Commit 1 (polish bundle + FS #198 substitution ladder) → `c0f3151` Commit 1.5 (summary nav race + skip-undo SnackBar position + recover routing — 3 device-test bugs) → `cd2c7b7` Commit 1.7 (`/review` pass 1: CR-1, CR-2, CR-3, W-5, W-7; grade B+ → A-) → `0a6bd66` Commit 1.8 (`/review` pass 2 tightening: CR-1', W-1', W-3', W-4', W-5'; grade A) → `c47a1a0` Commit 2 (FS #203 yoga adapter polish bundle: W1 timer leak, W2 typed exception hierarchy, W3 sessionShape re-fetch, A1 capitalizeFocus extract, A2 adapter relocation + FS #224 cold-start gate via SuggestProvider.hasUserSelectedFocus + FS #226 state-focus constants extraction to `app/lib/constants/focus_categories.dart`; grade A-) → `deabf57` Commit 2.1 (`/review` on Commit 2: CR-1 typed-exception escape fix in `loadFromEngineSession` + W-1 drop `_kYogaTabTimeBudgetMin` for Strength parity + S-1 onRetry fallback to `currentFocusSlug` + S-2 `resolveSessionStyle` allowlist gate; grade A) → `8a80759` Commit 3 (FS #204 yoga adapter unit tests, 16 cases in `app/test/adapters/yoga_session_adapter_test.dart` covering 12 contract cases + 3 `resolveSessionStyle` cases + 1 dedicated W-2.1.1 regression test; W-2.1.1 copy fix removed "tap to retry" from `YogaHydrationException.userMessage`; grade A) → (this chore commit). **Smoke:** `server/scripts/test-suggestion-engine-t2.js` baseline **3534 pass / 9 fail** preserved throughout T6 (the 9 fails are the pre-existing body-focus matrix flake, FUTURE_SCOPE #172, not T6-introduced). **`flutter analyze`:** 12 info-hint baseline preserved exactly across all 8 commits. **Unit tests:** 27/27 pass (11 existing breathwork timer + 16 new yoga adapter). **Device tests:** Greenlit by Prashob across all 4 device-test cycles — Commit 1.5 (3 bugs fixed: summary navigation race, skip-undo SnackBar position, recover routing), Commit 2 (state→body focus transition cold-start gate, after `flutter clean` resolved hot-reload field pollution), Commit 2.1 (W-1 30-min budget parity confirmed: Home/Strength/Yoga all 30 min; 60-min spread Home 67 / Strength 60 / Yoga 49 logged as FS #232 cross-modality duration semantics), Commit 3 (test-only commit, no device test). **FUTURE_SCOPE additions:** 34 entries logged in this chore commit (#208-#241; #224 + #226 marked Shipped as closed-traceability rows). Categories: 7 architecture refactors, 5 test-coverage gaps, 4 observability/dev-hygiene, 4 product UX questions, 6 engine/content gaps, 8 code hygiene. **Lessons learned:** see `Trackers/SPRINT_14_LESSONS.md` Lesson 4 (hot-reload-on-ChangeNotifier hazard surfaced during Commit 2 device retest — 2-hour detour resolved by `flutter clean + flutter run`) + Sprint 14 retrospective. Spec: `Trackers/S14-T6-spec.md`. Amendment: `Trackers/S14-T6-AMENDMENT-1.md` (engine pre-pick yoga style + client-side swap fallback + breathwork cap semantics). |
 
 Spec docs to be authored per ticket, in order, before any Claude Code dispatch.
+
+---
+
+## May 15, 2026 — Inter-sprint work
+
+After Sprint 14 close, dedicated stabilization-prep work before Sprint 15 kicks off. Three commits on `main`:
+
+| SHA | Subject | Summary |
+|---|---|---|
+| `80dd5f3` | chore: post-ChatGPT-review planning + tracker updates | Applied ChatGPT code review findings to FUTURE_SCOPE (6 new entries #243-#248; F7 merged into #212 cross-reference) and added `SPRINT_15_PLAN.md` + `SPRINT_16_OUTLINE.md` + `SPRINT_17_OUTLINE.md` + `CHATGPT_REVIEW_TRACEABILITY.md` mapping all 67 review findings to destinations (sprint tickets, FUTURE_SCOPE entries, or explicit rejections). |
+| `2179607` | docs: add ARCHITECTURE, API, architecture diagrams + gitignore review-packet | Generated from live codebase: `docs/API.md` (74 endpoints, 902 lines), `docs/ARCHITECTURE.md` (full system walkthrough, 743 lines), `docs/architecture-diagram.md` (Mermaid source), `docs/architecture-diagram.png` (component diagram, 1584×1200). Review packets gitignored under `/review-packet/`. |
+| `c69b718` | chore: consolidate missing migrations + delete legacy home pages | Added idempotent `CREATE TABLE IF NOT EXISTS` blocks to `server/src/db/migrate.js` for `focus_overlaps`, `exercise_swap_counts`, `user_excluded_exercises` (previously created out-of-band via preflight scripts; fresh setup would have been missing these). Deleted `app/lib/pages/home/_legacy/home_page_s8.dart` and `home_page_s10.dart`. Two preflight scripts marked PARTIALLY SUPERSEDED. `flutter analyze` clean. |
+
+**Strategic shift logged.** The original Sprint 15–16 feature roadmap (full onboarding flow, weekly plan UI, session composer) is **replaced by a 3-sprint stabilization phase** — S15 Foundation, S16 Engine & API hardening, S17 Security/safety/polish — before feature work resumes in Sprint 19+. The shift is sourced from the ChatGPT code review (May 15, 2026), which identified ~50 actionable items separating the current codebase from enterprise-grade production-readiness across architecture, code quality, and security. UI redesign is its own Sprint 18 track. Full review-finding-to-destination mapping in `Trackers/CHATGPT_REVIEW_TRACEABILITY.md`.
+
+---
+
+## Sprint 15 — Stabilization: Foundation — Planned, kicks off May 15+, 2026
+
+**Status:** 🟡 PLANNED
+**Source of truth:** `Trackers/SPRINT_15_PLAN.md` (full spec — read before authoring any S15 ticket prompt)
+**Sprint goal:** Production-readiness foundation. Ship the infrastructure, observability, and engine refactor that gate broader invite beta.
+**Theme:** Foundation. Not features.
+**Branch strategy:** Sprint-chained off `main`, single `--no-ff` merge + `sprint-15-close` annotated tag at sprint close (per PI #20).
+**Successors:** Sprint 16 (Engine & API hardening), Sprint 17 (Security, safety, polish), Sprint 18 (UI redesign).
+
+| # | Ticket | Status | Branch | Smoke | Commit |
+|---|---|---|---|---|---|
+| 1 | Environment separation (Neon staging + prod guards + API_BASE_URL dart-define) | ⏳ NOT STARTED | `s15-t1` (TBD) | — | — |
+| 2 | Sentry — Flutter integration | ⏳ NOT STARTED | `s15-t2` (TBD) | — | — |
+| 3 | Sentry — Node integration | ⏳ NOT STARTED | `s15-t3` (TBD) | — | — |
+| 4 | Suggestion engine extraction (FS #160) — behavior-preserving | ⏳ NOT STARTED | `s15-t4` (TBD) | — | — |
+| 5 | CI pipeline (GitHub Actions) + root `package.json` cleanup | ⏳ NOT STARTED | `s15-t5` (TBD) | — | — |
+| 6 | Auth middleware integer-id validation + route handler simplification | ⏳ NOT STARTED | `s15-t6` (TBD) | — | — |
+| 7 | ImageKit prod/test separation audit + remediation | ⏳ NOT STARTED | `s15-t7` (TBD) | — | — |
+
+---
+
+## Sprint 16 — Engine & API Hardening (Stabilization Part 2) — OUTLINED
+
+**Status:** OUTLINED. Full spec authored at S15 close.
+**Outline source:** `Trackers/SPRINT_16_OUTLINE.md`
+**Theme:** Harden the public API and the engine error surface. Reduce blast radius of suggestion-engine changes. Establish meaningful test coverage now that staging DB exists.
+**Ticket count:** 6 (server-heavy with a small app slice).
+
+---
+
+## Sprint 17 — Security, Safety, Polish (Stabilization Part 3) — OUTLINED
+
+**Status:** OUTLINED. Full spec authored at S16 close.
+**Outline source:** `Trackers/SPRINT_17_OUTLINE.md`
+**Theme:** Final stabilization before broader invite beta. Security hygiene, safety baseline, last large-file splits, and the substitution-ladder feature that's been waiting.
+**Ticket count:** 6.
 
 ---
 
