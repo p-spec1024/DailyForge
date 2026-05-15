@@ -1,3 +1,9 @@
+// PARTIALLY SUPERSEDED on 2026-05-15: table creation for focus_overlaps
+// moved to server/src/db/migrate.js. This script still verifies that the
+// 12 spec-asserted overlap pairs (chest<->triceps, etc.) match the live
+// focus_overlaps row contents — catches seed regressions. Keep running it
+// after any reseed.
+//
 // S12-T5 pre-flight: confirm focus_overlaps live data matches the 12 spec-asserted
 // pairs (S12-T5 spec Appendix A). Stops the build on any disagreement.
 // Run: node --env-file=.env scripts/preflight-s12-t5-overlaps.mjs

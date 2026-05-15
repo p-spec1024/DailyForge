@@ -319,6 +319,55 @@ CREATE TABLE IF NOT EXISTS user_pillar_levels (
   UNIQUE(user_id, pillar)
 );
 
+-- S12-T5: focus_overlaps — directed pairs of focus_areas that overlap muscle
+-- groups (e.g. chest↔triceps). Symmetric pairs are stored as two rows so the
+-- engine's recency-overlap query doesn't have to check both directions.
+-- Seeded by scripts under server/src/db/seeds/. Previously created out-of-band
+-- and verified by preflight-s12-t5-overlaps.mjs; consolidated here so a fresh
+-- migrate.js run provisions a complete schema.
+CREATE TABLE IF NOT EXISTS focus_overlaps (
+  id               SERIAL PRIMARY KEY,
+  focus_id         INT NOT NULL REFERENCES focus_areas(id) ON DELETE CASCADE,
+  overlaps_with_id INT NOT NULL REFERENCES focus_areas(id) ON DELETE CASCADE,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(focus_id, overlaps_with_id),
+  CHECK(focus_id <> overlaps_with_id)
+);
+
+-- S12-T6: exercise_swap_counts — per-(user, strength exercise) swap tally that
+-- drives the 3rd-swap "want to exclude this?" prompt. prompt_state is the
+-- finite state machine: never_prompted → prompted_keep (after the 3rd-swap
+-- prompt fires) → excluded (terminal; mirrored into user_excluded_exercises).
+-- Strength-only by design — yoga / breathwork mid-session swap don't write
+-- here today. Previously created out-of-band and verified by
+-- preflight-s12-t6-schema.mjs; consolidated here.
+CREATE TABLE IF NOT EXISTS exercise_swap_counts (
+  id              SERIAL PRIMARY KEY,
+  user_id         INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  exercise_id     INT NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+  swap_count      INT NOT NULL DEFAULT 0,
+  last_swapped_at TIMESTAMPTZ,
+  prompt_state    VARCHAR(20) NOT NULL DEFAULT 'never_prompted'
+                    CHECK (prompt_state IN ('never_prompted', 'prompted_keep', 'excluded')),
+  UNIQUE(user_id, exercise_id)
+);
+
+-- S12-T6: user_excluded_exercises — hard exclusions earned via the swap-counter.
+-- Pillar-aware via (content_type, content_id) so a future yoga/breathwork
+-- exclusion UI can reuse the same table. content_id is a SOFT FK (no
+-- constraint) because it can point at exercises.id OR breathwork_techniques.id
+-- depending on content_type — same pattern as focus_content_compatibility.
+-- Engine reads `WHERE content_type = 'strength'` today.
+CREATE TABLE IF NOT EXISTS user_excluded_exercises (
+  id           SERIAL PRIMARY KEY,
+  user_id      INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  content_type VARCHAR(20) NOT NULL
+                 CHECK (content_type IN ('strength', 'yoga', 'breathwork')),
+  content_id   INT NOT NULL,
+  excluded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, content_type, content_id)
+);
+
 -- S14-T4 (renamed S14-T5): multi-phase session header. One row per
 -- orchestrator session — covers both 5-phase cross_pillar (T4) and 3-stage
 -- state_focus (T5). Per-pillar phase rows in sessions / breathwork_sessions
@@ -834,6 +883,16 @@ CREATE INDEX IF NOT EXISTS idx_fcc_content
 -- S11-T4: Per-user lookup index for the inference function.
 CREATE INDEX IF NOT EXISTS idx_upl_user
   ON user_pillar_levels(user_id);
+
+-- S12-T5: focus_overlaps lookup by source focus (recency-overlap query).
+CREATE INDEX IF NOT EXISTS idx_focus_overlaps_focus
+  ON focus_overlaps(focus_id);
+
+-- S12-T6: per-user lookups for the swap-counter + exclusion tables.
+CREATE INDEX IF NOT EXISTS idx_swap_counts_user
+  ON exercise_swap_counts(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_excluded_user
+  ON user_excluded_exercises(user_id);
 
 -- S12-T5: forward-compat index on breathwork_sessions.focus_slug. Adapted from
 -- the spec's (user_id, focus_slug, date) shape — breathwork_sessions has no

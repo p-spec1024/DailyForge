@@ -1,3 +1,8 @@
+// PARTIALLY SUPERSEDED on 2026-05-15: table creation for exercise_swap_counts
+// and user_excluded_exercises moved to server/src/db/migrate.js. This script
+// still performs swap-handler discovery via filesystem grep — independent
+// of schema. Keep running it when adding new swap handlers.
+//
 // S12-T6 pre-flight: schema verification + swap-handler discovery.
 // Run: node --env-file=.env scripts/preflight-s12-t6-schema.mjs
 //

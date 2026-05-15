@@ -17,7 +17,7 @@ import 'widgets_v2/stat_tile.dart';
 import 'widgets_v2/todays_session_card.dart';
 import 'widgets_v2/training_load_chart.dart';
 
-/// S13-T4 home page (replaces Sprint-10 dashboard at `_legacy/home_page_s10.dart`).
+/// S13-T4 home page (replaces the Sprint-10 dashboard — see git history).
 ///
 /// **S13-T5 update:** the tap-and-instant-suggest model is replaced by
 /// tap → sheet → pick → suggest. First-load home shows the empty
