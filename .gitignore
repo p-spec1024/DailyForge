@@ -8,3 +8,8 @@ Trackers/.claude/
 
 # Review packets (one-shot artifacts, not durable docs)
 /review-packet/
+
+# Archived one-shot delivery artifacts (patch sources, superseded prompts).
+# Note: 16 existing files under this path are already git-tracked from prior
+# sprints and remain so; this rule applies to new additions only.
+Trackers/_archive/
