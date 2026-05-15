@@ -25,11 +25,11 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 
 | # | Finding | Source | Destination | Status |
 |---|---|---|---|---|
-| 1 | Single production database (no staging/dev) | §3.1 | **S15-T1** Environment separation | Pending |
+| 1 | Single production database (no staging/dev) | §3.1 | **S15-T1** Environment separation | Shipped [2026-05-16, 3dcd09d] |
 | 2 | Suggestion engine monolithic at 1791 LOC | §3.2 | **S15-T4** Suggestion engine extraction (FS #160) | Pending |
 | 3 | Engine error mapping via RangeError substring matching | §3.3 | **S16-T2** Typed engine errors | Pending |
 | 4 | Root `package.json` stale `client` workspace | §3.4 | **S15-T5** CI pipeline (bundled cleanup) | Pending |
-| 5 | `ApiConfig` LAN IP fallback `192.168.0.204` | §3.5 | **S15-T1** Environment separation (bundled) | Pending |
+| 5 | `ApiConfig` LAN IP fallback `192.168.0.204` | §3.5 | **S15-T1** Environment separation (bundled) | Shipped [2026-05-16, 3dcd09d] |
 | 6 | CORS `origin: true` reflects every origin | §3.6 | **S17-T1** Security hygiene | Pending |
 | 7 | `MultiPhaseSessionProvider` inheritance pattern | §3.7 | **F3** FUTURE_SCOPE (defer until 3rd shape appears) | Deferred |
 | 8 | `EmbeddablePlayer` boolean mode → sealed class | §3.8 | **F4** FUTURE_SCOPE (refactor when players stabilize) | Deferred |
@@ -114,7 +114,7 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 | 52 | FS #166 typed errors — do now | §12 | Adopted — see **S16-T2** | Resolved |
 | 53 | FS #198 phase fallback — keep high | §12 | Adopted — see **S17-T3** | Resolved |
 | 54 | FS #209 timeout — keep high, fix copy | §12 | Adopted — see **S16-T2** | Resolved |
-| 55 | FS #196 API /api convention — raise | §12 | Adopted — see **S15-T1** (covered by API_BASE_URL refactor) | Resolved |
+| 55 | FS #196 API /api convention — raise | §12 | Adopted — see **S15-T1** (covered by API_BASE_URL refactor) | Shipped [2026-05-16, 3dcd09d] |
 | 56 | FS #217/#218 smoke determinism | §12 | After staging DB lands — opportunistic | Deferred |
 
 ---
