@@ -1,4 +1,7 @@
 import { pool } from '../pool.js';
+import { assertSafeMutation } from '../../../scripts/lib/prod-guard.mjs';
+
+assertSafeMutation();
 
 const WORKOUTS = [
   { name: 'Push (Chest/Shoulders/Triceps)', description: 'Upper body push muscles' },

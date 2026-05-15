@@ -82,6 +82,8 @@ dailyforge/
 
 Two top-level directories (`media/`, `node_modules/`) are excluded from the tree.
 
+The database lives on Neon (Singapore region) and has two branches: `production` (real user data — touched only by the running server in deployed environments and by mutating scripts run with the explicit `NODE_ENV=production` + `ALLOW_PROD_MUTATION=true` override) and `staging` (a copy-on-write branch off `production`, used by local dev and the smoke harness by default). The split landed in S15-T1; see §4.3 for the env-gating mechanics.
+
 ---
 
 ## 4. Backend architecture
@@ -138,7 +140,16 @@ In order, applied by `createApp()`:
 
 `pool.on('error')` swallows transient drops so a single Neon hiccup doesn't take the server down. SIGTERM / SIGINT handlers call `pool.end()` for graceful shutdown.
 
-**Single environment.** There is no separate dev DB. `server/.env` points at the prod Neon instance and the Flutter client points at it via the LAN address baked into `app/lib/config/api_config.dart:13` (`192.168.0.204:3001` is the founder's dev-machine LAN IP; override at build time with `--dart-define=API_HOST=...`). This is acceptable today because the founder is the only user; it becomes blocking before broader signups and is a known item for the infrastructure separation work.
+**Two environment branches (S15-T1).** The database lives in two Neon branches: `production` (real user data) and `staging` (a copy-on-write clone of `production`, used by local dev and smoke harnesses). After S15-T1 the local `server/.env` defaults to staging — running `npm run dev`, `npm run db:seed`, or any smoke script under `server/scripts/` writes to staging, not prod.
+
+Mutating scripts (every seed under `server/src/db/seeds/`, `server/src/db/migrate.js`, and every writing one-shot under `server/scripts/`) call `assertSafeMutation()` at module top from `server/scripts/lib/prod-guard.mjs`. The guard throws unless one of these holds:
+
+- `NODE_ENV` is anything other than `'production'` (staging, development, undefined — the local-dev default), **or**
+- `NODE_ENV === 'production'` **AND** `ALLOW_PROD_MUTATION === 'true'` (explicit two-variable opt-in).
+
+The two-variable override is deliberate: a single typo cannot rewrite production data. Server runtime (`createApp()` and the pool itself) is **not** guarded — it reads whichever `DATABASE_URL` is set, no opt-in required. The guard is for one-shot scripts only.
+
+The Flutter client points at the API via `--dart-define=API_BASE_URL=...` (full URL, must end in `/api`). Default when no flag is passed: `http://localhost:3001/api` — sized for an emulator pointed at the laptop. For a real device on the LAN, pass `--dart-define=API_BASE_URL=http://<laptop-ip>:3001/api`. The previous `API_HOST` host-only flag and the `192.168.0.204` LAN-IP fallback in `api_config.dart` were removed in the S15-T1 refactor.
 
 The schema lives in **one file**: `server/src/db/migrate.js`. It runs four idempotent blocks in order — `schema` (CREATE TABLE IF NOT EXISTS), `alterations` (ADD COLUMN IF NOT EXISTS plus DO-blocks for the S14-T4→T5 cross_pillar→multi_phase rename), `indexes`, and `s11t4Functions` (CREATE OR REPLACE FUNCTION for `recompute_user_pillar_level` and `recompute_all_user_pillar_levels`). After the STEP 1 consolidation this session, the file is now the full source of truth — including `focus_overlaps`, `exercise_swap_counts`, and `user_excluded_exercises`, which previously existed in prod via out-of-band preflight scripts.
 
@@ -269,6 +280,7 @@ A few cross-cutting notes:
 - **JWT and `req.user.id`.** The middleware decodes the token and assigns the payload to `req.user`; it does not coerce `id` to int. Some routes coerce defensively (`workout.js` at the top of `slot/:exerciseId/choose`); others trust PG's implicit coercion. FUTURE_SCOPE #215 is the middleware-level cleanup.
 - **Error mapping.** 4xx responses use short stable codes (`invalid_focus_slug`, `routine_name_required`). 5xx flow through `errorHandler.js` and collapse to `"Internal server error"`.
 - **`/api/sessions/*` vs `/api/session/*`.** Both exist. `/api/session/*` (singular) is the legacy single-pillar session player surface; `/api/sessions/*` (plural) is the S12-T7 engine HTTP face plus the S14-T1 `start-from-list`. Don't conflate them.
+- **`/api` suffix lives in `baseUrl`.** `ApiConfig.baseUrl` always ends in `/api` (post-S15-T1, retiring FS #196). Endpoint constants (`/sessions/suggest`, `/auth/login`, etc.) MUST NOT re-prefix `/api/` — `ApiConfig.url(path)` simply concatenates `baseUrl + path`. This is the documented standard going forward; new endpoints follow the same rule.
 
 ### 4.7. Smoke harness
 
@@ -280,7 +292,7 @@ A few cross-cutting notes:
 - swap-counter + exclusion writes via `incrementSwap` and `setPromptState`
 - substitution-ladder rank via `rankAlternatives` (S14-T6 / FS #198)
 
-The harness runs against **prod data** (Neon Singapore). The test fixtures it creates are tagged with a sentinel pattern (look for `assertSession` and the `__smoke_` prefixes inside the file) so seed cleanup scripts can identify and drop them. This is intentional pre-launch — there's only one user, so isolating the smoke from real data isn't worth the dev-DB lift. The cross-script consolidation lives at `server/scripts/lib/smoke-fixtures.mjs`.
+After S15-T1 the harness runs against **staging** (Neon Singapore) by default — the same Neon project as production but on a separate branch, so smoke fixtures never collide with real user rows. The fixtures the harness creates are still tagged with a sentinel pattern (look for `assertSession` and the `__smoke_` prefixes inside the file) so cleanup queries can identify and drop them. Running against production is still possible via the explicit `NODE_ENV=production ALLOW_PROD_MUTATION=true` override, but should be rare — the staging branch exists precisely so this isn't a daily move.
 
 The sentinel pattern is the project's standing rule on smoke cleanup (Project Instruction #17): never `DELETE WHERE user_id = ...` from a smoke harness — that works until a real user shares a slug or row identity with a fixture and the test silently destroys real data. Instead, tag every fixture row with a sentinel literal (e.g. `notes='t7-smoke-fixture'`, `slug='__t_state_test'`) and `DELETE WHERE sentinel matches`. The pattern surfaced during S12-T7 and was consolidated into the shared helper by S13-T7.
 
@@ -555,7 +567,7 @@ await context.read<SuggestProvider>().selectBodyFocus(focusSlug, timeBudgetMin: 
 
 `SuggestProvider.selectBodyFocus` (line 93) reads the persisted time-budget if needed, then calls `_runRequest(focusSlug, request: () => _service.requestBodyFocusSession(...))`. The race tracker inside `_runRequest` records the current request slug; if the user picks a different focus before this one returns, the late response is discarded.
 
-`SuggestService.requestBodyFocusSession` (`app/lib/services/suggest_service.dart`) calls `_api.post(ApiConfig.sessionsSuggest, body)` — the constant resolves to `/sessions/suggest`, and `ApiConfig.url()` prepends `baseUrl` which already ends in `/api`, yielding `http://192.168.0.204:3001/api/sessions/suggest` in dev.
+`SuggestService.requestBodyFocusSession` (`app/lib/services/suggest_service.dart`) calls `_api.post(ApiConfig.sessionsSuggest, body)` — the constant resolves to `/sessions/suggest`, and `ApiConfig.url()` prepends `baseUrl` which already ends in `/api`, yielding `http://localhost:3001/api/sessions/suggest` for a default emulator build, or whatever `--dart-define=API_BASE_URL=...` was passed at build time.
 
 `ApiService._send` (`app/lib/services/api_service.dart:125`) wraps the HTTP call with a 15-second timeout, JWT-auth headers, and the typed exception ladder (`UnauthorizedException` / `TimeoutApiException` / `NetworkException` / `ApiException`).
 

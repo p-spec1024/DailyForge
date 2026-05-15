@@ -1,0 +1,4217 @@
+{
+  "databaseHostShort": "ep-orange-tree-a1f9srni",
+  "databaseName": "neondb",
+  "generatedAt": "2026-05-15T12:45:22.142Z",
+  "label": "production (Neon `production` branch)",
+  "schema": {
+    "enums": [],
+    "functions": [
+      {
+        "arguments": "p_user_id integer",
+        "definition": "CREATE OR REPLACE FUNCTION public.recompute_all_user_pillar_levels(p_user_id integer)\n RETURNS SETOF user_pillar_levels\n LANGUAGE plpgsql\nAS $function$\nBEGIN\n  RETURN QUERY SELECT * FROM recompute_user_pillar_level(p_user_id, 'strength');\n  RETURN QUERY SELECT * FROM recompute_user_pillar_level(p_user_id, 'yoga');\n  RETURN QUERY SELECT * FROM recompute_user_pillar_level(p_user_id, 'breathwork');\n  RETURN;\nEND;\n$function$\n",
+        "kind": "function",
+        "language": "plpgsql",
+        "name": "recompute_all_user_pillar_levels",
+        "return_type": "SETOF user_pillar_levels",
+        "schema": "public"
+      },
+      {
+        "arguments": "p_user_id integer, p_pillar character varying",
+        "definition": "CREATE OR REPLACE FUNCTION public.recompute_user_pillar_level(p_user_id integer, p_pillar character varying)\n RETURNS user_pillar_levels\n LANGUAGE plpgsql\nAS $function$\nDECLARE\n  v_existing       user_pillar_levels;\n  v_computed_level VARCHAR(15) := 'beginner';\n  v_session_count  INT := 0;\n  v_weeks_active   NUMERIC := 0;\n  v_first_date     DATE;\n  v_weight_kg      NUMERIC;\n  v_bench_1rm      NUMERIC;\n  v_squat_1rm      NUMERIC;\n  v_dl_1rm         NUMERIC;\n  v_int_distinct   INT := 0;\n  v_int_total      INT := 0;\n  v_first_int_date DATE;\n  v_int_weeks      NUMERIC := 0;\n  v_adv_distinct   INT := 0;\n  v_adv_total      INT := 0;\n  v_result         user_pillar_levels;\n  v_level_rank     INT;\n  v_existing_rank  INT;\nBEGIN\n  IF p_pillar NOT IN ('strength', 'yoga', 'breathwork') THEN\n    RAISE EXCEPTION 'Invalid pillar: %', p_pillar;\n  END IF;\n\n  SELECT * INTO v_existing\n    FROM user_pillar_levels\n   WHERE user_id = p_user_id AND pillar = p_pillar;\n\n  -- Never overwrite user-stated levels.\n  IF v_existing.id IS NOT NULL AND v_existing.source IN ('declared', 'manual_override') THEN\n    RETURN v_existing;\n  END IF;\n\n  IF p_pillar = 'strength' THEN\n    SELECT COUNT(*)::INT, MIN(date)\n      INTO v_session_count, v_first_date\n      FROM sessions\n     WHERE user_id = p_user_id\n       AND type IN ('strength', '5phase')\n       AND completed = true;\n\n    IF v_first_date IS NOT NULL THEN\n      v_weeks_active := GREATEST(0, (CURRENT_DATE - v_first_date)::NUMERIC / 7);\n    END IF;\n\n    SELECT weight_kg INTO v_weight_kg\n      FROM body_measurements\n     WHERE user_id = p_user_id\n     ORDER BY measured_at DESC\n     LIMIT 1;\n\n    SELECT MAX(epc.estimated_1rm) INTO v_bench_1rm\n      FROM exercise_progress_cache epc\n      JOIN exercises e ON e.id = epc.exercise_id\n     WHERE epc.user_id = p_user_id\n       AND epc.kind = 'strength'\n       AND epc.estimated_1rm IS NOT NULL\n       AND e.name ILIKE '%bench press%'\n       AND e.name NOT ILIKE '%dumbbell%'\n       AND e.name NOT ILIKE '%incline%'\n       AND e.name NOT ILIKE '%decline%';\n\n    SELECT MAX(epc.estimated_1rm) INTO v_squat_1rm\n      FROM exercise_progress_cache epc\n      JOIN exercises e ON e.id = epc.exercise_id\n     WHERE epc.user_id = p_user_id\n       AND epc.kind = 'strength'\n       AND epc.estimated_1rm IS NOT NULL\n       AND e.name ILIKE '%squat%'\n       AND e.name ILIKE '%barbell%'\n       AND e.name NOT ILIKE '%front%'\n       AND e.name NOT ILIKE '%goblet%';\n\n    SELECT MAX(epc.estimated_1rm) INTO v_dl_1rm\n      FROM exercise_progress_cache epc\n      JOIN exercises e ON e.id = epc.exercise_id\n     WHERE epc.user_id = p_user_id\n       AND epc.kind = 'strength'\n       AND epc.estimated_1rm IS NOT NULL\n       AND e.name ILIKE '%deadlift%'\n       AND e.name NOT ILIKE '%romanian%'\n       AND e.name NOT ILIKE '%stiff%'\n       AND e.name NOT ILIKE '%sumo%';\n\n    -- Male thresholds (users.sex absent — see spec §Sex handling).\n    -- Advanced: volume-floor AND any advanced ratio.\n    IF v_session_count >= 50\n       AND v_weeks_active >= 78\n       AND v_weight_kg IS NOT NULL\n       AND (\n            (v_bench_1rm IS NOT NULL AND v_bench_1rm >= 1.5  * v_weight_kg)\n         OR (v_squat_1rm IS NOT NULL AND v_squat_1rm >= 1.75 * v_weight_kg)\n         OR (v_dl_1rm    IS NOT NULL AND v_dl_1rm    >= 2.0  * v_weight_kg)\n       ) THEN\n      v_computed_level := 'advanced';\n    -- Intermediate: Path A (volume floor) OR Path B (performance gate).\n    ELSIF (v_session_count >= 12 AND v_weeks_active >= 8)\n       OR (v_weight_kg IS NOT NULL AND (\n              (v_bench_1rm IS NOT NULL AND v_bench_1rm >= 1.0  * v_weight_kg)\n           OR (v_squat_1rm IS NOT NULL AND v_squat_1rm >= 1.25 * v_weight_kg)\n           OR (v_dl_1rm    IS NOT NULL AND v_dl_1rm    >= 1.5  * v_weight_kg)\n          )) THEN\n      v_computed_level := 'intermediate';\n    END IF;\n\n  ELSIF p_pillar = 'yoga' THEN\n    SELECT COUNT(*)::INT, MIN(date)\n      INTO v_session_count, v_first_date\n      FROM sessions\n     WHERE user_id = p_user_id\n       AND type = 'yoga'\n       AND completed = true;\n\n    IF v_first_date IS NOT NULL THEN\n      v_weeks_active := GREATEST(0, (CURRENT_DATE - v_first_date)::NUMERIC / 7);\n    END IF;\n\n    IF v_session_count >= 100 AND v_weeks_active >= 78 THEN\n      v_computed_level := 'advanced';\n    ELSIF v_session_count >= 25 AND v_weeks_active >= 12 THEN\n      v_computed_level := 'intermediate';\n    END IF;\n\n  ELSIF p_pillar = 'breathwork' THEN\n    SELECT COUNT(*)::INT, MIN(created_at)::DATE\n      INTO v_session_count, v_first_date\n      FROM breathwork_sessions\n     WHERE user_id = p_user_id\n       AND completed = true;\n\n    IF v_first_date IS NOT NULL THEN\n      v_weeks_active := GREATEST(0, (CURRENT_DATE - v_first_date)::NUMERIC / 7);\n    END IF;\n\n    SELECT\n        COUNT(DISTINCT bs.technique_id)::INT,\n        COUNT(*)::INT,\n        MIN(bs.created_at)::DATE\n      INTO v_int_distinct, v_int_total, v_first_int_date\n      FROM breathwork_sessions bs\n      JOIN breathwork_techniques bt ON bt.id = bs.technique_id\n     WHERE bs.user_id = p_user_id\n       AND bs.completed = true\n       AND bt.difficulty = 'intermediate';\n\n    IF v_first_int_date IS NOT NULL THEN\n      v_int_weeks := GREATEST(0, (CURRENT_DATE - v_first_int_date)::NUMERIC / 7);\n    END IF;\n\n    SELECT\n        COUNT(DISTINCT bs.technique_id)::INT,\n        COUNT(*)::INT\n      INTO v_adv_distinct, v_adv_total\n      FROM breathwork_sessions bs\n      JOIN breathwork_techniques bt ON bt.id = bs.technique_id\n     WHERE bs.user_id = p_user_id\n       AND bs.completed = true\n       AND bt.difficulty = 'advanced';\n\n    -- Advanced: ≥5 advanced sessions across ≥2 distinct techniques AND\n    -- ≥12 weeks since first intermediate-tier completion (conjunction).\n    IF v_adv_total >= 5 AND v_adv_distinct >= 2 AND v_int_weeks >= 12 THEN\n      v_computed_level := 'advanced';\n    -- Intermediate: Path A (technique exposure) OR Path B (volume floor).\n    ELSIF (v_int_total >= 8 AND v_int_distinct >= 2)\n       OR (v_session_count >= 30 AND v_weeks_active >= 12) THEN\n      v_computed_level := 'intermediate';\n    END IF;\n  END IF;\n\n  -- INSERT if absent.\n  IF v_existing.id IS NULL THEN\n    INSERT INTO user_pillar_levels (user_id, pillar, level, source, computed_at, updated_at)\n    VALUES (p_user_id, p_pillar, v_computed_level, 'inferred', NOW(), NOW())\n    RETURNING * INTO v_result;\n    RETURN v_result;\n  END IF;\n\n  -- Promotion-only update (never demote).\n  v_level_rank := CASE v_computed_level\n                    WHEN 'beginner'     THEN 1\n                    WHEN 'intermediate' THEN 2\n                    WHEN 'advanced'     THEN 3\n                  END;\n  v_existing_rank := CASE v_existing.level\n                    WHEN 'beginner'     THEN 1\n                    WHEN 'intermediate' THEN 2\n                    WHEN 'advanced'     THEN 3\n                  END;\n\n  IF v_level_rank > v_existing_rank THEN\n    UPDATE user_pillar_levels\n       SET level       = v_computed_level,\n           source      = 'inferred',\n           computed_at = NOW(),\n           updated_at  = NOW()\n     WHERE id = v_existing.id\n     RETURNING * INTO v_result;\n  ELSE\n    -- Same or lower computed level — only bump computed_at, leave level alone.\n    UPDATE user_pillar_levels\n       SET computed_at = NOW()\n     WHERE id = v_existing.id\n     RETURNING * INTO v_result;\n  END IF;\n\n  RETURN v_result;\nEND;\n$function$\n",
+        "kind": "function",
+        "language": "plpgsql",
+        "name": "recompute_user_pillar_level",
+        "return_type": "user_pillar_levels",
+        "schema": "public"
+      }
+    ],
+    "sequences": [
+      {
+        "name": "body_measurements_id_seq",
+        "owned_column": "id",
+        "owned_table": "body_measurements",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "breathwork_logs_id_seq",
+        "owned_column": "id",
+        "owned_table": "breathwork_logs",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "breathwork_sessions_id_seq",
+        "owned_column": "id",
+        "owned_table": "breathwork_sessions",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "breathwork_techniques_id_seq",
+        "owned_column": "id",
+        "owned_table": "breathwork_techniques",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "cross_pillar_sessions_id_seq",
+        "owned_column": "id",
+        "owned_table": "multi_phase_sessions",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "exercise_progress_cache_id_seq",
+        "owned_column": "id",
+        "owned_table": "exercise_progress_cache",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "exercise_swap_counts_id_seq",
+        "owned_column": "id",
+        "owned_table": "exercise_swap_counts",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "exercises_id_seq",
+        "owned_column": "id",
+        "owned_table": "exercises",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "focus_areas_id_seq",
+        "owned_column": "id",
+        "owned_table": "focus_areas",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "focus_content_compatibility_id_seq",
+        "owned_column": "id",
+        "owned_table": "focus_content_compatibility",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "focus_muscle_keywords_id_seq",
+        "owned_column": "id",
+        "owned_table": "focus_muscle_keywords",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "focus_overlaps_id_seq",
+        "owned_column": "id",
+        "owned_table": "focus_overlaps",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "habit_entries_id_seq",
+        "owned_column": "id",
+        "owned_table": "habit_entries",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "habits_id_seq",
+        "owned_column": "id",
+        "owned_table": "habits",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "progress_photos_id_seq",
+        "owned_column": "id",
+        "owned_table": "progress_photos",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "session_exercises_id_seq",
+        "owned_column": "id",
+        "owned_table": "session_exercises",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "sessions_id_seq",
+        "owned_column": "id",
+        "owned_table": "sessions",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "slot_alternatives_id_seq",
+        "owned_column": "id",
+        "owned_table": "slot_alternatives",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "user_breathwork_prefs_id_seq",
+        "owned_column": "id",
+        "owned_table": "user_breathwork_prefs",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "user_excluded_exercises_id_seq",
+        "owned_column": "id",
+        "owned_table": "user_excluded_exercises",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "user_exercise_prefs_id_seq",
+        "owned_column": "id",
+        "owned_table": "user_exercise_prefs",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "user_pillar_levels_id_seq",
+        "owned_column": "id",
+        "owned_table": "user_pillar_levels",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "user_routine_exercises_id_seq",
+        "owned_column": "id",
+        "owned_table": "user_routine_exercises",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "user_routines_id_seq",
+        "owned_column": "id",
+        "owned_table": "user_routines",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "user_settings_id_seq",
+        "owned_column": "id",
+        "owned_table": "user_settings",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "user_slot_prefs_id_seq",
+        "owned_column": "id",
+        "owned_table": "user_slot_prefs",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "users_id_seq",
+        "owned_column": "id",
+        "owned_table": "users",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "workout_slots_id_seq",
+        "owned_column": "id",
+        "owned_table": "workout_slots",
+        "owned_table_schema": "public",
+        "schema": "public"
+      },
+      {
+        "name": "workouts_id_seq",
+        "owned_column": "id",
+        "owned_table": "workouts",
+        "owned_table_schema": "public",
+        "schema": "public"
+      }
+    ],
+    "tables": {
+      "public.body_measurements": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('body_measurements_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "measured_at",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "weight_kg",
+            "nullable": true,
+            "numericPrecision": 5,
+            "numericScale": 2,
+            "position": 4,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "body_fat_percent",
+            "nullable": true,
+            "numericPrecision": 4,
+            "numericScale": 1,
+            "position": 5,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "waist_cm",
+            "nullable": true,
+            "numericPrecision": 5,
+            "numericScale": 1,
+            "position": 6,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "hips_cm",
+            "nullable": true,
+            "numericPrecision": 5,
+            "numericScale": 1,
+            "position": 7,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "chest_cm",
+            "nullable": true,
+            "numericPrecision": 5,
+            "numericScale": 1,
+            "position": 8,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "bicep_left_cm",
+            "nullable": true,
+            "numericPrecision": 5,
+            "numericScale": 1,
+            "position": 9,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "bicep_right_cm",
+            "nullable": true,
+            "numericPrecision": 5,
+            "numericScale": 1,
+            "position": 10,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "notes",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 11,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 12,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "body_measurements_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "body_measurements_user_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX body_measurements_pkey ON public.body_measurements USING btree (id)",
+            "name": "body_measurements_pkey"
+          },
+          {
+            "definition": "CREATE INDEX idx_body_measurements_user_date ON public.body_measurements USING btree (user_id, measured_at DESC)",
+            "name": "idx_body_measurements_user_date"
+          }
+        ]
+      },
+      "public.breathwork_logs": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('breathwork_logs_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "session_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 3,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "technique_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 4,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "rounds_completed",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 5,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "avg_hold_seconds",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 6,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "max_hold_seconds",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 7,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "total_duration_seconds",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 8,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": null,
+            "name": "ratio_used",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 9,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "notes",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 10,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 11,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "breathwork_logs_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE SET NULL",
+            "name": "breathwork_logs_session_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "FOREIGN KEY (technique_id) REFERENCES breathwork_techniques(id)",
+            "name": "breathwork_logs_technique_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "breathwork_logs_user_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX breathwork_logs_pkey ON public.breathwork_logs USING btree (id)",
+            "name": "breathwork_logs_pkey"
+          },
+          {
+            "definition": "CREATE INDEX idx_breathwork_logs_date ON public.breathwork_logs USING btree (created_at)",
+            "name": "idx_breathwork_logs_date"
+          },
+          {
+            "definition": "CREATE INDEX idx_breathwork_logs_technique ON public.breathwork_logs USING btree (technique_id)",
+            "name": "idx_breathwork_logs_technique"
+          },
+          {
+            "definition": "CREATE INDEX idx_breathwork_logs_user ON public.breathwork_logs USING btree (user_id)",
+            "name": "idx_breathwork_logs_user"
+          }
+        ]
+      },
+      "public.breathwork_sessions": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('breathwork_sessions_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "technique_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 3,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "duration_seconds",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 4,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "rounds_completed",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 5,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "false",
+            "name": "completed",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "boolean",
+            "udtName": "bool"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 7,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": 40,
+            "default": null,
+            "name": "focus_slug",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 8,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "multi_phase_session_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 9,
+            "type": "integer",
+            "udtName": "int4"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "FOREIGN KEY (multi_phase_session_id) REFERENCES multi_phase_sessions(id)",
+            "name": "breathwork_sessions_cross_pillar_session_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "breathwork_sessions_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (technique_id) REFERENCES breathwork_techniques(id)",
+            "name": "breathwork_sessions_technique_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "breathwork_sessions_user_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX breathwork_sessions_pkey ON public.breathwork_sessions USING btree (id)",
+            "name": "breathwork_sessions_pkey"
+          },
+          {
+            "definition": "CREATE INDEX idx_breathwork_sessions_mps ON public.breathwork_sessions USING btree (multi_phase_session_id) WHERE (multi_phase_session_id IS NOT NULL)",
+            "name": "idx_breathwork_sessions_mps"
+          },
+          {
+            "definition": "CREATE INDEX idx_breathwork_sessions_technique ON public.breathwork_sessions USING btree (technique_id)",
+            "name": "idx_breathwork_sessions_technique"
+          },
+          {
+            "definition": "CREATE INDEX idx_breathwork_sessions_user ON public.breathwork_sessions USING btree (user_id)",
+            "name": "idx_breathwork_sessions_user"
+          },
+          {
+            "definition": "CREATE INDEX idx_breathwork_sessions_user_focus_created ON public.breathwork_sessions USING btree (user_id, focus_slug, created_at) WHERE (completed = true)",
+            "name": "idx_breathwork_sessions_user_focus_created"
+          }
+        ]
+      },
+      "public.breathwork_techniques": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('breathwork_techniques_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 255,
+            "default": null,
+            "name": "name",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 2,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 50,
+            "default": null,
+            "name": "tradition",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "purposes",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "ARRAY",
+            "udtName": "_varchar"
+          },
+          {
+            "characterMaximumLength": 50,
+            "default": null,
+            "name": "difficulty",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "protocol",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "jsonb",
+            "udtName": "jsonb"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "contraindications",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 8,
+            "type": "ARRAY",
+            "udtName": "_text"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "description",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 9,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 10,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "updated_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 11,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": 100,
+            "default": null,
+            "name": "sanskrit_name",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 12,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 50,
+            "default": "'calming'::character varying",
+            "name": "category",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 13,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 10,
+            "default": "'green'::character varying",
+            "name": "safety_level",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 14,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "''::text",
+            "name": "instructions",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 15,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "benefits",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 16,
+            "type": "ARRAY",
+            "udtName": "_text"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "caution_note",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 17,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": 100,
+            "default": null,
+            "name": "source",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 18,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "pre_workout_compatible",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 21,
+            "type": "boolean",
+            "udtName": "bool"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "post_workout_compatible",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 22,
+            "type": "boolean",
+            "udtName": "bool"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "standalone_compatible",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 23,
+            "type": "boolean",
+            "udtName": "bool"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "beginner_duration_min",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 24,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "beginner_duration_max",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 25,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "intermediate_duration_min",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 26,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "intermediate_duration_max",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 27,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "advanced_duration_min",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 28,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "advanced_duration_max",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 29,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "'{}'::text[]",
+            "name": "settle_eligible_for",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 30,
+            "type": "ARRAY",
+            "udtName": "_text"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "CHECK (((difficulty)::text = ANY ((ARRAY['beginner'::character varying, 'intermediate'::character varying, 'advanced'::character varying])::text[])))",
+            "name": "breathwork_techniques_difficulty_check",
+            "type": "check"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "breathwork_techniques_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "CHECK (((tradition)::text = ANY ((ARRAY['pranayama'::character varying, 'western'::character varying, 'therapeutic'::character varying, 'goal_specific'::character varying, 'advanced'::character varying])::text[])))",
+            "name": "breathwork_techniques_tradition_check",
+            "type": "check"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX breathwork_techniques_pkey ON public.breathwork_techniques USING btree (id)",
+            "name": "breathwork_techniques_pkey"
+          },
+          {
+            "definition": "CREATE INDEX idx_breathwork_category ON public.breathwork_techniques USING btree (category)",
+            "name": "idx_breathwork_category"
+          },
+          {
+            "definition": "CREATE INDEX idx_breathwork_difficulty ON public.breathwork_techniques USING btree (difficulty)",
+            "name": "idx_breathwork_difficulty"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX idx_breathwork_name ON public.breathwork_techniques USING btree (name)",
+            "name": "idx_breathwork_name"
+          },
+          {
+            "definition": "CREATE INDEX idx_breathwork_safety ON public.breathwork_techniques USING btree (safety_level)",
+            "name": "idx_breathwork_safety"
+          },
+          {
+            "definition": "CREATE INDEX idx_breathwork_settle_eligible ON public.breathwork_techniques USING gin (settle_eligible_for)",
+            "name": "idx_breathwork_settle_eligible"
+          },
+          {
+            "definition": "CREATE INDEX idx_breathwork_tradition ON public.breathwork_techniques USING btree (tradition)",
+            "name": "idx_breathwork_tradition"
+          }
+        ]
+      },
+      "public.exercise_progress_cache": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('exercise_progress_cache_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "exercise_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 3,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": "'strength'::character varying",
+            "name": "kind",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "best_weight",
+            "nullable": true,
+            "numericPrecision": 6,
+            "numericScale": 2,
+            "position": 5,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "best_weight_date",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "date",
+            "udtName": "date"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "best_volume",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 7,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "best_volume_date",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 8,
+            "type": "date",
+            "udtName": "date"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "estimated_1rm",
+            "nullable": true,
+            "numericPrecision": 6,
+            "numericScale": 2,
+            "position": 9,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "best_hold_seconds",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 10,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "best_hold_date",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 11,
+            "type": "date",
+            "udtName": "date"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "best_breath_hold_seconds",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 12,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "best_breath_hold_date",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 13,
+            "type": "date",
+            "udtName": "date"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "total_rounds",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 14,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "0",
+            "name": "total_sessions",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 15,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "first_session_date",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 16,
+            "type": "date",
+            "udtName": "date"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "last_session_date",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 17,
+            "type": "date",
+            "udtName": "date"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "improvement_percentage",
+            "nullable": true,
+            "numericPrecision": 6,
+            "numericScale": 2,
+            "position": 18,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 19,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "updated_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 20,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "CHECK (((kind)::text = ANY ((ARRAY['strength'::character varying, 'yoga'::character varying, 'breathwork'::character varying])::text[])))",
+            "name": "exercise_progress_cache_kind_check",
+            "type": "check"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "exercise_progress_cache_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "UNIQUE (user_id, exercise_id, kind)",
+            "name": "exercise_progress_cache_user_id_exercise_id_kind_key",
+            "type": "unique"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "exercise_progress_cache_user_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX exercise_progress_cache_pkey ON public.exercise_progress_cache USING btree (id)",
+            "name": "exercise_progress_cache_pkey"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX exercise_progress_cache_user_id_exercise_id_kind_key ON public.exercise_progress_cache USING btree (user_id, exercise_id, kind)",
+            "name": "exercise_progress_cache_user_id_exercise_id_kind_key"
+          },
+          {
+            "definition": "CREATE INDEX idx_progress_cache_exercise ON public.exercise_progress_cache USING btree (exercise_id, kind)",
+            "name": "idx_progress_cache_exercise"
+          },
+          {
+            "definition": "CREATE INDEX idx_progress_cache_user ON public.exercise_progress_cache USING btree (user_id)",
+            "name": "idx_progress_cache_user"
+          }
+        ]
+      },
+      "public.exercise_swap_counts": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('exercise_swap_counts_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "exercise_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 3,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "0",
+            "name": "swap_count",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 4,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "last_swapped_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": "'never_prompted'::character varying",
+            "name": "prompt_state",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "character varying",
+            "udtName": "varchar"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE CASCADE",
+            "name": "exercise_swap_counts_exercise_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "exercise_swap_counts_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "CHECK (((prompt_state)::text = ANY ((ARRAY['never_prompted'::character varying, 'prompted_keep'::character varying, 'excluded'::character varying])::text[])))",
+            "name": "exercise_swap_counts_prompt_state_check",
+            "type": "check"
+          },
+          {
+            "definition": "UNIQUE (user_id, exercise_id)",
+            "name": "exercise_swap_counts_user_id_exercise_id_key",
+            "type": "unique"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "exercise_swap_counts_user_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX exercise_swap_counts_pkey ON public.exercise_swap_counts USING btree (id)",
+            "name": "exercise_swap_counts_pkey"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX exercise_swap_counts_user_id_exercise_id_key ON public.exercise_swap_counts USING btree (user_id, exercise_id)",
+            "name": "exercise_swap_counts_user_id_exercise_id_key"
+          },
+          {
+            "definition": "CREATE INDEX idx_swap_counts_user ON public.exercise_swap_counts USING btree (user_id)",
+            "name": "idx_swap_counts_user"
+          }
+        ]
+      },
+      "public.exercises": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('exercises_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "workout_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 255,
+            "default": null,
+            "name": "name",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 255,
+            "default": null,
+            "name": "sanskrit_name",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "target_muscles",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": 50,
+            "default": "'strength'::character varying",
+            "name": "type",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "default_sets",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 7,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "default_reps",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 8,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "default_duration_secs",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 9,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "0",
+            "name": "sort_order",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 10,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 11,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "description",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 12,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "url",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 13,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": 100,
+            "default": null,
+            "name": "source",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 14,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 50,
+            "default": null,
+            "name": "difficulty",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 15,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "media_url",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 16,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "thumbnail_url",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 17,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": "'pending'::character varying",
+            "name": "review_status",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 18,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "review_notes",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 19,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": 10,
+            "default": "'image'::character varying",
+            "name": "media_type",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 20,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": null,
+            "name": "category",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 21,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": "'weight_reps'::character varying",
+            "name": "tracking_type",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 22,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "hold_times_json",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 24,
+            "type": "jsonb",
+            "udtName": "jsonb"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "practice_types",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 25,
+            "type": "ARRAY",
+            "udtName": "_text"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "exercises_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (workout_id) REFERENCES workouts(id)",
+            "name": "exercises_workout_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX exercises_pkey ON public.exercises USING btree (id)",
+            "name": "exercises_pkey"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX idx_exercises_sanskrit_unique ON public.exercises USING btree (sanskrit_name) WHERE (((type)::text = 'yoga'::text) AND (sanskrit_name IS NOT NULL))",
+            "name": "idx_exercises_sanskrit_unique"
+          },
+          {
+            "definition": "CREATE INDEX idx_exercises_workout_id ON public.exercises USING btree (workout_id)",
+            "name": "idx_exercises_workout_id"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX idx_lib_exercises_name_source ON public.exercises USING btree (name, source) WHERE (workout_id IS NULL)",
+            "name": "idx_lib_exercises_name_source"
+          }
+        ]
+      },
+      "public.focus_areas": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('focus_areas_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 40,
+            "default": null,
+            "name": "slug",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 2,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 80,
+            "default": null,
+            "name": "display_name",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 10,
+            "default": null,
+            "name": "focus_type",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "description",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": 40,
+            "default": null,
+            "name": "icon_name",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "0",
+            "name": "sort_order",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 7,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "true",
+            "name": "is_active",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 8,
+            "type": "boolean",
+            "udtName": "bool"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 9,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "CHECK (((focus_type)::text = ANY ((ARRAY['body'::character varying, 'state'::character varying])::text[])))",
+            "name": "focus_areas_focus_type_check",
+            "type": "check"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "focus_areas_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "UNIQUE (slug)",
+            "name": "focus_areas_slug_key",
+            "type": "unique"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX focus_areas_pkey ON public.focus_areas USING btree (id)",
+            "name": "focus_areas_pkey"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX focus_areas_slug_key ON public.focus_areas USING btree (slug)",
+            "name": "focus_areas_slug_key"
+          },
+          {
+            "definition": "CREATE INDEX idx_focus_areas_type_active ON public.focus_areas USING btree (focus_type, is_active) WHERE (is_active = true)",
+            "name": "idx_focus_areas_type_active"
+          }
+        ]
+      },
+      "public.focus_content_compatibility": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('focus_content_compatibility_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "focus_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": null,
+            "name": "content_type",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "content_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 4,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": null,
+            "name": "role",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "weight",
+            "nullable": true,
+            "numericPrecision": 3,
+            "numericScale": 2,
+            "position": 6,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "notes",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 7,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 8,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "CHECK (((content_type)::text = ANY ((ARRAY['strength'::character varying, 'yoga'::character varying, 'breathwork'::character varying])::text[])))",
+            "name": "focus_content_compatibility_content_type_check",
+            "type": "check"
+          },
+          {
+            "definition": "UNIQUE (focus_id, content_type, content_id, role)",
+            "name": "focus_content_compatibility_focus_id_content_type_content_i_key",
+            "type": "unique"
+          },
+          {
+            "definition": "FOREIGN KEY (focus_id) REFERENCES focus_areas(id) ON DELETE CASCADE",
+            "name": "focus_content_compatibility_focus_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "focus_content_compatibility_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "CHECK (((role)::text = ANY ((ARRAY['main'::character varying, 'warmup'::character varying, 'cooldown'::character varying, 'bookend_open'::character varying, 'bookend_close'::character varying])::text[])))",
+            "name": "focus_content_compatibility_role_check",
+            "type": "check"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX focus_content_compatibility_focus_id_content_type_content_i_key ON public.focus_content_compatibility USING btree (focus_id, content_type, content_id, role)",
+            "name": "focus_content_compatibility_focus_id_content_type_content_i_key"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX focus_content_compatibility_pkey ON public.focus_content_compatibility USING btree (id)",
+            "name": "focus_content_compatibility_pkey"
+          },
+          {
+            "definition": "CREATE INDEX idx_fcc_content ON public.focus_content_compatibility USING btree (content_type, content_id)",
+            "name": "idx_fcc_content"
+          },
+          {
+            "definition": "CREATE INDEX idx_fcc_focus_role_type ON public.focus_content_compatibility USING btree (focus_id, role, content_type)",
+            "name": "idx_fcc_focus_role_type"
+          }
+        ]
+      },
+      "public.focus_muscle_keywords": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('focus_muscle_keywords_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "focus_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 60,
+            "default": null,
+            "name": "keyword",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "character varying",
+            "udtName": "varchar"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "FOREIGN KEY (focus_id) REFERENCES focus_areas(id) ON DELETE CASCADE",
+            "name": "focus_muscle_keywords_focus_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "UNIQUE (focus_id, keyword)",
+            "name": "focus_muscle_keywords_focus_id_keyword_key",
+            "type": "unique"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "focus_muscle_keywords_pkey",
+            "type": "primary_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX focus_muscle_keywords_focus_id_keyword_key ON public.focus_muscle_keywords USING btree (focus_id, keyword)",
+            "name": "focus_muscle_keywords_focus_id_keyword_key"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX focus_muscle_keywords_pkey ON public.focus_muscle_keywords USING btree (id)",
+            "name": "focus_muscle_keywords_pkey"
+          },
+          {
+            "definition": "CREATE INDEX idx_focus_muscle_keywords_focus ON public.focus_muscle_keywords USING btree (focus_id)",
+            "name": "idx_focus_muscle_keywords_focus"
+          }
+        ]
+      },
+      "public.focus_overlaps": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('focus_overlaps_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "focus_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "overlaps_with_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 3,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "CHECK ((focus_id <> overlaps_with_id))",
+            "name": "focus_overlaps_check",
+            "type": "check"
+          },
+          {
+            "definition": "FOREIGN KEY (focus_id) REFERENCES focus_areas(id) ON DELETE CASCADE",
+            "name": "focus_overlaps_focus_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "UNIQUE (focus_id, overlaps_with_id)",
+            "name": "focus_overlaps_focus_id_overlaps_with_id_key",
+            "type": "unique"
+          },
+          {
+            "definition": "FOREIGN KEY (overlaps_with_id) REFERENCES focus_areas(id) ON DELETE CASCADE",
+            "name": "focus_overlaps_overlaps_with_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "focus_overlaps_pkey",
+            "type": "primary_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX focus_overlaps_focus_id_overlaps_with_id_key ON public.focus_overlaps USING btree (focus_id, overlaps_with_id)",
+            "name": "focus_overlaps_focus_id_overlaps_with_id_key"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX focus_overlaps_pkey ON public.focus_overlaps USING btree (id)",
+            "name": "focus_overlaps_pkey"
+          },
+          {
+            "definition": "CREATE INDEX idx_focus_overlaps_focus ON public.focus_overlaps USING btree (focus_id)",
+            "name": "idx_focus_overlaps_focus"
+          }
+        ]
+      },
+      "public.habit_entries": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('habit_entries_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "habit_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "CURRENT_DATE",
+            "name": "entry_date",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "date",
+            "udtName": "date"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "0",
+            "name": "value",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "numeric",
+            "udtName": "numeric"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "UNIQUE (habit_id, entry_date)",
+            "name": "habit_entries_habit_id_entry_date_key",
+            "type": "unique"
+          },
+          {
+            "definition": "FOREIGN KEY (habit_id) REFERENCES habits(id) ON DELETE CASCADE",
+            "name": "habit_entries_habit_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "habit_entries_pkey",
+            "type": "primary_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX habit_entries_habit_id_entry_date_key ON public.habit_entries USING btree (habit_id, entry_date)",
+            "name": "habit_entries_habit_id_entry_date_key"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX habit_entries_pkey ON public.habit_entries USING btree (id)",
+            "name": "habit_entries_pkey"
+          },
+          {
+            "definition": "CREATE INDEX idx_habit_entries_date ON public.habit_entries USING btree (entry_date)",
+            "name": "idx_habit_entries_date"
+          },
+          {
+            "definition": "CREATE INDEX idx_habit_entries_habit_date ON public.habit_entries USING btree (habit_id, entry_date)",
+            "name": "idx_habit_entries_habit_date"
+          },
+          {
+            "definition": "CREATE INDEX idx_habit_entries_habit_id ON public.habit_entries USING btree (habit_id)",
+            "name": "idx_habit_entries_habit_id"
+          }
+        ]
+      },
+      "public.habits": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('habits_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 255,
+            "default": null,
+            "name": "name",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": "'boolean'::character varying",
+            "name": "type",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 50,
+            "default": null,
+            "name": "unit",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "target_value",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 7,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": 50,
+            "default": "'personal'::character varying",
+            "name": "category",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 8,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "0",
+            "name": "sort_order",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 9,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "true",
+            "name": "active",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 10,
+            "type": "boolean",
+            "udtName": "bool"
+          },
+          {
+            "characterMaximumLength": 50,
+            "default": "NULL::character varying",
+            "name": "auto_type",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 11,
+            "type": "character varying",
+            "udtName": "varchar"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "habits_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "CHECK (((type)::text = ANY ((ARRAY['boolean'::character varying, 'quantity'::character varying])::text[])))",
+            "name": "habits_type_check",
+            "type": "check"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "habits_user_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX habits_pkey ON public.habits USING btree (id)",
+            "name": "habits_pkey"
+          },
+          {
+            "definition": "CREATE INDEX idx_habits_user_id ON public.habits USING btree (user_id)",
+            "name": "idx_habits_user_id"
+          }
+        ]
+      },
+      "public.multi_phase_sessions": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('cross_pillar_sessions_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 40,
+            "default": null,
+            "name": "focus_slug",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "started_at",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "completed_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "0",
+            "name": "phases_completed",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 6,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "total_phases",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 7,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": null,
+            "name": "end_intent",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 8,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "session_shape",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 9,
+            "type": "text",
+            "udtName": "text"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "CHECK (((end_intent)::text = ANY ((ARRAY['completed'::character varying, 'end_early'::character varying, 'abandoned'::character varying])::text[])))",
+            "name": "cross_pillar_sessions_end_intent_check",
+            "type": "check"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "cross_pillar_sessions_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "cross_pillar_sessions_user_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX cross_pillar_sessions_pkey ON public.multi_phase_sessions USING btree (id)",
+            "name": "cross_pillar_sessions_pkey"
+          },
+          {
+            "definition": "CREATE INDEX idx_mps_user ON public.multi_phase_sessions USING btree (user_id, started_at DESC)",
+            "name": "idx_mps_user"
+          }
+        ]
+      },
+      "public.progress_photos": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('progress_photos_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "taken_at",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "date",
+            "udtName": "date"
+          },
+          {
+            "characterMaximumLength": 10,
+            "default": "'front'::character varying",
+            "name": "view",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 100,
+            "default": null,
+            "name": "local_storage_key",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "progress_photos_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "progress_photos_user_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE INDEX idx_progress_photos_user_date ON public.progress_photos USING btree (user_id, taken_at DESC)",
+            "name": "idx_progress_photos_user_date"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX progress_photos_pkey ON public.progress_photos USING btree (id)",
+            "name": "progress_photos_pkey"
+          }
+        ]
+      },
+      "public.session_exercises": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('session_exercises_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "session_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "exercise_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 3,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "sets_completed",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 4,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "reps_completed",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 5,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "weight",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "duration_secs",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 7,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "0",
+            "name": "sort_order",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 8,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "set_number",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 9,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "rpe",
+            "nullable": true,
+            "numericPrecision": 3,
+            "numericScale": 1,
+            "position": 10,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": "'normal'::character varying",
+            "name": "set_type",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 11,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "false",
+            "name": "completed",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 12,
+            "type": "boolean",
+            "udtName": "bool"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "notes",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 13,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "hold_duration_seconds",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 14,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "rounds_completed",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 15,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": null,
+            "name": "technique_ratio",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 16,
+            "type": "character varying",
+            "udtName": "varchar"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "FOREIGN KEY (exercise_id) REFERENCES exercises(id)",
+            "name": "session_exercises_exercise_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "session_exercises_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE",
+            "name": "session_exercises_session_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "UNIQUE (session_id, exercise_id, set_number)",
+            "name": "uq_session_exercise_set",
+            "type": "unique"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE INDEX idx_session_exercises_exercise ON public.session_exercises USING btree (exercise_id)",
+            "name": "idx_session_exercises_exercise"
+          },
+          {
+            "definition": "CREATE INDEX idx_session_exercises_session ON public.session_exercises USING btree (session_id)",
+            "name": "idx_session_exercises_session"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX session_exercises_pkey ON public.session_exercises USING btree (id)",
+            "name": "session_exercises_pkey"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX uq_session_exercise_set ON public.session_exercises USING btree (session_id, exercise_id, set_number)",
+            "name": "uq_session_exercise_set"
+          }
+        ]
+      },
+      "public.sessions": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('sessions_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "workout_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 3,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "started_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "completed_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "notes",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "CURRENT_DATE",
+            "name": "date",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 7,
+            "type": "date",
+            "udtName": "date"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "duration",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 8,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": "'strength'::character varying",
+            "name": "type",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 9,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "false",
+            "name": "completed",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 10,
+            "type": "boolean",
+            "udtName": "bool"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "phases_json",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 11,
+            "type": "jsonb",
+            "udtName": "jsonb"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "routine_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 12,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 40,
+            "default": null,
+            "name": "focus_slug",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 13,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "multi_phase_session_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 14,
+            "type": "integer",
+            "udtName": "int4"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "FOREIGN KEY (multi_phase_session_id) REFERENCES multi_phase_sessions(id)",
+            "name": "sessions_cross_pillar_session_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "sessions_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (routine_id) REFERENCES user_routines(id) ON DELETE SET NULL",
+            "name": "sessions_routine_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "sessions_user_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "FOREIGN KEY (workout_id) REFERENCES workouts(id)",
+            "name": "sessions_workout_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE INDEX idx_sessions_mps ON public.sessions USING btree (multi_phase_session_id) WHERE (multi_phase_session_id IS NOT NULL)",
+            "name": "idx_sessions_mps"
+          },
+          {
+            "definition": "CREATE INDEX idx_sessions_routine ON public.sessions USING btree (routine_id)",
+            "name": "idx_sessions_routine"
+          },
+          {
+            "definition": "CREATE INDEX idx_sessions_user_date ON public.sessions USING btree (user_id, date)",
+            "name": "idx_sessions_user_date"
+          },
+          {
+            "definition": "CREATE INDEX idx_sessions_user_focus_date ON public.sessions USING btree (user_id, focus_slug, date) WHERE (completed = true)",
+            "name": "idx_sessions_user_focus_date"
+          },
+          {
+            "definition": "CREATE INDEX idx_sessions_user_id ON public.sessions USING btree (user_id)",
+            "name": "idx_sessions_user_id"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX sessions_pkey ON public.sessions USING btree (id)",
+            "name": "sessions_pkey"
+          }
+        ]
+      },
+      "public.slot_alternatives": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('slot_alternatives_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "exercise_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "alternative_exercise_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 3,
+            "type": "integer",
+            "udtName": "int4"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "FOREIGN KEY (alternative_exercise_id) REFERENCES exercises(id) ON DELETE CASCADE",
+            "name": "slot_alternatives_alternative_exercise_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "UNIQUE (exercise_id, alternative_exercise_id)",
+            "name": "slot_alternatives_exercise_id_alternative_exercise_id_key",
+            "type": "unique"
+          },
+          {
+            "definition": "FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE CASCADE",
+            "name": "slot_alternatives_exercise_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "slot_alternatives_pkey",
+            "type": "primary_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE INDEX idx_slot_alternatives_exercise ON public.slot_alternatives USING btree (exercise_id)",
+            "name": "idx_slot_alternatives_exercise"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX slot_alternatives_exercise_id_alternative_exercise_id_key ON public.slot_alternatives USING btree (exercise_id, alternative_exercise_id)",
+            "name": "slot_alternatives_exercise_id_alternative_exercise_id_key"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX slot_alternatives_pkey ON public.slot_alternatives USING btree (id)",
+            "name": "slot_alternatives_pkey"
+          }
+        ]
+      },
+      "public.user_breathwork_prefs": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('user_breathwork_prefs_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 10,
+            "default": null,
+            "name": "phase",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "technique_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 4,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "CHECK (((phase)::text = ANY ((ARRAY['opening'::character varying, 'closing'::character varying])::text[])))",
+            "name": "user_breathwork_prefs_phase_check",
+            "type": "check"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "user_breathwork_prefs_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (technique_id) REFERENCES breathwork_techniques(id)",
+            "name": "user_breathwork_prefs_technique_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "user_breathwork_prefs_user_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "UNIQUE (user_id, phase)",
+            "name": "user_breathwork_prefs_user_id_phase_key",
+            "type": "unique"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE INDEX idx_breathwork_prefs_user ON public.user_breathwork_prefs USING btree (user_id)",
+            "name": "idx_breathwork_prefs_user"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_breathwork_prefs_pkey ON public.user_breathwork_prefs USING btree (id)",
+            "name": "user_breathwork_prefs_pkey"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_breathwork_prefs_user_id_phase_key ON public.user_breathwork_prefs USING btree (user_id, phase)",
+            "name": "user_breathwork_prefs_user_id_phase_key"
+          }
+        ]
+      },
+      "public.user_excluded_exercises": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('user_excluded_exercises_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": null,
+            "name": "content_type",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "content_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 4,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "excluded_at",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "CHECK (((content_type)::text = ANY ((ARRAY['strength'::character varying, 'yoga'::character varying, 'breathwork'::character varying])::text[])))",
+            "name": "user_excluded_exercises_content_type_check",
+            "type": "check"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "user_excluded_exercises_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "UNIQUE (user_id, content_type, content_id)",
+            "name": "user_excluded_exercises_user_id_content_type_content_id_key",
+            "type": "unique"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "user_excluded_exercises_user_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE INDEX idx_user_excluded_user ON public.user_excluded_exercises USING btree (user_id)",
+            "name": "idx_user_excluded_user"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_excluded_exercises_pkey ON public.user_excluded_exercises USING btree (id)",
+            "name": "user_excluded_exercises_pkey"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_excluded_exercises_user_id_content_type_content_id_key ON public.user_excluded_exercises USING btree (user_id, content_type, content_id)",
+            "name": "user_excluded_exercises_user_id_content_type_content_id_key"
+          }
+        ]
+      },
+      "public.user_exercise_prefs": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('user_exercise_prefs_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "exercise_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 3,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "chosen_exercise_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 4,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "FOREIGN KEY (chosen_exercise_id) REFERENCES exercises(id) ON DELETE CASCADE",
+            "name": "user_exercise_prefs_chosen_exercise_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "FOREIGN KEY (exercise_id) REFERENCES exercises(id) ON DELETE CASCADE",
+            "name": "user_exercise_prefs_exercise_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "user_exercise_prefs_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "UNIQUE (user_id, exercise_id)",
+            "name": "user_exercise_prefs_user_id_exercise_id_key",
+            "type": "unique"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "user_exercise_prefs_user_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE INDEX idx_user_exercise_prefs_exercise ON public.user_exercise_prefs USING btree (user_id, exercise_id)",
+            "name": "idx_user_exercise_prefs_exercise"
+          },
+          {
+            "definition": "CREATE INDEX idx_user_exercise_prefs_user ON public.user_exercise_prefs USING btree (user_id)",
+            "name": "idx_user_exercise_prefs_user"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_exercise_prefs_pkey ON public.user_exercise_prefs USING btree (id)",
+            "name": "user_exercise_prefs_pkey"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_exercise_prefs_user_id_exercise_id_key ON public.user_exercise_prefs USING btree (user_id, exercise_id)",
+            "name": "user_exercise_prefs_user_id_exercise_id_key"
+          }
+        ]
+      },
+      "public.user_pillar_levels": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('user_pillar_levels_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": null,
+            "name": "pillar",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 15,
+            "default": "'beginner'::character varying",
+            "name": "level",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 20,
+            "default": "'inferred'::character varying",
+            "name": "source",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "computed_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "updated_at",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 7,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 8,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "CHECK (((level)::text = ANY ((ARRAY['beginner'::character varying, 'intermediate'::character varying, 'advanced'::character varying])::text[])))",
+            "name": "user_pillar_levels_level_check",
+            "type": "check"
+          },
+          {
+            "definition": "CHECK (((pillar)::text = ANY ((ARRAY['strength'::character varying, 'yoga'::character varying, 'breathwork'::character varying])::text[])))",
+            "name": "user_pillar_levels_pillar_check",
+            "type": "check"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "user_pillar_levels_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "CHECK (((source)::text = ANY ((ARRAY['declared'::character varying, 'inferred'::character varying, 'manual_override'::character varying])::text[])))",
+            "name": "user_pillar_levels_source_check",
+            "type": "check"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "user_pillar_levels_user_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "UNIQUE (user_id, pillar)",
+            "name": "user_pillar_levels_user_id_pillar_key",
+            "type": "unique"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE INDEX idx_upl_user ON public.user_pillar_levels USING btree (user_id)",
+            "name": "idx_upl_user"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_pillar_levels_pkey ON public.user_pillar_levels USING btree (id)",
+            "name": "user_pillar_levels_pkey"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_pillar_levels_user_id_pillar_key ON public.user_pillar_levels USING btree (user_id, pillar)",
+            "name": "user_pillar_levels_user_id_pillar_key"
+          }
+        ]
+      },
+      "public.user_routine_exercises": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('user_routine_exercises_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "routine_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "exercise_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 3,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "position",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 4,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "3",
+            "name": "target_sets",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 5,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "notes",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "text",
+            "udtName": "text"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "FOREIGN KEY (exercise_id) REFERENCES exercises(id)",
+            "name": "user_routine_exercises_exercise_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "user_routine_exercises_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (routine_id) REFERENCES user_routines(id) ON DELETE CASCADE",
+            "name": "user_routine_exercises_routine_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "UNIQUE (routine_id, \"position\")",
+            "name": "user_routine_exercises_routine_id_position_key",
+            "type": "unique"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE INDEX idx_routine_exercises_routine ON public.user_routine_exercises USING btree (routine_id)",
+            "name": "idx_routine_exercises_routine"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_routine_exercises_pkey ON public.user_routine_exercises USING btree (id)",
+            "name": "user_routine_exercises_pkey"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_routine_exercises_routine_id_position_key ON public.user_routine_exercises USING btree (routine_id, \"position\")",
+            "name": "user_routine_exercises_routine_id_position_key"
+          }
+        ]
+      },
+      "public.user_routines": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('user_routines_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 100,
+            "default": null,
+            "name": "name",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "description",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "updated_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "user_routines_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "user_routines_user_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE INDEX idx_user_routines_user ON public.user_routines USING btree (user_id)",
+            "name": "idx_user_routines_user"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_routines_pkey ON public.user_routines USING btree (id)",
+            "name": "user_routines_pkey"
+          }
+        ]
+      },
+      "public.user_settings": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('user_settings_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "90",
+            "name": "rest_timer_duration",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 3,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "true",
+            "name": "rest_timer_enabled",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "boolean",
+            "udtName": "bool"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "true",
+            "name": "rest_timer_auto_start",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "boolean",
+            "udtName": "bool"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 6,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "updated_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 7,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "user_settings_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id)",
+            "name": "user_settings_user_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "UNIQUE (user_id)",
+            "name": "user_settings_user_id_key",
+            "type": "unique"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX user_settings_pkey ON public.user_settings USING btree (id)",
+            "name": "user_settings_pkey"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_settings_user_id_key ON public.user_settings USING btree (user_id)",
+            "name": "user_settings_user_id_key"
+          }
+        ]
+      },
+      "public.user_slot_prefs": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('user_slot_prefs_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "user_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "slot_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 3,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "workout_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 4,
+            "type": "integer",
+            "udtName": "int4"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "user_slot_prefs_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (slot_id) REFERENCES workout_slots(id)",
+            "name": "user_slot_prefs_slot_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+            "name": "user_slot_prefs_user_id_fkey",
+            "type": "foreign_key"
+          },
+          {
+            "definition": "UNIQUE (user_id, slot_id)",
+            "name": "user_slot_prefs_user_id_slot_id_key",
+            "type": "unique"
+          },
+          {
+            "definition": "FOREIGN KEY (workout_id) REFERENCES workouts(id)",
+            "name": "user_slot_prefs_workout_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE INDEX idx_user_slot_prefs_slot_id ON public.user_slot_prefs USING btree (slot_id)",
+            "name": "idx_user_slot_prefs_slot_id"
+          },
+          {
+            "definition": "CREATE INDEX idx_user_slot_prefs_user_id ON public.user_slot_prefs USING btree (user_id)",
+            "name": "idx_user_slot_prefs_user_id"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_slot_prefs_pkey ON public.user_slot_prefs USING btree (id)",
+            "name": "user_slot_prefs_pkey"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX user_slot_prefs_user_id_slot_id_key ON public.user_slot_prefs USING btree (user_id, slot_id)",
+            "name": "user_slot_prefs_user_id_slot_id_key"
+          }
+        ]
+      },
+      "public.users": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('users_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 255,
+            "default": null,
+            "name": "email",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 2,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 255,
+            "default": null,
+            "name": "password_hash",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": 255,
+            "default": null,
+            "name": "name",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "height_cm",
+            "nullable": true,
+            "numericPrecision": 5,
+            "numericScale": 1,
+            "position": 6,
+            "type": "numeric",
+            "udtName": "numeric"
+          },
+          {
+            "characterMaximumLength": 10,
+            "default": "'metric'::character varying",
+            "name": "unit_system",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 7,
+            "type": "character varying",
+            "udtName": "varchar"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "UNIQUE (email)",
+            "name": "users_email_key",
+            "type": "unique"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "users_pkey",
+            "type": "primary_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX users_email_key ON public.users USING btree (email)",
+            "name": "users_email_key"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)",
+            "name": "users_pkey"
+          }
+        ]
+      },
+      "public.workout_slots": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('workout_slots_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "day_of_week",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 2,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 100,
+            "default": null,
+            "name": "label",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "workout_id",
+            "nullable": true,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 4,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 30,
+            "default": "'main'::character varying",
+            "name": "phase",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 5,
+            "type": "character varying",
+            "udtName": "varchar"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "CHECK (((day_of_week >= 0) AND (day_of_week <= 6)))",
+            "name": "workout_slots_day_of_week_check",
+            "type": "check"
+          },
+          {
+            "definition": "UNIQUE (day_of_week, phase)",
+            "name": "workout_slots_day_phase_key",
+            "type": "unique"
+          },
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "workout_slots_pkey",
+            "type": "primary_key"
+          },
+          {
+            "definition": "FOREIGN KEY (workout_id) REFERENCES workouts(id)",
+            "name": "workout_slots_workout_id_fkey",
+            "type": "foreign_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE INDEX idx_workout_slots_day_phase ON public.workout_slots USING btree (day_of_week, phase)",
+            "name": "idx_workout_slots_day_phase"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX workout_slots_day_phase_key ON public.workout_slots USING btree (day_of_week, phase)",
+            "name": "workout_slots_day_phase_key"
+          },
+          {
+            "definition": "CREATE UNIQUE INDEX workout_slots_pkey ON public.workout_slots USING btree (id)",
+            "name": "workout_slots_pkey"
+          }
+        ]
+      },
+      "public.workouts": {
+        "columns": [
+          {
+            "characterMaximumLength": null,
+            "default": "nextval('workouts_id_seq'::regclass)",
+            "name": "id",
+            "nullable": false,
+            "numericPrecision": 32,
+            "numericScale": 0,
+            "position": 1,
+            "type": "integer",
+            "udtName": "int4"
+          },
+          {
+            "characterMaximumLength": 255,
+            "default": null,
+            "name": "name",
+            "nullable": false,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 2,
+            "type": "character varying",
+            "udtName": "varchar"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": null,
+            "name": "description",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 3,
+            "type": "text",
+            "udtName": "text"
+          },
+          {
+            "characterMaximumLength": null,
+            "default": "now()",
+            "name": "created_at",
+            "nullable": true,
+            "numericPrecision": null,
+            "numericScale": null,
+            "position": 4,
+            "type": "timestamp with time zone",
+            "udtName": "timestamptz"
+          }
+        ],
+        "constraints": [
+          {
+            "definition": "PRIMARY KEY (id)",
+            "name": "workouts_pkey",
+            "type": "primary_key"
+          }
+        ],
+        "indexes": [
+          {
+            "definition": "CREATE UNIQUE INDEX workouts_pkey ON public.workouts USING btree (id)",
+            "name": "workouts_pkey"
+          }
+        ]
+      }
+    },
+    "triggers": []
+  },
+  "snapshotVersion": "1.0"
+}

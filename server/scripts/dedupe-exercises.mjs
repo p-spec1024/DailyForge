@@ -1,5 +1,8 @@
 import 'dotenv/config';
 import pg from 'pg';
+import { assertSafeMutation } from './lib/prod-guard.mjs';
+
+assertSafeMutation();
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,

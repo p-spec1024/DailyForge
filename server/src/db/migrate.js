@@ -1,4 +1,7 @@
 import { pool } from './pool.js';
+import { assertSafeMutation } from '../../scripts/lib/prod-guard.mjs';
+
+assertSafeMutation();
 
 const schema = `
 CREATE TABLE IF NOT EXISTS users (

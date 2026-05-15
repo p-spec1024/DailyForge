@@ -7,6 +7,9 @@
  */
 import 'dotenv/config';
 import { pool } from '../src/db/pool.js';
+import { assertSafeMutation } from './lib/prod-guard.mjs';
+
+assertSafeMutation();
 
 // Default hold times per practice type (seconds)
 const HOLD_DEFAULTS = {

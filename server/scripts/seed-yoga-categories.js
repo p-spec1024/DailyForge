@@ -5,6 +5,9 @@
  * Categories: warmup, standing, peak, floor, cooldown, savasana, flow
  */
 import { pool } from '../src/db/pool.js';
+import { assertSafeMutation } from './lib/prod-guard.mjs';
+
+assertSafeMutation();
 
 // Keywords mapped to categories (checked against lowercase pose name)
 const CATEGORY_RULES = [

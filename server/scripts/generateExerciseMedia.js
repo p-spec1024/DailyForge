@@ -9,9 +9,12 @@
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { assertSafeMutation } from './lib/prod-guard.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, '..', '.env') });
+
+assertSafeMutation();
 import pg from 'pg';
 import { PROMPT_TEMPLATES } from '../src/utils/mediaGenerator.js';
 

@@ -15,6 +15,9 @@ import { pool } from '../src/db/pool.js';
 import { readFile } from 'fs/promises';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { assertSafeMutation } from './lib/prod-guard.mjs';
+
+assertSafeMutation();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MEDIA_DIR = resolve(__dirname, '..', 'media');

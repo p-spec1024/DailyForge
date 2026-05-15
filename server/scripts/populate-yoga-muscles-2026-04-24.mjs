@@ -7,6 +7,9 @@
 // Journal pose library; see SPRINT_TRACKER.md S10-T5b followup notes.
 import 'dotenv/config';
 import { pool } from '../src/db/pool.js';
+import { assertSafeMutation } from './lib/prod-guard.mjs';
+
+assertSafeMutation();
 
 const UPDATES = [
   // 13 dirty-pose populates (Group 3 keepers + Group 4 keepers)

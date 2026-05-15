@@ -1,5 +1,8 @@
 import 'dotenv/config';
 import { pool } from '../pool.js';
+import { assertSafeMutation } from '../../../scripts/lib/prod-guard.mjs';
+
+assertSafeMutation();
 
 // ---------------------------------------------------------------------------
 // S11-T3 — Focus-area data model
