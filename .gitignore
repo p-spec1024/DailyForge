@@ -4,4 +4,7 @@ dist
 media/
 .claude/
 .claude/settings.local.json
-Trackers/.claude/ 
+Trackers/.claude/
+
+# Review packets (one-shot artifacts, not durable docs)
+/review-packet/
