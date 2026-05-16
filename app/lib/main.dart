@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import 'config/theme.dart';
 import 'config/routes.dart';
 import 'providers/auth_provider.dart';
@@ -27,9 +28,34 @@ import 'services/auth_service.dart';
 import 'services/onboarding_service.dart';
 import 'services/storage_service.dart';
 
-void main() {
+// S15-T2: Sentry build-time configuration. Empty DSN means no init,
+// no network calls — dev builds behave identically to pre-S15-T2.
+const String _sentryDsn = String.fromEnvironment('SENTRY_DSN', defaultValue: '');
+const String _appEnv = String.fromEnvironment('APP_ENV', defaultValue: 'dev');
+const String _sentryRelease = String.fromEnvironment('SENTRY_RELEASE', defaultValue: '');
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const DailyForgeApp());
+
+  if (_sentryDsn.isEmpty) {
+    runApp(const DailyForgeApp());
+    return;
+  }
+
+  await SentryFlutter.init(
+    (options) {
+      options.dsn = _sentryDsn;
+      options.environment = _appEnv;
+      // PII minimization: no request headers, no IP. user.id only,
+      // set explicitly by AuthProvider on auth state transitions.
+      options.sendDefaultPii = false;
+      if (_sentryRelease.isNotEmpty) {
+        options.release = _sentryRelease;
+      }
+      options.tracesSampleRate = 0.2;
+    },
+    appRunner: () => runApp(const DailyForgeApp()),
+  );
 }
 
 class DailyForgeApp extends StatefulWidget {
