@@ -76,7 +76,7 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 | # | Finding | Source | Destination | Status |
 |---|---|---|---|---|
 | 36 | ImageKit prod/test separation unknown | §6 P0 | **S15-T7** ImageKit audit | Pending |
-| 37 | No Sentry/crash reporting | §6 P0 | **S15-T2 + S15-T3** Sentry Flutter + Node | Shipped partial [2026-05-16, 0102a8e — T2 Flutter only; T3 Node pending] |
+| 37 | No Sentry/crash reporting | §6 P0 | **S15-T2 + S15-T3** Sentry Flutter + Node | Shipped [2026-05-16, 0102a8e (T2 Flutter) + 3b083f0 (T3 Node)] |
 | 38 | FS #198 cross-pillar 4-phase fallback | §6 P1 | **S17-T3** | Pending |
 | 39 | No CI pipeline | §6 P1 | **S15-T5** CI pipeline | Pending |
 
