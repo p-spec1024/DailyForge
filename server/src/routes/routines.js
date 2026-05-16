@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 
 const MAX_EXERCISES = 50;
 
@@ -15,7 +15,7 @@ function validateExerciseIds(exercises) {
 }
 
 const router = Router();
-router.use(authenticate);
+router.use(...authChain);
 
 // POST /api/routines — Save new routine
 router.post('/', async (req, res, next) => {

@@ -24,7 +24,7 @@
 
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 import {
   fmtDate,
   calculateStreak,
@@ -32,7 +32,7 @@ import {
 } from '../services/milestones.js';
 
 const router = Router();
-router.use(authenticate);
+router.use(...authChain);
 
 // Fallbacks when a user hasn't done enough sessions of a pillar to form a
 // median. Matches the S10-T5c-b spec (strength 45 / yoga 20 / breath 10).

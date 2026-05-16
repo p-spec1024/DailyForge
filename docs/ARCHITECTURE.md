@@ -665,9 +665,19 @@ The `recompute_user_pillar_level` PG function is **not** triggered from the mult
 
 ## 8. Observability
 
-_S15-T2 stub — S15-T3 will expand this section once server-side Sentry lands._
+Sentry is the single vendor across the stack. Flutter side shipped in S15-T2 (May 16, 2026); Node side in S15-T3 (May 16, 2026). Two separate Sentry projects under the same org (`dailyforge-3i`): `dailyforge-flutter` and `dailyforge-node`. Separate projects per runtime keeps quota, release tracking, and alert rules independent.
 
-Crash reporting on the Flutter side ships in S15-T2 (May 16, 2026). `SentryFlutter.init` is wired in `app/lib/main.dart` and runs **only** when `--dart-define=SENTRY_DSN=...` is passed at build time — dev / emulator builds without the flag skip Sentry entirely (no init, no network calls, no overhead). `options.sendDefaultPii = false` is set explicitly, so the SDK never attaches email, request headers, or client IP. `AuthProvider` sets / clears the Sentry scope on all five user-state transitions (`login`, `register`, `initialize` for app-restart-with-stored-token, `logout`, `_handleUnauthorized` for the 401 fallback) — only `user.id` is ever passed to `SentryUser`. Performance traces sample at 20% (`tracesSampleRate = 0.2`).
+Both halves share the same discipline:
+
+- **DSN-gated init.** Empty / unset DSN = full no-op, zero network calls, zero overhead. Dev builds skip Sentry by default.
+- **PII off at the SDK level.** `sendDefaultPii: false` on both sides. The SDK never attaches email, request headers, or client IP.
+- **Org-level IP storage off.** The Sentry web console toggle **"Prevent Storing of IP Addresses"** is ON for the whole org. This is the real geographic-PII gate — `sendDefaultPii: false` alone is not enough, because Sentry derives geography server-side from the request IP unless the org toggle is set. Both layers together = belt and braces. **Do not turn the org toggle off** without an explicit privacy review.
+- **User scope is id-only.** Only `user.id` (as a string) is ever attached. No email, no username.
+- **Performance traces at 20%.** `tracesSampleRate: 0.2` on both sides. Cheap calibration; revisit after first month of beta data.
+
+### 8.1. Client (Flutter)
+
+`SentryFlutter.init` is wired in `app/lib/main.dart` and runs **only** when `--dart-define=SENTRY_DSN=...` is passed at build time. `AuthProvider` sets / clears the Sentry scope on all five user-state transitions (`login`, `register`, `initialize` for app-restart-with-stored-token, `logout`, `_handleUnauthorized` for the 401 fallback) — only `user.id` is ever passed to `SentryUser`.
 
 Build flags for a QA / production build:
 
@@ -681,7 +691,44 @@ flutter build apk \
 
 Symbol / source-map upload is manual via `app/scripts/upload-sentry-symbols.sh` (requires `sentry-cli` + `SENTRY_AUTH_TOKEN` / `SENTRY_ORG` / `SENTRY_PROJECT` env vars). CI integration is queued for S15-T5.
 
-Server-side Sentry, performance traces on engine routes, and a unified observability dashboard land in **S15-T3** — this section will be rewritten then to cover both halves of the stack.
+### 8.2. Server (Node)
+
+`@sentry/node` (v10+) is wired via the Sentry v8+ Express API — `Sentry.expressIntegration()` declared in `init()` plus `Sentry.setupExpressErrorHandler(app)` mounted inside `createApp()`. The deprecated v7 `Sentry.Handlers.*` middleware is not used.
+
+**Init runs via `node --import`,** not by a top-of-file call. The npm scripts in `server/package.json` reference `--import ./src/observability/instrument.js`, which loads `initSentry()` before any Express module imports. This is required: under ESM, `import` statements are hoisted, so an in-file call to `initSentry()` would run after Express had already loaded — too late for Sentry's auto-instrumentation to patch the `http` / `express` modules.
+
+```
+server/
+├── package.json                          # dev/start scripts use --import
+└── src/
+    ├── observability/
+    │   ├── instrument.js                 # node --import entry: calls initSentry()
+    │   └── sentry.js                     # initSentry() + isSentryEnabled()
+    └── middleware/
+        ├── auth.js                       # exports authChain = [authenticate, sentryUser]
+        └── sentryUser.js                 # Sentry.setUser({ id: String(req.user.id) })
+```
+
+**User scope is attached via the `authChain` bundle.** `server/src/middleware/auth.js` exports `authChain = [authenticate, sentryUser]`. Every auth-gated router uses `router.use(...authChain)` (or `(...authChain, handler)` for per-route gating). `sentryUser` is a no-op when `req.user` is absent, so the only paths that touch Sentry user scope are the auth-gated ones. The login / register endpoints in `routes/auth.js` are intentionally unauthenticated and do not run `sentryUser`.
+
+**Error capture.** `Sentry.setupExpressErrorHandler(app)` mounts AFTER all route mounts and BEFORE the project `errorHandler`. Express convention: error handlers run in declaration order; Sentry's must see the error before the project handler responds. The mount is gated on `isSentryEnabled()` so dev (no DSN) skips it entirely.
+
+**Performance tracing.** Sentry's Express integration auto-instruments routes — no per-handler wrapping needed. The three engine routes (`POST /api/sessions/suggest`, `GET /api/sessions/last`, `POST /api/sessions/save-as-routine`) are sampled at the same 20% rate as everything else; they're not specially boosted because route-level metric drilldown in the Sentry dashboard is per-route anyway.
+
+**Run with Sentry locally.** Add `SENTRY_DSN=https://<key>@o<org>.ingest.sentry.io/<project>` to `server/.env` (don't commit `.env`; `.env.example` carries the empty form). Then `npm run dev` from `server/` — the `--import ./src/observability/instrument.js` flag in the `dev` script will init Sentry before Express loads.
+
+**Trap 1 — dotenv ordering.** `instrument.js` must call `import 'dotenv/config'` *before* `import { initSentry } from './sentry.js'`. The `--import` chain runs ahead of `src/index.js` (which is where `config/env.js` would normally load dotenv), so without an explicit dotenv import inside `instrument.js`, `process.env.SENTRY_DSN` is empty at init time and the SDK silently no-ops. Failure mode is silent — no error, no log. Verified during S15-T3 deliberate-error testing.
+
+**Trap 2 — per-request user scope.** `sentryUser` middleware uses `Sentry.getIsolationScope().setUser({...})`, not the shorthand `Sentry.setUser({...})`. Both work under `expressIntegration()` today because Sentry's OTel-AsyncLocalStorage plumbing gives each request its own current scope. But pinning to the isolation scope makes the per-request boundary explicit at the call site — protects against future code paths that bypass the OTel context (workers, queue consumers, nested `Sentry.withScope()` calls in route handlers). Without this guard, user attribution could leak across concurrent requests — a real PII boundary, not a cosmetic one.
+
+Release tracking reads `process.env.npm_package_version` when run via `npm`, falling back to a `package.json` read when invoked with bare `node`. Environment tag comes from `NODE_ENV`.
+
+### 8.3. Known gaps
+
+- **Sentry sampling calibration.** `tracesSampleRate: 0.2` is a starting guess. Revisit after first month of beta data — `FUTURE_SCOPE.md` candidate flagged in S15-T3 §9.
+- **Structured logging.** `console.error` calls in route handlers remain as local-dev aids; Sentry captures uncaught errors but local-dev logs are still ad-hoc. Logger replacement (winston / pino) is out-of-scope for S15 — possibly S17.
+- **Source maps for Node.** Not needed — Node does not ship minified bundles, so stack traces are already readable.
+- **CI release upload.** Manual today via `sentry-cli`. CI integration for both client and server is queued for S15-T5.
 
 ---
 

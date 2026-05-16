@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 
 const router = Router();
-router.use(authenticate);
+router.use(...authChain);
 
 const MAX_PHOTOS_PER_USER = 50;
 const ALLOWED_VIEWS = new Set(['front', 'side', 'back']);

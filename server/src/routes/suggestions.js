@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 import { getUserUnitSystem } from '../services/users.js';
 import {
   getStrengthSuggestion,
@@ -8,7 +8,7 @@ import {
 } from '../services/suggestions.js';
 
 const router = Router();
-router.use(authenticate);
+router.use(...authChain);
 
 const MAX_BATCH_IDS = 50;
 

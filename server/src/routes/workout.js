@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 import { incrementSwap } from '../services/swapCounter.js';
 import { rankAlternatives } from '../services/substitutionLadder.js';
 
 const router = Router();
-router.use(authenticate);
+router.use(...authChain);
 
 const PHASE_ORDER = {
   opening_breathwork: 1,
@@ -342,7 +342,7 @@ router.put('/slot/:exerciseId/reset', async (req, res, next) => {
 });
 
 // PUT /api/workout/exercise-pref — save a generic exercise preference (yoga/breathwork swaps)
-router.put('/exercise-pref', authenticate, async (req, res, next) => {
+router.put('/exercise-pref', async (req, res, next) => {
   try {
     const exerciseId = parseInt(req.body.exercise_id, 10);
     const chosenId = parseInt(req.body.chosen_exercise_id, 10);

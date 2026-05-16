@@ -21,7 +21,7 @@
 // Design doc: docs/sprints/S10-T5-DESIGN.md
 
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 import {
   getMuscleVolumes,
   getFlexibility,
@@ -30,7 +30,7 @@ import {
 } from '../services/bodyMapService.js';
 
 const router = Router();
-router.use(authenticate);
+router.use(...authChain);
 
 router.get('/muscle-volumes', async (req, res, next) => {
   try {

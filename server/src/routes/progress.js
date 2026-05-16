@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 import {
   getExerciseHistory,
   getChartData,
@@ -7,7 +7,7 @@ import {
 } from '../services/progressService.js';
 
 const router = Router();
-router.use(authenticate);
+router.use(...authChain);
 
 function parseIntParam(v) {
   const n = parseInt(v, 10);

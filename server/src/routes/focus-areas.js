@@ -9,7 +9,7 @@
 
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 import {
   getAvailableDurations,
   BRACKET_TABLE,
@@ -30,7 +30,7 @@ const BRACKET_DISPLAY = {
 
 const VALID_BREATHWORK_LEVELS = new Set(['beginner', 'intermediate', 'advanced']);
 
-router.get('/', authenticate, async (_req, res) => {
+router.get('/', ...authChain, async (_req, res) => {
   try {
     // `focus_type` and `sort_order` are aliased to `type` and `display_order` for
     // client contract stability. Column rename queued for a future schema migration.
@@ -52,7 +52,7 @@ router.get('/', authenticate, async (_req, res) => {
 // Returns the bracket grid the BracketPickerSheet renders for state focuses.
 // Engine output is filtered server-side (Decision #10: hide locked/empty)
 // and enriched with display copy + window bounds from BRACKET_TABLE.
-router.get('/:slug/available-durations', authenticate, async (req, res) => {
+router.get('/:slug/available-durations', ...authChain, async (req, res) => {
   const { slug } = req.params;
   try {
     const focusRow = await pool.query(
@@ -125,7 +125,7 @@ router.get('/:slug/available-durations', authenticate, async (req, res) => {
 // Lightweight history lookup for the body-focus DurationSliderSheet (and the
 // state-focus sheet's pre-fetch path). Returns the user's mode-of-history
 // bracket (state) or duration in minutes (body), null when no history exists.
-router.get('/:slug/suggested-default', authenticate, async (req, res) => {
+router.get('/:slug/suggested-default', ...authChain, async (req, res) => {
   const { slug } = req.params;
   try {
     const focusRow = await pool.query(
