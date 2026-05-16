@@ -663,7 +663,29 @@ The `recompute_user_pillar_level` PG function is **not** triggered from the mult
 
 ---
 
-## 8. Operating model
+## 8. Observability
+
+_S15-T2 stub — S15-T3 will expand this section once server-side Sentry lands._
+
+Crash reporting on the Flutter side ships in S15-T2 (May 16, 2026). `SentryFlutter.init` is wired in `app/lib/main.dart` and runs **only** when `--dart-define=SENTRY_DSN=...` is passed at build time — dev / emulator builds without the flag skip Sentry entirely (no init, no network calls, no overhead). `options.sendDefaultPii = false` is set explicitly, so the SDK never attaches email, request headers, or client IP. `AuthProvider` sets / clears the Sentry scope on all five user-state transitions (`login`, `register`, `initialize` for app-restart-with-stored-token, `logout`, `_handleUnauthorized` for the 401 fallback) — only `user.id` is ever passed to `SentryUser`. Performance traces sample at 20% (`tracesSampleRate = 0.2`).
+
+Build flags for a QA / production build:
+
+```
+flutter build apk \
+  --dart-define=API_BASE_URL=https://api.dailyforge.app/api \
+  --dart-define=SENTRY_DSN=https://<key>@o<org>.ingest.sentry.io/<project> \
+  --dart-define=APP_ENV=production \
+  --dart-define=SENTRY_RELEASE=dailyforge-flutter@1.0.0+1
+```
+
+Symbol / source-map upload is manual via `app/scripts/upload-sentry-symbols.sh` (requires `sentry-cli` + `SENTRY_AUTH_TOKEN` / `SENTRY_ORG` / `SENTRY_PROJECT` env vars). CI integration is queued for S15-T5.
+
+Server-side Sentry, performance traces on engine routes, and a unified observability dashboard land in **S15-T3** — this section will be rewritten then to cover both halves of the stack.
+
+---
+
+## 9. Operating model
 
 DailyForge is built by a solo founder operating with Claude.ai as PM/architect and Claude Code as senior engineer. Specs and architectural decisions are authored in Claude.ai conversations, then handed to Claude Code as downloadable markdown prompts (the prompt that produced this document is a representative example — multi-phase, halt-and-greenlight between phases, explicit drift-flag rules). Claude Code reads the live code, executes, and reports back **without auto-committing**. The founder runs device tests on a physical Android phone before greenlighting commits. The model has shipped 14 sprints (Sprints 1–6 React PWA + Sprints 7–14 Flutter rebuild).
 
@@ -671,17 +693,17 @@ The repository carries the artifacts of this model: sprint-tagged commits, `Trac
 
 ---
 
-## 9. Known debt and deferred work
+## 10. Known debt and deferred work
 
 Pulled from `Trackers/FUTURE_SCOPE.md` (304 lines, FS #1 through #241). Grouped by severity for reviewer triage. FS numbers cited inline.
 
-### 9.1. High priority (blocks broader signups)
+### 10.1. High priority (blocks broader signups)
 
 - **Infrastructure separation.** Single Neon prod DB serves both real use and smoke testing. No dev environment. Need separate dev/staging/prod databases before opening signups beyond the founder. (No specific FS number — described in this doc §4.3 and §4.7.)
 - **FS #198** — Engine cross-pillar phase-substitution fallback. Cross-pillar sessions sometimes emit 4 phases instead of 5 when the muscle-specific pool empties (biceps cooldown drop, S14-T2 AMENDMENT-1). Home page is branded "5-phase" — a 4-phase session is a leaky abstraction. Engine substitution ladder (adjacent muscle → generic restorative → allow warmup duplicate). ~30–50 LOC + smoke assertion.
 - **FS #209** — Neon DB cold-start timeout bump. `ApiService._kRequestTimeout = 15s` is too tight for Neon cold-starts (8–12s warmup is common). Client maps the timeout to `NetworkException → "Check your connection"` which misleads users. Either bump to 30s for engine endpoints or warm via `/api/health` at app boot.
 
-### 9.2. Medium priority
+### 10.2. Medium priority
 
 - **FS #160** — Engine architecture extraction. 1791 LOC in one file is the load-bearing service of the entire product. Proposed structure (per the FS entry): `server/src/services/suggestion-engine/` directory with `index.js`, `constants.js`, `helpers.js`, `pickers.js`, `item-formatters.js`, and `recipes/{cross-pillar,strength-only,yoga-only,state-focus,available-durations}.js`. See §4.4.8 for details. FS entry text says "~1140 lines"; actual is 1791 — the entry's size estimate is stale but the proposed structure stands. Best done alongside FS #166 (typed-error refactor).
 - **FS #166** — Engine `RangeError`-by-string-match → typed errors. The route mapper at `server/src/routes/sessions.js:66-74` matches substrings of engine throw messages to stable codes. Brittle — silently breaks if the engine's throw text changes.
@@ -694,7 +716,7 @@ Pulled from `Trackers/FUTURE_SCOPE.md` (304 lines, FS #1 through #241). Grouped 
 - **FS #215** — Coerce `req.user.id` to int at the auth-middleware boundary. Several routes coerce locally; should be one place.
 - **FS #228** — `PillarSessionException` sealed parent for the launcher error ladder.
 
-### 9.3. Low priority
+### 10.3. Low priority
 
 - **FS #130** — `pg` / `pg-connection-string` SSL deprecation. Informational warning on every `node` run. SSL modes `prefer` / `require` / `verify-ca` will adopt standard libpq semantics in pg v3.0.0. Action when triggered: audit `.env` sslmode, then either pin pg or migrate the connection string to explicit `sslmode=verify-full` or `uselibpqcompat=true&sslmode=require`. Test against Neon Singapore before shipping.
 - **FS #141 / FS #194 / FS #195** — `exercises` table soft-delete + `equipment` column. Engine + adapter currently work around by dropping `is_active` filters and `equipment` fields. Close after a content sprint.
@@ -705,7 +727,7 @@ Pulled from `Trackers/FUTURE_SCOPE.md` (304 lines, FS #1 through #241). Grouped 
 - **FS #233** — `developer.log` over `debugPrint` for release-build observability.
 - **FS #239 / #240 / #241** — Yoga adapter test coverage gaps.
 
-### 9.4. Convention drift / hygiene
+### 10.4. Convention drift / hygiene
 
 - **FS #196** — `ApiConfig.baseUrl` ends in `/api`; endpoint constants must not re-prefix. Document the convention at the top of `app/lib/config/api_config.dart`.
 - **FS #216 / #234** — Dart `catch (e)` → `on Exception catch` sweep.
@@ -718,7 +740,7 @@ Pulled from `Trackers/FUTURE_SCOPE.md` (304 lines, FS #1 through #241). Grouped 
 
 ---
 
-## 10. What's intentionally NOT built yet
+## 11. What's intentionally NOT built yet
 
 Product decisions, not omissions:
 
@@ -731,7 +753,7 @@ Product decisions, not omissions:
 
 ---
 
-## 11. Glossary
+## 12. Glossary
 
 - **Approach 5** — Post-Sprint-11 strategic pivot (Apr 26, 2026) from "5-phase session as flagship daily experience" to "plan-first home with cross-pillar focus areas." Source: `Trackers/PRE_SPRINT_11_PLANNING.md`.
 - **Body focus** — One of 12 muscle-targeted focuses (biceps, chest, hamstrings, full_body, mobility, etc.). Body focuses require a `time_budget_min` parameter. State focuses are hidden from body-only entry points.
@@ -751,5 +773,5 @@ Product decisions, not omissions:
 > Notes for future regenerations:
 >
 > - This document refers to `Trackers/PRE_SPRINT_11_PLANNING.md` and `Trackers/_archive/S12-suggestion-engine-spec.md` for strategic / contractual material. If either file moves, update the link.
-> - Section 4.4 covers an engine of 1791 LOC. When that file is extracted (see §9.2), this section should be rewritten with the new module layout.
+> - Section 4.4 covers an engine of 1791 LOC. When that file is extracted (see §10.2), this section should be rewritten with the new module layout.
 > - The `// review:` markers in this document are honest uncertainty flags — they appear where the original prompt referenced details I could not verify against the code. They should be resolved or rephrased on the next regeneration, not silently dropped.

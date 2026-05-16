@@ -400,7 +400,7 @@ After Sprint 14 close, dedicated stabilization-prep work before Sprint 15 kicks 
 | # | Ticket | Status | Branch | Smoke | Commit |
 |---|---|---|---|---|---|
 | 1 | Environment separation (Neon staging + prod guards + API_BASE_URL dart-define) | ✅ SHIPPED May 16, 2026 | `s15-t1` | 3534 / 9 | feat `3dcd09d` + chore (this) |
-| 2 | Sentry — Flutter integration | ⏳ NOT STARTED | `s15-t2` (TBD) | — | — |
+| 2 | Sentry — Flutter integration | ✅ SHIPPED May 16, 2026 | `s15-t2` | — | feat `0102a8e` + chore (this) |
 | 3 | Sentry — Node integration | ⏳ NOT STARTED | `s15-t3` (TBD) | — | — |
 | 4 | Suggestion engine extraction (FS #160) — behavior-preserving | ⏳ NOT STARTED | `s15-t4` (TBD) | — | — |
 | 5 | CI pipeline (GitHub Actions) + root `package.json` cleanup | ⏳ NOT STARTED | `s15-t5` (TBD) | — | — |
