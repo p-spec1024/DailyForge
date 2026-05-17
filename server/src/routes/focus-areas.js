@@ -13,7 +13,7 @@ import { authChain } from '../middleware/auth.js';
 import {
   getAvailableDurations,
   BRACKET_TABLE,
-} from '../services/suggestionEngine.js';
+} from '../services/suggestion-engine/index.js';
 
 const router = Router();
 

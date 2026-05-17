@@ -46,7 +46,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { authChain } from '../middleware/auth.js';
-import { generateSession } from '../services/suggestionEngine.js';
+import { generateSession } from '../services/suggestion-engine/index.js';
 import { formatLastSession } from '../services/sessionFormatter.js';
 
 const VALID_ENTRY_POINTS = new Set(['home', 'strength_tab', 'yoga_tab', 'breathwork_tab']);

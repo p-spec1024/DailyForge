@@ -15,7 +15,7 @@ import {
   checkRecencyOverlap,
   BRACKET_TABLE,
   NotImplementedError,
-} from '../src/services/suggestionEngine.js';
+} from '../src/services/suggestion-engine/index.js';
 import { incrementSwap, setPromptState } from '../src/services/swapCounter.js';
 import { rankAlternatives } from '../src/services/substitutionLadder.js';
 import jwt from 'jsonwebtoken';
