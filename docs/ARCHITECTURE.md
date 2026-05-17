@@ -307,6 +307,25 @@ The sentinel pattern is the project's standing rule on smoke cleanup (Project In
 
 Pass-count drift between runs and fixture leak on mid-block exceptions are open items at FUTURE_SCOPE #217 and #218 respectively.
 
+### 4.8. Server tests
+
+`server/test/` holds `node:test`-driven unit-level tests, spawned via `supertest` against an in-process `createApp()` instance — request-level coverage that runs in CI on every push and PR. Distinct from §4.7's smoke harness, which is integration-level: smoke writes to staging Neon, exercises the full engine + DB roundtrip, and is invoked manually (not in CI).
+
+```
+server/test/
+├── README.md              — quick-start + conventions
+├── helpers/
+│   ├── app-factory.js     — buildTestApp() wraps createApp()
+│   └── jwt-mint.js        — mintTestJwt() + bearerHeader() for auth-gated routes
+└── *.test.js              — flat layout until file count > ~15
+```
+
+Invoked via `npm test -w server`, which runs `node --test --env-file-if-exists=.env test/**/*.test.js`. The `--env-file-if-exists` flag makes `.env` optional — local dev auto-loads it; CI injects dummy `JWT_SECRET` / `DATABASE_URL` via the workflow's `env:` block on the test step. (`server/src/config/env.js` calls `process.exit(1)` if either is unset at import time, hence the need for either a file or injected values.)
+
+Tests at S15-T6 close: 4 smoke tests covering health, missing-token 401, login-validation 400, and authenticate-passthrough via `/api/users/pillar-levels`. S15-T7 adds 7 middleware tests; S16-T3 adds ~9 engine tests. Coverage accretes per-sprint, not by a threshold gate.
+
+Convention: tests at `test/*.test.js` flat; helpers under `test/helpers/`. If a future test writes to DB, use the §4.7 sentinel pattern — never `DELETE WHERE user_id = …`. No DB-touching unit tests exist today.
+
 ---
 
 ## 5. App architecture

@@ -3,7 +3,7 @@
 **Sprint goal:** Production-readiness foundation. Ship the infrastructure, observability, and engine refactor that gate broader invite beta.
 
 **Theme:** Foundation. Not features.
-**Ticket count:** 7
+**Ticket count:** 8
 **Estimated duration:** 4–6 weeks
 **Branch strategy:** Sprint-chained off `main`, single `--no-ff` merge + `sprint-15-close` annotated tag at sprint close (per PI #20).
 **Predecessor:** Sprint 14 close.
@@ -20,8 +20,9 @@ Sprint 15 specifically addresses **the foundation layer** — items that block e
 - Without crash reporting, beta failures are invisible (S15-T2, S15-T3).
 - Without engine extraction, future filter dimensions (equipment, injury) become very risky (S15-T4).
 - Without CI, refactors during S15-S17 risk breaking the app silently (S15-T5).
-- Without proper auth validation, security posture stays weak (S15-T6).
-- Without verified media separation, ImageKit risk is unknown (S15-T7).
+- Without server test infrastructure, every subsequent ticket's tests have nowhere to land (S15-T6).
+- Without proper auth validation, security posture stays weak (S15-T7).
+- Without verified media separation, ImageKit risk is unknown (S15-T8).
 
 Sprint 15 is intentionally infrastructure-heavy. No product features land in this sprint. That is the trade.
 
@@ -36,8 +37,9 @@ Sprint 15 is intentionally infrastructure-heavy. No product features land in thi
 | S15-T3 | Sentry — Node integration | Medium | Server only |
 | S15-T4 | Suggestion engine extraction (FS #160) — behavior-preserving | High | Server only |
 | S15-T5 | CI pipeline (GitHub Actions) + root `package.json` cleanup | Low | Both |
-| S15-T6 | Auth middleware integer-id validation + route handler simplification | Medium | Server only |
-| S15-T7 | ImageKit prod/test separation audit + remediation | Low (probably) | Server only |
+| S15-T6 | Server test infrastructure (`node:test` + supertest) | Low | Server only |
+| S15-T7 | Auth middleware integer-id validation + route handler simplification | Medium | Server only |
+| S15-T8 | ImageKit prod/test separation audit + remediation | Low (probably) | Server only |
 
 ---
 
@@ -398,7 +400,21 @@ Two coupled problems:
 
 ---
 
-## S15-T6 — Auth middleware integer-id validation
+## S15-T6 — Server test infrastructure
+
+**Priority:** Inserted between original T5 and original T6 (now T7). Surfaced during T7 pre-flight on May 17, 2026 — the spec assumed `npm test -w server` would run a real test runner, but pre-flight found no runner, no `server/test/`, and no `test` script. Test-infra promoted to a standalone foundation ticket; T7 (auth) and S16-T3 (engine tests) both need this.
+
+**Estimated time:** 2-3 days
+**Touches:** `server/`, root `package.json`, `.github/workflows/checks.yml`
+**`.5`-suffix risk:** Low.
+
+See `Trackers/S15-T6-spec.md` and `Trackers/S15-T6-AMENDMENT-1.md` for the full spec, acceptance criteria, pre-flight diagnostics, build steps, and test plan.
+
+**One-paragraph summary:** install `node:test` (built-in, no new runner dep) + `supertest` as devDep; create `server/test/` with helpers (`buildTestApp`, `mintTestJwt`, `bearerHeader`) and 4 smoke tests covering health / missing-token 401 / login-validation 400 / authenticate-passthrough 400; replace the `node --check` step in CI with `npm test -w server`. Deliberate-failure sanity check confirms the CI failure path is wired. No DB writes in any test.
+
+---
+
+## S15-T7 — Auth middleware integer-id validation
 
 **Priority:** #6 — security hygiene.
 **Estimated time:** 3-4 days
@@ -461,7 +477,7 @@ Current `authenticate` middleware assigns the decoded JWT payload to `req.user` 
 
 ---
 
-## S15-T7 — ImageKit prod/test separation audit
+## S15-T8 — ImageKit prod/test separation audit
 
 **Priority:** #7 — investigation ticket, potentially small.
 **Estimated time:** Investigation 1 day; remediation (if needed) up to 1 week.
@@ -513,18 +529,19 @@ Branched on outcome — keep investigation phase separate from remediation phase
 
 Sprint 15 is complete when:
 
-1. All 7 tickets shipped, `/review` clean, smoke harness green against staging.
+1. All 8 tickets shipped, `/review` clean, smoke harness green against staging.
 2. Production-prod-mutation accidents are now impossible (S15-T1 guards prevent them).
 3. Production crashes are visible in Sentry (S15-T2 + S15-T3).
 4. Engine refactor preserves byte-identical behavior (S15-T4 baseline).
 5. CI green on `main` (S15-T5).
-6. Malformed JWT rejected at middleware (S15-T6).
-7. ImageKit separation documented and remediated if needed (S15-T7).
-8. `SPRINT_TRACKER.md` updated with all 7 ticket SHAs.
-9. `FUTURE_SCOPE.md` updated with F1-F7 entries from `FUTURE_SCOPE-updates.md`.
-10. `ARCHITECTURE.md` updated to reflect prod/staging split, Sentry integration, engine extraction.
-11. `CHATGPT_REVIEW_TRACEABILITY.md` updated: all S15-T* rows marked `Shipped [date, commit SHA]`.
-12. Sprint-close merge: `--no-ff` to `main` + annotated tag `sprint-15-close`.
+6. Server test infrastructure in place; `npm test -w server` runs in CI (S15-T6).
+7. Malformed JWT rejected at middleware (S15-T7).
+8. ImageKit separation documented and remediated if needed (S15-T8).
+9. `SPRINT_TRACKER.md` updated with all 8 ticket SHAs.
+10. `FUTURE_SCOPE.md` updated with F1-F7 entries from `FUTURE_SCOPE-updates.md`.
+11. `ARCHITECTURE.md` updated to reflect prod/staging split, Sentry integration, engine extraction.
+12. `CHATGPT_REVIEW_TRACEABILITY.md` updated: all S15-T* rows marked `Shipped [date, commit SHA]`.
+13. Sprint-close merge: `--no-ff` to `main` + annotated tag `sprint-15-close`.
 
 ---
 
