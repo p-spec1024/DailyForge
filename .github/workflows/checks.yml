@@ -29,4 +29,9 @@ jobs:
         with:
           node-version: '24'
       - run: npm install
-      - run: node --check server/src/index.js
+      - run: npm test -w server
+        env:
+          # Smoke tests don't use these values, but server/src/config/env.js
+          # process.exit(1)s on missing env at import time. CI has no .env file.
+          JWT_SECRET: ci-test-secret-not-real
+          DATABASE_URL: postgres://ci:ci@localhost/ci_not_used
