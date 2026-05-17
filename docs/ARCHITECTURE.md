@@ -65,7 +65,7 @@ dailyforge/
 │   │   ├── db/                   # pool.js, migrate.js, seeds/
 │   │   ├── middleware/           # auth.js, errorHandler.js
 │   │   ├── routes/               # 20 route files (see docs/API.md)
-│   │   ├── services/             # business logic (suggestionEngine + 9 others)
+│   │   ├── services/             # business logic (suggestion-engine/ tree + 9 others)
 │   │   ├── utils/                # media generation, upload helpers
 │   │   └── index.js              # createApp() + listener
 │   ├── scripts/                  # smoke / preflight / seed / media gen
@@ -155,31 +155,31 @@ The schema lives in **one file**: `server/src/db/migrate.js`. It runs four idemp
 
 ### 4.4. Suggestion engine
 
-The engine is `server/src/services/suggestionEngine.js` — **1791 LOC** at S14 close (significantly larger than the architect's pre-flight estimate of ~1140; growth came through S13–S14 with state-focus, special-case recipes, and the recency check). The engine is plain async functions over the `pg` pool — no classes, no DI, no ORM.
+The engine is `server/src/services/suggestion-engine/` — a 12-file modular tree post-S15-T4 (extracted from the 1791-LOC monolith `suggestionEngine.js`; see §4.4.8). Entry point is `suggestion-engine/index.js`. The engine is plain async functions over the `pg` pool — no classes, no DI, no ORM.
 
 #### 4.4.1. Public API
 
 Exported symbols (`grep '^export'`):
 
 ```js
-// server/src/services/suggestionEngine.js
-export class NotImplementedError extends Error { ... }    // line 34
-export const BRACKET_TABLE = { ... }                       // line 125
-export async function getAvailableDurations(...)           // line 1513
-export async function checkRecencyOverlap(...)             // line 1633
-export async function generateSession({...})               // line 1714
+// server/src/services/suggestion-engine/index.js (post-S15-T4)
+export { NotImplementedError } from './errors.js';
+export { BRACKET_TABLE } from './constants.js';
+export { checkRecencyOverlap } from './recency.js';
+export { getAvailableDurations } from './recipes/available-durations.js';
+export async function generateSession({...})  // defined in index.js
 ```
 
 `generateSession` is the single entry point used by `POST /api/sessions/suggest` and the smoke harness. The other exports support `GET /api/focus-areas/:slug/available-durations` (S13-T5 picker support), the recency-overlap warning helper consumed inside body-focus recipes, and the shared bracket configuration table.
 
 #### 4.4.2. `generateSession` flow
 
-(`suggestionEngine.js:1714-1791`)
+(`suggestion-engine/index.js:69-146` post-S15-T4)
 
-1. **Identity validation** (lines 1716-1724) — `user_id` must be a positive int, `focus_slug` non-empty, `entry_point` in `{home, strength_tab, yoga_tab, breathwork_tab}`. Throws `TypeError` on bad shape.
-2. **Bracket value check** (line 1727) — if `bracket` provided, validate against `BRACKET_TABLE` keys. Throws `RangeError` on garbage. This is the only path producing the `invalid bracket value` substring that the route's mapper picks up.
-3. **Focus resolution** (line 1731) — `resolveFocus(focus_slug)` reads `focus_areas` (`is_active = true` filter; throws on unknown slug).
-4. **Strength-tab exclusion** for mobility (line 1735) — mobility is hidden from strength_tab; engine asserts the contract as second line of defense and throws `RangeError`.
+1. **Identity validation** (`index.js:71-79`) — `user_id` must be a positive int, `focus_slug` non-empty, `entry_point` in `{home, strength_tab, yoga_tab, breathwork_tab}`. Throws `TypeError` on bad shape.
+2. **Bracket value check** (`index.js:82`) — if `bracket` provided, validate against `BRACKET_TABLE` keys. Throws `RangeError` on garbage. This is the only path producing the `invalid bracket value` substring that the route's mapper picks up.
+3. **Focus resolution** (`index.js:86`) — `resolveFocus(focus_slug)` reads `focus_areas` (`is_active = true` filter; throws on unknown slug).
+4. **Strength-tab exclusion** for mobility (`index.js:90`) — mobility is hidden from strength_tab; engine asserts the contract as second line of defense and throws `RangeError`.
 5. **State-focus path** (line 1742) — focus type `'state'` routes to `generateStateFocus({ userId, focus, bracket })`. Body-only tabs (`strength_tab` / `yoga_tab`) throw before reaching here. Missing `bracket` throws `state focus requires bracket parameter` (the substring the route maps to `state_focus_requires_bracket`).
 6. **Body-focus path** (line 1766) — `time_budget_min` must be a positive int in the entry-point's allowed budget set (`VALID_BUDGETS_BY_ENTRY`). Engine reads `user_pillar_levels` via `resolveLevels(user_id)` and then dispatches by entry point.
 
@@ -217,7 +217,7 @@ Plus helper picks (`pickBookend`, `pickStrength`, `pickStrengthCompound`, `pickY
 The engine remaps the master spec's movement-quality intent (mobility / flexibility / restorative) onto live style data — those movement-quality tokens don't exist in the DB. The remap is centralized at the top of the file:
 
 ```js
-// server/src/services/suggestionEngine.js:52-54
+// server/src/services/suggestion-engine/constants.js:18-20 (post-S15-T4)
 const WARMUP_PRACTICE_STYLES   = ['vinyasa', 'sun_salutation', 'hatha'];
 const MOBILITY_MAIN_STYLES     = ['hatha', 'yin', 'vinyasa'];
 const COOLDOWN_PRACTICE_STYLES = ['restorative', 'yin', 'hatha'];
@@ -239,26 +239,35 @@ Engine reads (but never writes) `user_excluded_exercises` for the user via `load
 
 Engine throws **`TypeError`** for programmer bugs (bad shape; should never reach prod from a real route) and **`RangeError`** for contract violations the route should turn into 400s. The route handler at `server/src/routes/sessions.js:66-74` maps RangeError-message **substrings** to stable error codes (`invalid_bracket`, `state_focus_requires_bracket`, `invalid_focus_entry_combo`, `invalid_time_budget`, or the catchall `unmapped_engine_error`). String-matching is intentional v1; the typed-error refactor is tracked at FUTURE_SCOPE #166.
 
-#### 4.4.8. Architecture-extraction debt (FS #160)
+#### 4.4.8. Architecture-extraction debt (FS #160) — ✅ SHIPPED S15-T4
 
-At 1791 LOC the engine is a single procedural file with constants, helpers, recipe functions, and the public dispatch all interleaved. FUTURE_SCOPE #160 captures the planned extraction. Proposed structure (per the FS entry):
+**Status:** Shipped May 17, 2026 in S15-T4 (feat `9aa95d6`). FS #160 closed. The 1791-LOC monolith was extracted byte-preservingly into the structure below. Smoke 3537/0 with no new failure categories vs the S15-T4 baseline.
+
+**Actual structure** (matches the FS #160 proposal plus a separate `recency.js` for the body-focus T5 helper — 12 files total instead of the proposed 11):
 
 ```
 server/src/services/suggestion-engine/
-  index.js                       — dispatch + re-exports
+  index.js                       — generateSession dispatch + public re-exports
   constants.js                   — BRACKET_TABLE, style sets, picks tables
-  helpers.js                     — compoundFilter, durationsForLevel, level rank
-  pickers.js                     — the 5 picker functions
-  item-formatters.js
+  errors.js                      — NotImplementedError + EngineContractError shell
+  helpers.js                     — pure helpers + data loaders + bracket helpers
+  pickers.js                     — 6 generic body-focus pickers
+  item-formatters.js             — bookendItem, strengthItem, yogaItem
+  recency.js                     — checkRecencyOverlap (T5 body-focus warning)
   recipes/
-    cross-pillar.js
-    strength-only.js
-    yoga-only.js
-    state-focus.js
-    available-durations.js
+    cross-pillar.js              — standard + Mobility + FullBody (~467 LOC, documented exception)
+    strength-only.js             — standard + FullBody
+    yoga-only.js                 — standard + Mobility + FullBody (~310 LOC, documented exception)
+    state-focus.js               — generateStateFocus + state-only pickers
+    available-durations.js       — getAvailableDurations
 ```
 
-Net effect: same logic, easier-to-navigate surface area; per-recipe tests can target individual files; the HTTP layer (`routes/sessions.js`) imports from the index without pulling in the whole module graph. Trigger per the FS entry was Sprint 12 close after T7 ships — that trigger slipped through S13 and S14. Note that the FS entry itself says "~1140 lines"; the file has grown to **1791 LOC** through S13–S14 layered work, so the FS entry's size estimate is stale. The proposed structure is still the right shape; the extraction is just larger than the entry anticipated. Pairs naturally with FS #166 (typed-error refactor) — both are best done in the same pass per FS #166's note.
+**Layout decisions** (per the S15-T4 prompt's drift log):
+- Two recipe files (`cross-pillar.js` 467 LOC, `yoga-only.js` 310 LOC) intentionally exceed the 300-LOC guideline. Both carry top-of-file justification comments. The three internal variants (standard / mobility / full-body) in each are cohesive — they share scaffolding, helpers, and tests; splitting by variant introduces layout asymmetry and breaks domain cohesion for a line-count win. Tracked at FS for revisit if either grows past ~500 LOC.
+- `recency.js` lives at the top level rather than inside `recipes/` because `checkRecencyOverlap` is a body-focus-only public export with non-trivial DB query construction + defensive try/catch, not a recipe.
+- `errors.js` ships `EngineContractError` as a class shell only. Its wiring to existing RangeError throw sites is S16-T2's job (typed-error refactor). The route-level `mapRangeErrorToCode` substring matching at `routes/sessions.js:66-74` remains intact until that lands.
+
+**Net effect:** same logic; the public API surface (`generateSession`, `getAvailableDurations`, `checkRecencyOverlap`, `BRACKET_TABLE`, `NotImplementedError`) is preserved across the three call sites (`routes/sessions.js`, `routes/focus-areas.js`, smoke harness); per-recipe tests can target individual files when test coverage expands (S16-T3); the engine internals are now a clean import DAG (constants → helpers → {pickers, formatters} → recipes → index) with zero cycles. Pairs with FS #166 (typed-error refactor) — best done in the same engine touch.
 
 ### 4.5. Multi-phase sessions (S14)
 
@@ -578,13 +587,13 @@ await context.read<SuggestProvider>().selectBodyFocus(focusSlug, timeBudgetMin: 
 1. Validates `focus_slug` shape (regex `/^[a-z_]{1,40}$/`), `entry_point` (one of 4), `time_budget_min` (5–240), `bracket` (one of 5 if present). 400 with stable codes on failure.
 2. Calls `getFocusBySlug(focus_slug, { requireActive: true })` (line 114) which queries `focus_areas WHERE is_active = true`. 400 `unknown_focus_slug` if missing.
 3. Enforces the body/state contract: body focus requires `time_budget_min`; state focus requires `bracket`.
-4. Calls `generateSession({ user_id, focus_slug, entry_point, time_budget_min, bracket })` (`server/src/services/suggestionEngine.js:1714`).
+4. Calls `generateSession({ user_id, focus_slug, entry_point, time_budget_min, bracket })` (`server/src/services/suggestion-engine/index.js:69`, post-S15-T4).
 5. Stamps `result.metadata.source = 'engine_v1'` and returns 200 JSON.
 6. Catches `RangeError` — maps the message substring to a stable code via `mapRangeErrorToCode` (line 66) and returns 400. Catches any other error → 500 `engine_error`.
 
 ### Step 4. Engine reads from DB, builds the plan
 
-Continuing in `suggestionEngine.js`:
+Continuing in `suggestion-engine/index.js`:
 
 - `resolveFocus(focus_slug)` (line 214) — confirms the focus exists and grabs `focus_type`.
 - Body-focus path dispatches by `entry_point`. For `entry_point = 'home'`, calls `generateCrossPillar({ userId, focus, levels, timeBudget })` (line 483).
@@ -752,7 +761,7 @@ Pulled from `Trackers/FUTURE_SCOPE.md` (304 lines, FS #1 through #241). Grouped 
 
 ### 10.2. Medium priority
 
-- **FS #160** — Engine architecture extraction. 1791 LOC in one file is the load-bearing service of the entire product. Proposed structure (per the FS entry): `server/src/services/suggestion-engine/` directory with `index.js`, `constants.js`, `helpers.js`, `pickers.js`, `item-formatters.js`, and `recipes/{cross-pillar,strength-only,yoga-only,state-focus,available-durations}.js`. See §4.4.8 for details. FS entry text says "~1140 lines"; actual is 1791 — the entry's size estimate is stale but the proposed structure stands. Best done alongside FS #166 (typed-error refactor).
+- **FS #160** — ✅ Engine architecture extraction. **Shipped S15-T4** (May 17, 2026, feat `9aa95d6`). The 1791-LOC monolith now lives as a 12-file modular tree at `server/src/services/suggestion-engine/`. See §4.4.8 for the actual structure and the layout-decision rationale. Originally proposed alongside FS #166 (typed-error refactor); FS #166 remains open and will fold in the engine-touch follow-ups (#255 `fitMainCandidate` cleanup, #256 `MOBILITY_MAIN_STYLES` cleanup, #257 Sentry on recency catch).
 - **FS #166** — Engine `RangeError`-by-string-match → typed errors. The route mapper at `server/src/routes/sessions.js:66-74` matches substrings of engine throw messages to stable codes. Brittle — silently breaks if the engine's throw text changes.
 - **FS #199 / #200** — Engine should emit savasana for yoga sessions, and `metadata.yoga_style` for swap-style filtering.
 - **FS #201** — Body-focus yoga library audit. `hips` is a meaningful yoga concept but is not a seeded body focus slug; engine throws `Unknown or inactive focus_slug: hips`. Likely 50+ yoga poses are invisible to `yoga_tab` queries.
