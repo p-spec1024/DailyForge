@@ -403,7 +403,7 @@ After Sprint 14 close, dedicated stabilization-prep work before Sprint 15 kicks 
 | 2 | Sentry — Flutter integration | ✅ SHIPPED May 16, 2026 | `s15-t2` | — | feat `0102a8e` + chore (this) |
 | 3 | Sentry — Node integration | ✅ SHIPPED May 16, 2026 | `s15-t3` | — | feat `3b083f0` + chore (this) |
 | 4 | Suggestion engine extraction (FS #160) — behavior-preserving | ✅ SHIPPED May 17, 2026 | `s15-t4` | 3537 / 0 | feat `9aa95d6` + chore (this) |
-| 5 | CI pipeline (GitHub Actions) + root `package.json` cleanup | ⏳ NOT STARTED | `s15-t5` (TBD) | — | — |
+| 5 | CI pipeline (GitHub Actions) + root `package.json` cleanup | ✅ SHIPPED May 17, 2026 | `s15-t5` | — | feat `e34eaae` + chore (this); prep `f911d79`, `51267bc` |
 | 6 | Auth middleware integer-id validation + route handler simplification | ⏳ NOT STARTED | `s15-t6` (TBD) | — | — |
 | 7 | ImageKit prod/test separation audit + remediation | ⏳ NOT STARTED | `s15-t7` (TBD) | — | — |
 

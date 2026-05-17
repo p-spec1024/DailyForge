@@ -28,7 +28,7 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 | 1 | Single production database (no staging/dev) | §3.1 | **S15-T1** Environment separation | Shipped [2026-05-16, 3dcd09d] |
 | 2 | Suggestion engine monolithic at 1791 LOC | §3.2 | **S15-T4** Suggestion engine extraction (FS #160) | Shipped [2026-05-17, 9aa95d6] |
 | 3 | Engine error mapping via RangeError substring matching | §3.3 | **S16-T2** Typed engine errors | Pending |
-| 4 | Root `package.json` stale `client` workspace | §3.4 | **S15-T5** CI pipeline (bundled cleanup) | Pending |
+| 4 | Root `package.json` stale `client` workspace | §3.4 | **S15-T5** CI pipeline (bundled cleanup) | Shipped [2026-05-17, e34eaae] |
 | 5 | `ApiConfig` LAN IP fallback `192.168.0.204` | §3.5 | **S15-T1** Environment separation (bundled) | Shipped [2026-05-16, 3dcd09d] |
 | 6 | CORS `origin: true` reflects every origin | §3.6 | **S17-T1** Security hygiene | Pending |
 | 7 | `MultiPhaseSessionProvider` inheritance pattern | §3.7 | **F3** FUTURE_SCOPE (defer until 3rd shape appears) | Deferred |
@@ -78,13 +78,13 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 | 36 | ImageKit prod/test separation unknown | §6 P0 | **S15-T7** ImageKit audit | Pending |
 | 37 | No Sentry/crash reporting | §6 P0 | **S15-T2 + S15-T3** Sentry Flutter + Node | Shipped [2026-05-16, 0102a8e (T2 Flutter) + 3b083f0 (T3 Node)] |
 | 38 | FS #198 cross-pillar 4-phase fallback | §6 P1 | **S17-T3** | Pending |
-| 39 | No CI pipeline | §6 P1 | **S15-T5** CI pipeline | Pending |
+| 39 | No CI pipeline | §6 P1 | **S15-T5** CI pipeline | Shipped [2026-05-17, e34eaae] |
 
 ### §7. Release/tooling
 
 | # | Finding | Source | Destination | Status |
 |---|---|---|---|---|
-| 40 | GitHub Actions CI config | §7 | **S15-T5** (use the provided YAML as starting point) | Pending |
+| 40 | GitHub Actions CI config | §7 | **S15-T5** (use the provided YAML as starting point) | Shipped [2026-05-17, e34eaae] |
 
 ### §8. Security and safety
 
