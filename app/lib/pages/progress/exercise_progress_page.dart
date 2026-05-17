@@ -389,7 +389,7 @@ class _ExerciseProgressPageState extends State<ExerciseProgressPage> {
             getTouchedSpotIndicator: (barData, spotIndexes) {
               return spotIndexes.map((index) {
                 return TouchedSpotIndicatorData(
-                  FlLine(color: AppColors.gold, strokeWidth: 2),
+                  const FlLine(color: AppColors.gold, strokeWidth: 2),
                   FlDotData(
                     show: true,
                     getDotPainter: (spot, percent, bar, index) {

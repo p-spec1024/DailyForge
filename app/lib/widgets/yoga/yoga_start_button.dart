@@ -71,7 +71,7 @@ class YogaStartButton extends StatelessWidget {
                 ? Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      SizedBox(
+                      const SizedBox(
                         width: 14,
                         height: 14,
                         child: CircularProgressIndicator(
@@ -82,7 +82,7 @@ class YogaStartButton extends StatelessWidget {
                       const SizedBox(width: 8),
                       Text(
                         text,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                           color: AppColors.background,
@@ -92,7 +92,7 @@ class YogaStartButton extends StatelessWidget {
                   )
                 : Text(
                     text,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                       color: AppColors.background,
