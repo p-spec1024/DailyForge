@@ -1,5 +1,8 @@
 import 'dotenv/config';
 import { pool } from '../pool.js';
+import { assertSafeMutation } from '../../../scripts/lib/prod-guard.mjs';
+
+assertSafeMutation();
 
 // Complete yoga poses from DailyForge Yoga Library (NotebookLM)
 // Sources: Light on Yoga (Iyengar), Yoga Anatomy (Kaminoff), The Heart of Yoga (Desikachar)

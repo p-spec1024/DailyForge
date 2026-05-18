@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 import { setPromptState } from '../services/swapCounter.js';
 
 const router = Router();
-router.use(authenticate);
+router.use(...authChain);
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 50;

@@ -82,14 +82,14 @@ class _ExerciseHistoryPageState extends State<ExerciseHistoryPage> {
               provider.breathworkExercises.isNotEmpty;
 
           if (!hasAny) {
-            return Center(
+            return const Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(LucideIcons.barChart3,
                       color: AppColors.hintText, size: 64),
-                  const SizedBox(height: 16),
-                  const Text(
+                  SizedBox(height: 16),
+                  Text(
                     'No exercise history yet',
                     style: TextStyle(
                       color: AppColors.primaryText,
@@ -97,8 +97,8 @@ class _ExerciseHistoryPageState extends State<ExerciseHistoryPage> {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
+                  SizedBox(height: 8),
+                  Text(
                     'Complete some workouts to see your progress',
                     style: TextStyle(color: AppColors.hintText),
                   ),

@@ -58,9 +58,9 @@ class YogaPoseDisplay extends StatelessWidget {
               ),
             ),
             alignment: Alignment.center,
-            child: Text(
+            child: const Text(
               '\u{1F9D8}',
-              style: const TextStyle(fontSize: 56),
+              style: TextStyle(fontSize: 56),
             ),
           ),
 

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 import {
   MILESTONES,
   fmtDate,
@@ -9,7 +9,7 @@ import {
 } from '../services/milestones.js';
 
 const router = Router();
-router.use(authenticate);
+router.use(...authChain);
 
 router.get('/', async (req, res, next) => {
   try {

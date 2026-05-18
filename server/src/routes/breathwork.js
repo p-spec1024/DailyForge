@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 import { recalculateBreathwork } from '../services/progressService.js';
 import { getEstimatedDurationSeconds } from '../constants/breathwork-durations.js';
 
@@ -54,7 +54,7 @@ router.get('/techniques/:id', async (req, res, next) => {
 });
 
 // GET /api/breathwork/alternatives — alternative techniques for mid-session swap
-router.get('/alternatives', authenticate, async (req, res, next) => {
+router.get('/alternatives', ...authChain, async (req, res, next) => {
   try {
     const techniqueId = parseInt(req.query.techniqueId, 10);
     const { category } = req.query;
@@ -97,7 +97,7 @@ router.get('/alternatives', authenticate, async (req, res, next) => {
 });
 
 // PUT /api/breathwork/preference — save preferred technique for a session phase
-router.put('/preference', authenticate, async (req, res, next) => {
+router.put('/preference', ...authChain, async (req, res, next) => {
   try {
     const { phase } = req.body;
     const techniqueId = parseInt(req.body.technique_id, 10);
@@ -123,7 +123,7 @@ router.put('/preference', authenticate, async (req, res, next) => {
 });
 
 // GET /api/breathwork/preferences — fetch user's saved breathwork phase preferences
-router.get('/preferences', authenticate, async (req, res, next) => {
+router.get('/preferences', ...authChain, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `SELECT ubp.phase, ubp.technique_id, bt.name AS technique_name
@@ -143,7 +143,7 @@ router.get('/preferences', authenticate, async (req, res, next) => {
 });
 
 // POST /api/breathwork/sessions — log a completed breathwork session
-router.post('/sessions', authenticate, async (req, res, next) => {
+router.post('/sessions', ...authChain, async (req, res, next) => {
   try {
     const { technique_id, duration_seconds, rounds_completed, completed, focus_slug } = req.body;
     const user_id = req.user.id;

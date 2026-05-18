@@ -1,4 +1,7 @@
 import { pool } from '../pool.js';
+import { assertSafeMutation } from '../../../scripts/lib/prod-guard.mjs';
+
+assertSafeMutation();
 
 /*
  * Seed slot_alternatives — 2-3 alternatives per default exercise.

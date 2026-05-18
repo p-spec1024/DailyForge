@@ -25,11 +25,11 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 
 | # | Finding | Source | Destination | Status |
 |---|---|---|---|---|
-| 1 | Single production database (no staging/dev) | §3.1 | **S15-T1** Environment separation | Pending |
-| 2 | Suggestion engine monolithic at 1791 LOC | §3.2 | **S15-T4** Suggestion engine extraction (FS #160) | Pending |
+| 1 | Single production database (no staging/dev) | §3.1 | **S15-T1** Environment separation | Shipped [2026-05-16, 3dcd09d] |
+| 2 | Suggestion engine monolithic at 1791 LOC | §3.2 | **S15-T4** Suggestion engine extraction (FS #160) | Shipped [2026-05-17, 9aa95d6] |
 | 3 | Engine error mapping via RangeError substring matching | §3.3 | **S16-T2** Typed engine errors | Pending |
-| 4 | Root `package.json` stale `client` workspace | §3.4 | **S15-T5** CI pipeline (bundled cleanup) | Pending |
-| 5 | `ApiConfig` LAN IP fallback `192.168.0.204` | §3.5 | **S15-T1** Environment separation (bundled) | Pending |
+| 4 | Root `package.json` stale `client` workspace | §3.4 | **S15-T5** CI pipeline (bundled cleanup) | Shipped [2026-05-17, e34eaae] |
+| 5 | `ApiConfig` LAN IP fallback `192.168.0.204` | §3.5 | **S15-T1** Environment separation (bundled) | Shipped [2026-05-16, 3dcd09d] |
 | 6 | CORS `origin: true` reflects every origin | §3.6 | **S17-T1** Security hygiene | Pending |
 | 7 | `MultiPhaseSessionProvider` inheritance pattern | §3.7 | **F3** FUTURE_SCOPE (defer until 3rd shape appears) | Deferred |
 | 8 | `EmbeddablePlayer` boolean mode → sealed class | §3.8 | **F4** FUTURE_SCOPE (refactor when players stabilize) | Deferred |
@@ -52,7 +52,7 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 
 | # | Finding | Source | Destination | Status |
 |---|---|---|---|---|
-| 18 | Large file: `suggestionEngine.js` (1791) — split now | §5.1 | **S15-T4** (covers this) | Pending |
+| 18 | Large file: `suggestionEngine.js` (1791) — split now | §5.1 | **S15-T4** (covers this) | Shipped [2026-05-17, 9aa95d6] |
 | 19 | Large file: `routes/session.js` (933) | §5.1 | **S16-T4** | Pending |
 | 20 | Large file: `migrate.js` (888) — split by version once staging exists | §5.1 | **F2** FUTURE_SCOPE (post-S15-T1) | Deferred |
 | 21 | Large file: `workout_session_provider.dart` (784) | §5.1 | **S16-T6** | Pending |
@@ -67,7 +67,7 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 | 30 | `ApiService.getList()` separated handling | §5.2 | **S16-T1** ApiService consolidation | Pending |
 | 31 | Timeout 15s flat, no endpoint awareness | §5.3 | **S16-T2** (bundled with typed errors) | Pending |
 | 32 | Timeout copy misleading ("Check your connection") | §5.3 | **S16-T2** (bundled) | Pending |
-| 33 | Auth middleware not validating JWT `id` integer | §5.4 | **S15-T6** Auth integer-id validation | Pending |
+| 33 | Auth middleware not validating JWT `id` integer | §5.4 | **S15-T7** Auth integer-id validation (renumbered from S15-T6 on 2026-05-17) | Shipped [2026-05-18, 0a35a9a] |
 | 34 | `/api/media/test-upload` ships to production | §5.5 | **S17-T1** Security hygiene (bundled) | Pending |
 | 35 | Test coverage narrow — 9 high-value tests missing | §5.6 | **S16-T3** Test coverage expansion | Pending |
 
@@ -75,22 +75,22 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 
 | # | Finding | Source | Destination | Status |
 |---|---|---|---|---|
-| 36 | ImageKit prod/test separation unknown | §6 P0 | **S15-T7** ImageKit audit | Pending |
-| 37 | No Sentry/crash reporting | §6 P0 | **S15-T2 + S15-T3** Sentry Flutter + Node | Pending |
+| 36 | ImageKit prod/test separation unknown | §6 P0 | **S15-T8** ImageKit audit (renumbered from S15-T7 on 2026-05-17) | Pending |
+| 37 | No Sentry/crash reporting | §6 P0 | **S15-T2 + S15-T3** Sentry Flutter + Node | Shipped [2026-05-16, 0102a8e (T2 Flutter) + 3b083f0 (T3 Node)] |
 | 38 | FS #198 cross-pillar 4-phase fallback | §6 P1 | **S17-T3** | Pending |
-| 39 | No CI pipeline | §6 P1 | **S15-T5** CI pipeline | Pending |
+| 39 | No CI pipeline | §6 P1 | **S15-T5** CI pipeline | Shipped [2026-05-17, e34eaae] |
 
 ### §7. Release/tooling
 
 | # | Finding | Source | Destination | Status |
 |---|---|---|---|---|
-| 40 | GitHub Actions CI config | §7 | **S15-T5** (use the provided YAML as starting point) | Pending |
+| 40 | GitHub Actions CI config | §7 | **S15-T5** (use the provided YAML as starting point) | Shipped [2026-05-17, e34eaae] |
 
 ### §8. Security and safety
 
 | # | Finding | Source | Destination | Status |
 |---|---|---|---|---|
-| 41 | JWT payload integer validation | §8.1 | **S15-T6** | Pending |
+| 41 | JWT payload integer validation | §8.1 | **S15-T7** (renumbered from S15-T6 on 2026-05-17) | Shipped [2026-05-18, 0a35a9a] |
 | 42 | Rate limiting on `/api/sessions/suggest` | §8.2 | **S17-T1** (bundled with security hygiene) | Pending |
 | 43 | CORS environment-based tightening | §8.3 | **S17-T1** (bundled) | Pending |
 | 44 | Breathwork safety: onboarding disclaimer | §8.4 | **S17-T2** Breathwork safety pack | Pending |
@@ -110,12 +110,20 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 
 | # | Finding | Source | Destination | Status |
 |---|---|---|---|---|
-| 51 | FS #160 priority raised to high | §12 | Adopted — see **S15-T4** | Resolved |
+| 51 | FS #160 priority raised to high | §12 | Adopted — see **S15-T4** | Shipped [2026-05-17, 9aa95d6] |
 | 52 | FS #166 typed errors — do now | §12 | Adopted — see **S16-T2** | Resolved |
 | 53 | FS #198 phase fallback — keep high | §12 | Adopted — see **S17-T3** | Resolved |
 | 54 | FS #209 timeout — keep high, fix copy | §12 | Adopted — see **S16-T2** | Resolved |
-| 55 | FS #196 API /api convention — raise | §12 | Adopted — see **S15-T1** (covered by API_BASE_URL refactor) | Resolved |
+| 55 | FS #196 API /api convention — raise | §12 | Adopted — see **S15-T1** (covered by API_BASE_URL refactor) | Shipped [2026-05-16, 3dcd09d] |
 | 56 | FS #217/#218 smoke determinism | §12 | After staging DB lands — opportunistic | Deferred |
+
+### Internal-surfaced (not in May 15 ChatGPT review)
+
+These findings emerged during pre-flight or build work in S15-S17, not in the May 15 review. Tracked here for the same shipped/deferred discipline.
+
+| # | Finding | Source | Destination | Status |
+|---|---|---|---|---|
+| I1 | Server has no automated test infrastructure (no `test` script, no `server/test/`, CI only `node --check`) | S15-T7 pre-flight, 2026-05-17 | **S15-T6** Server test infrastructure (promoted to standalone; was originally inside T7's scope) | Shipped [2026-05-17, d8a0af7] |
 
 ---
 
@@ -149,14 +157,14 @@ All UI redesign items deferred to **Sprint 18** per user direction. Captured her
 
 | Destination | Item count |
 |---|---|
-| Sprint 15 (Foundation) | 7 tickets covering 9 findings |
+| Sprint 15 (Foundation) | 8 tickets covering 10 findings |
 | Sprint 16 (Engine & API hardening) | 6 tickets covering 11 findings |
 | Sprint 17 (Security, safety, polish) | 6 tickets covering 13 findings |
 | Sprint 18+ (UI redesign) | 16 findings |
 | FUTURE_SCOPE (deferred) | 6 entries (F1-F6) |
 | Rejected | 1 finding (U8 — contradicts Approach 5) |
 | Resolved (already aligned) | 7 findings (#17, #50, #51-#55) |
-| **Total findings tracked** | **67** |
+| **Total findings tracked** | **68** |
 
 ---
 

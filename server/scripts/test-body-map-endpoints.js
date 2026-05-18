@@ -13,6 +13,9 @@ import {
   STRENGTH_GROUPS,
   FLEXIBILITY_REGIONS,
 } from '../src/services/muscleMapping.js';
+import { assertSafeMutation } from './lib/prod-guard.mjs';
+
+assertSafeMutation();
 
 const PORT = process.env.PORT || 3001;
 const BASE = `http://localhost:${PORT}/api/body-map`;

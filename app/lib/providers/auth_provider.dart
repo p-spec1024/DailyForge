@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 
@@ -27,6 +28,9 @@ class AuthProvider extends ChangeNotifier {
     if (loggedIn) {
       _isAuthenticated = true;
       _user = await _authService.getCurrentUser();
+      if (_user != null) {
+        _setSentryUser(_user!['id'].toString());
+      }
     }
     _isLoading = false;
     notifyListeners();
@@ -40,6 +44,7 @@ class AuthProvider extends ChangeNotifier {
     try {
       _user = await _authService.login(email, password);
       _isAuthenticated = true;
+      _setSentryUser(_user!['id'].toString());
       _isLoading = false;
       notifyListeners();
       return true;
@@ -59,6 +64,7 @@ class AuthProvider extends ChangeNotifier {
     try {
       _user = await _authService.register(email, password, name);
       _isAuthenticated = true;
+      _setSentryUser(_user!['id'].toString());
       _isLoading = false;
       notifyListeners();
       return true;
@@ -75,6 +81,7 @@ class AuthProvider extends ChangeNotifier {
     _isAuthenticated = false;
     _user = null;
     _error = null;
+    _clearSentryUser();
     notifyListeners();
   }
 
@@ -86,6 +93,22 @@ class AuthProvider extends ChangeNotifier {
   void _handleUnauthorized() {
     _isAuthenticated = false;
     _user = null;
+    _clearSentryUser();
     notifyListeners();
+  }
+
+  // S15-T2: Sentry user-context helpers. Scope mutation is synchronous;
+  // the returned FutureOr resolves immediately. PII-minimal — only `id`
+  // is set, never email/username/IP.
+  void _setSentryUser(String id) {
+    Sentry.configureScope((scope) {
+      scope.setUser(SentryUser(id: id));
+    });
+  }
+
+  void _clearSentryUser() {
+    Sentry.configureScope((scope) {
+      scope.setUser(null);
+    });
   }
 }

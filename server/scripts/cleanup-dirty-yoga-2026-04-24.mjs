@@ -17,6 +17,9 @@
 // populate-yoga-muscles-2026-04-24.mjs for the 14 follow-up UPDATEs.
 import 'dotenv/config';
 import { pool } from '../src/db/pool.js';
+import { assertSafeMutation } from './lib/prod-guard.mjs';
+
+assertSafeMutation();
 
 const DELETE_IDS = [
   1109, 1110, 1112, 1118, 1124, 1128, // Group 1

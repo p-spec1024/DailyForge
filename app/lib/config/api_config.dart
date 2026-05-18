@@ -1,18 +1,18 @@
 class ApiConfig {
-  // Override with: flutter run --dart-define=API_HOST=192.168.1.42
-  static const String _overrideHost =
-      String.fromEnvironment('API_HOST', defaultValue: '');
-  static const int _port = 3001;
-
-  // For a real device on the same network, pass your machine's LAN IP via
-  // --dart-define=API_HOST=... ; otherwise the hardcoded fallback is used.
-  static String get baseUrl {
-    if (_overrideHost.isNotEmpty) {
-      return 'http://$_overrideHost:$_port/api';
-    }
-    const host = '192.168.0.204';
-    return 'http://$host:$_port/api';
-  }
+  // Base URL for the API. Always ends in `/api` — endpoint constants below
+  // MUST NOT re-prefix `/api/`. (Retires FS #196: the `/api` convention is now
+  // the documented standard. See docs/ARCHITECTURE.md §4.3.)
+  //
+  // Default points at localhost so a build with no --dart-define just works
+  // on an emulator pointed at the laptop. For a real device on the same
+  // network, pass your laptop's LAN IP:
+  //   flutter run --dart-define=API_BASE_URL=http://192.168.0.204:3001/api
+  // For a release build pointed at the deployed API:
+  //   flutter build apk --dart-define=API_BASE_URL=https://api.dailyforge.app/api
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://localhost:3001/api',
+  );
 
   // Auth
   static const String login = '/auth/login';

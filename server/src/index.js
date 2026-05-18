@@ -1,8 +1,10 @@
 import express from 'express';
+import * as Sentry from '@sentry/node';
 import cors from 'cors';
 import helmet from 'helmet';
 import { fileURLToPath } from 'node:url';
 import { config } from './config/env.js';
+import { isSentryEnabled } from './observability/sentry.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import authRoutes from './routes/auth.js';
 import workoutRoutes from './routes/workout.js';
@@ -59,6 +61,18 @@ export function createApp() {
   app.use('/api/sessions', sessionsRoutes);
   app.use('/api/focus-areas', focusAreasRoutes);
   app.use('/api/multi-phase-sessions', multiPhaseSessionsRoutes);
+
+  // S15-T3: Sentry's Express error handler must mount AFTER all routes and
+  // BEFORE the project errorHandler — otherwise the project handler responds
+  // and Sentry never sees the error. Gated on DSN so dev (no DSN) skips it.
+  //
+  // Test note: in-process createApp() spawns inherit process env. If a test
+  // run has SENTRY_DSN set (e.g. from a shared .env), this mount activates
+  // and assertions about error responses may see Sentry side effects. Clear
+  // SENTRY_DSN in test setup if that matters.
+  if (isSentryEnabled()) {
+    Sentry.setupExpressErrorHandler(app);
+  }
 
   app.use(errorHandler);
 

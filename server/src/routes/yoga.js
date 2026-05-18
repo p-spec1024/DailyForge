@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 import crypto from 'crypto';
 import { recalculateForSession } from '../services/progressService.js';
 
@@ -64,7 +64,7 @@ function shuffle(arr) {
 }
 
 // GET /api/yoga/generate — generate a yoga session sequence
-router.get('/generate', authenticate, async (req, res, next) => {
+router.get('/generate', ...authChain, async (req, res, next) => {
   try {
     const rawType = req.query.type || 'vinyasa';
     const rawLevel = req.query.level || 'intermediate';
@@ -342,7 +342,7 @@ router.get('/generate', authenticate, async (req, res, next) => {
 // requested id is missing — partial-success is rejected so the player never
 // opens with placeholder pose names.
 const POSES_BY_IDS_MAX = 50;
-router.post('/poses-by-ids', authenticate, async (req, res, next) => {
+router.post('/poses-by-ids', ...authChain, async (req, res, next) => {
   try {
     const ids = req.body && req.body.ids;
     if (!Array.isArray(ids) || ids.length === 0) {
@@ -387,7 +387,7 @@ router.post('/poses-by-ids', authenticate, async (req, res, next) => {
 });
 
 // GET /api/yoga/alternatives — alternative poses for mid-session swap
-router.get('/alternatives', authenticate, async (req, res, next) => {
+router.get('/alternatives', ...authChain, async (req, res, next) => {
   try {
     const exerciseId = parseInt(req.query.exerciseId, 10);
     const { category, practiceType, maxDifficulty } = req.query;
@@ -438,7 +438,7 @@ router.get('/alternatives', authenticate, async (req, res, next) => {
 });
 
 // GET /api/yoga/recent — last 3 yoga sessions for current user
-router.get('/recent', authenticate, async (req, res, next) => {
+router.get('/recent', ...authChain, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, type, duration, started_at, completed_at, notes
@@ -470,7 +470,7 @@ router.get('/recent', authenticate, async (req, res, next) => {
 });
 
 // POST /api/yoga/session — log a completed yoga session
-router.post('/session', authenticate, async (req, res, next) => {
+router.post('/session', ...authChain, async (req, res, next) => {
   const client = await pool.connect();
   try {
     const { type, level, duration, focus, poses, focus_slug } = req.body;

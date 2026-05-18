@@ -45,8 +45,8 @@
 
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { authenticate } from '../middleware/auth.js';
-import { generateSession } from '../services/suggestionEngine.js';
+import { authChain } from '../middleware/auth.js';
+import { generateSession } from '../services/suggestion-engine/index.js';
 import { formatLastSession } from '../services/sessionFormatter.js';
 
 const VALID_ENTRY_POINTS = new Set(['home', 'strength_tab', 'yoga_tab', 'breathwork_tab']);
@@ -84,7 +84,7 @@ function requireUserId(req, res, next) {
 }
 
 const router = Router();
-router.use(authenticate);
+router.use(...authChain);
 router.use(requireUserId);
 
 // ── POST /api/sessions/suggest ──────────────────────────────────────────

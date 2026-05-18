@@ -16,3 +16,6 @@ Trackers/_archive/
 
 # Tracker scratch — pre-flight snapshots, throwaway diagnostics
 Trackers/_scratch/
+
+# Per-ticket smoke baselines (local-only verification artifacts; spec §4.7).
+Trackers/*-baseline-smoke-output.txt

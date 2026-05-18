@@ -47,6 +47,11 @@ dependencies:
   # Required by share_plus for the temp PNG paths.
   path_provider: ^2.1.0
 
+  # S15-T2: crash reporting + performance traces. No-op unless
+  # --dart-define=SENTRY_DSN=... is passed at build time. PII off by
+  # default (no email, no IP, no headers — only user.id set on login).
+  sentry_flutter: ^9.20.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

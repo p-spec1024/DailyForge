@@ -235,4 +235,29 @@ Standard three-commit pattern.
 
 ---
 
-*Originally authored as S15-T6, May 17, 2026. Renumbered to T7 + wording flip applied same day after test-infra pre-flight finding.*
+## 11. Drift log
+
+Per PI #16 and the project's drift-log convention: spec-vs-code drifts that surface during build are captured in §11 of the spec itself, not in scratch docs. Each row links the spec section that drifted, what was found, and how it was resolved.
+
+| # | Section | Spec said | Live / discovered reality | Resolution |
+|---|---------|-----------|---------------------------|------------|
+| 1 | §3.1 vs §3.5 (test #1) | Middleware code uses `const id = Number(decoded.id); if (!Number.isInteger(id) || id <= 0) ...`. The inline justification ("`Number(undefined)` is NaN") only covers the missing-id case. | `Number('123')` returns the integer `123`, so the spec's middleware as written would silently accept string-digit ids and let them through validation — directly contradicting §3.5 test #1, which expects `{ id: '123' }` to return 401 `invalid_token`. The intent in §2 ("a malformed JWT — string `id`, missing `id`, negative `id`") matches §3.5; only §3.1's implementation was wrong. | **Inline fix (chosen over AMENDMENT-1, per Prashob).** Dropped the `Number()` coercion in `server/src/middleware/auth.js`; the check is now bare `Number.isInteger(decoded.id) || decoded.id <= 0`. `Number.isInteger` is strict — rejects strings, decimals, undefined, null, BigInt — so no coercion needed. `req.user = decoded` (no spread + override) since happy-path `id` is already a JS Number from `pg`. Surfaced mid-build before tests were written; no green commits relied on the broken middleware. |
+| 2 | §3.5 test count | Spec §3.5 says "9 cases"; §6 reads "9 new auth tests"; prompt's stop checklist reads "12 tests" (3 T6 + 9 T7). | T6 actually shipped **4** smoke tests (the original 3 from spec §3.4 plus a 4th — `POST /api/users/pillar-levels with valid JWT + empty body returns 400` — exercising the JWT helper end-to-end). Total at T7 close is **13**, not 12. | Documentary only. Adjusted `docs/ARCHITECTURE.md` §4.8 wording at chore commit to read "13 — 4 smoke tests from T6 plus 9 middleware tests from T7." No spec or test code change. |
+| 3 | §3.2 audit expectation | "Audit every route handler that previously coerced `req.user.id`" — wording implies multiple files. Build steps §5.4 reads "Route audit, one file at a time." | Inventory found **one** in-scope coercion site (`server/src/routes/workout.js:226`). All other `req.user.id` reads (47 sites across 17 route files) were already trust-raw, no coercion to remove. | Documentary only. Built workout.js as a single WIP commit. Build report under "Out of scope, untouched" captures the 47 raw-read sites that needed no change. |
+
+### 11.1. Pre-build adjustments
+
+Adjustments applied between spec lock and build start (after pre-flight, before the first WIP commit). None for this ticket — all five pre-flight items (§4 a-e) returned clean, no halt-on-drift triggers, and no spec amendments were needed before code. Mid-build drift (drift #1 above) was caught after the middleware commit but before any tests were authored.
+
+---
+
+## 12. Post-ship deviations from §8
+
+| # | §8 said | Actually shipped | Why |
+|---|---------|------------------|-----|
+| 1 | "S15-T7 adds 7 middleware tests" (ARCHITECTURE.md §4.8 update implied by `S15-T6-spec.md` cross-reference) | 9 tests, matching §3.5 exactly. | The 7-vs-9 mismatch was an authoring inconsistency between T6 spec and T7 spec at renumber time. T7 spec §3.5 was the source of truth. |
+| 2 | "Flip ARCHITECTURE.md §4.6 + API.md Conventions wording" | Also dropped the FS #215 reference from ARCHITECTURE.md §10.2 "Medium priority" bullet list (FS #215 is now closed) and replaced it with FS #258 (new — whitelist `req.user` fields). Also removed the `400 invalid_user_id` line from API.md's `PUT /api/workout/slot/:exerciseId/choose` Errors list (per prompt's special-case instruction). Also updated ARCHITECTURE.md §4.8 test-count wording from "S15-T7 adds 7 middleware tests" to "13 — 4 smoke tests from T6 plus 9 middleware tests from T7" reflecting the actual shipped count. | §8 was non-exhaustive; the closing-of-FS-#215, new FS #258, and §4.8 test-count correction are necessary corollaries. |
+
+---
+
+*Originally authored as S15-T6, May 17, 2026. Renumbered to T7 + wording flip applied same day after test-infra pre-flight finding. §11–§12 added at S15-T7 chore commit (May 18, 2026) to capture mid-build drift + post-ship deviations.*

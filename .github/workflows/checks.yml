@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  flutter:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.6'
+          channel: 'stable'
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install
+      - run: npm test -w server
+        env:
+          # Smoke tests don't use these values, but server/src/config/env.js
+          # process.exit(1)s on missing env at import time. CI has no .env file.
+          JWT_SECRET: ci-test-secret-not-real
+          DATABASE_URL: postgres://ci:ci@localhost/ci_not_used

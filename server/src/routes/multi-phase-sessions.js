@@ -30,7 +30,7 @@
 
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 
 const VALID_END_INTENTS = new Set(['completed', 'end_early', 'abandoned']);
 const VALID_SESSION_SHAPES = new Set(['cross_pillar', 'state_focus']);
@@ -49,7 +49,7 @@ function isIsoString(v) {
 }
 
 const router = Router();
-router.use(authenticate);
+router.use(...authChain);
 
 router.post('/', async (req, res) => {
   const {

@@ -65,7 +65,7 @@ dailyforge/
 │   │   ├── db/                   # pool.js, migrate.js, seeds/
 │   │   ├── middleware/           # auth.js, errorHandler.js
 │   │   ├── routes/               # 20 route files (see docs/API.md)
-│   │   ├── services/             # business logic (suggestionEngine + 9 others)
+│   │   ├── services/             # business logic (suggestion-engine/ tree + 9 others)
 │   │   ├── utils/                # media generation, upload helpers
 │   │   └── index.js              # createApp() + listener
 │   ├── scripts/                  # smoke / preflight / seed / media gen
@@ -81,6 +81,8 @@ dailyforge/
 ```
 
 Two top-level directories (`media/`, `node_modules/`) are excluded from the tree.
+
+The database lives on Neon (Singapore region) and has two branches: `production` (real user data — touched only by the running server in deployed environments and by mutating scripts run with the explicit `NODE_ENV=production` + `ALLOW_PROD_MUTATION=true` override) and `staging` (a copy-on-write branch off `production`, used by local dev and the smoke harness by default). The split landed in S15-T1; see §4.3 for the env-gating mechanics.
 
 ---
 
@@ -138,37 +140,46 @@ In order, applied by `createApp()`:
 
 `pool.on('error')` swallows transient drops so a single Neon hiccup doesn't take the server down. SIGTERM / SIGINT handlers call `pool.end()` for graceful shutdown.
 
-**Single environment.** There is no separate dev DB. `server/.env` points at the prod Neon instance and the Flutter client points at it via the LAN address baked into `app/lib/config/api_config.dart:13` (`192.168.0.204:3001` is the founder's dev-machine LAN IP; override at build time with `--dart-define=API_HOST=...`). This is acceptable today because the founder is the only user; it becomes blocking before broader signups and is a known item for the infrastructure separation work.
+**Two environment branches (S15-T1).** The database lives in two Neon branches: `production` (real user data) and `staging` (a copy-on-write clone of `production`, used by local dev and smoke harnesses). After S15-T1 the local `server/.env` defaults to staging — running `npm run dev`, `npm run db:seed`, or any smoke script under `server/scripts/` writes to staging, not prod.
+
+Mutating scripts (every seed under `server/src/db/seeds/`, `server/src/db/migrate.js`, and every writing one-shot under `server/scripts/`) call `assertSafeMutation()` at module top from `server/scripts/lib/prod-guard.mjs`. The guard throws unless one of these holds:
+
+- `NODE_ENV` is anything other than `'production'` (staging, development, undefined — the local-dev default), **or**
+- `NODE_ENV === 'production'` **AND** `ALLOW_PROD_MUTATION === 'true'` (explicit two-variable opt-in).
+
+The two-variable override is deliberate: a single typo cannot rewrite production data. Server runtime (`createApp()` and the pool itself) is **not** guarded — it reads whichever `DATABASE_URL` is set, no opt-in required. The guard is for one-shot scripts only.
+
+The Flutter client points at the API via `--dart-define=API_BASE_URL=...` (full URL, must end in `/api`). Default when no flag is passed: `http://localhost:3001/api` — sized for an emulator pointed at the laptop. For a real device on the LAN, pass `--dart-define=API_BASE_URL=http://<laptop-ip>:3001/api`. The previous `API_HOST` host-only flag and the `192.168.0.204` LAN-IP fallback in `api_config.dart` were removed in the S15-T1 refactor.
 
 The schema lives in **one file**: `server/src/db/migrate.js`. It runs four idempotent blocks in order — `schema` (CREATE TABLE IF NOT EXISTS), `alterations` (ADD COLUMN IF NOT EXISTS plus DO-blocks for the S14-T4→T5 cross_pillar→multi_phase rename), `indexes`, and `s11t4Functions` (CREATE OR REPLACE FUNCTION for `recompute_user_pillar_level` and `recompute_all_user_pillar_levels`). After the STEP 1 consolidation this session, the file is now the full source of truth — including `focus_overlaps`, `exercise_swap_counts`, and `user_excluded_exercises`, which previously existed in prod via out-of-band preflight scripts.
 
 ### 4.4. Suggestion engine
 
-The engine is `server/src/services/suggestionEngine.js` — **1791 LOC** at S14 close (significantly larger than the architect's pre-flight estimate of ~1140; growth came through S13–S14 with state-focus, special-case recipes, and the recency check). The engine is plain async functions over the `pg` pool — no classes, no DI, no ORM.
+The engine is `server/src/services/suggestion-engine/` — a 12-file modular tree post-S15-T4 (extracted from the 1791-LOC monolith `suggestionEngine.js`; see §4.4.8). Entry point is `suggestion-engine/index.js`. The engine is plain async functions over the `pg` pool — no classes, no DI, no ORM.
 
 #### 4.4.1. Public API
 
 Exported symbols (`grep '^export'`):
 
 ```js
-// server/src/services/suggestionEngine.js
-export class NotImplementedError extends Error { ... }    // line 34
-export const BRACKET_TABLE = { ... }                       // line 125
-export async function getAvailableDurations(...)           // line 1513
-export async function checkRecencyOverlap(...)             // line 1633
-export async function generateSession({...})               // line 1714
+// server/src/services/suggestion-engine/index.js (post-S15-T4)
+export { NotImplementedError } from './errors.js';
+export { BRACKET_TABLE } from './constants.js';
+export { checkRecencyOverlap } from './recency.js';
+export { getAvailableDurations } from './recipes/available-durations.js';
+export async function generateSession({...})  // defined in index.js
 ```
 
 `generateSession` is the single entry point used by `POST /api/sessions/suggest` and the smoke harness. The other exports support `GET /api/focus-areas/:slug/available-durations` (S13-T5 picker support), the recency-overlap warning helper consumed inside body-focus recipes, and the shared bracket configuration table.
 
 #### 4.4.2. `generateSession` flow
 
-(`suggestionEngine.js:1714-1791`)
+(`suggestion-engine/index.js:69-146` post-S15-T4)
 
-1. **Identity validation** (lines 1716-1724) — `user_id` must be a positive int, `focus_slug` non-empty, `entry_point` in `{home, strength_tab, yoga_tab, breathwork_tab}`. Throws `TypeError` on bad shape.
-2. **Bracket value check** (line 1727) — if `bracket` provided, validate against `BRACKET_TABLE` keys. Throws `RangeError` on garbage. This is the only path producing the `invalid bracket value` substring that the route's mapper picks up.
-3. **Focus resolution** (line 1731) — `resolveFocus(focus_slug)` reads `focus_areas` (`is_active = true` filter; throws on unknown slug).
-4. **Strength-tab exclusion** for mobility (line 1735) — mobility is hidden from strength_tab; engine asserts the contract as second line of defense and throws `RangeError`.
+1. **Identity validation** (`index.js:71-79`) — `user_id` must be a positive int, `focus_slug` non-empty, `entry_point` in `{home, strength_tab, yoga_tab, breathwork_tab}`. Throws `TypeError` on bad shape.
+2. **Bracket value check** (`index.js:82`) — if `bracket` provided, validate against `BRACKET_TABLE` keys. Throws `RangeError` on garbage. This is the only path producing the `invalid bracket value` substring that the route's mapper picks up.
+3. **Focus resolution** (`index.js:86`) — `resolveFocus(focus_slug)` reads `focus_areas` (`is_active = true` filter; throws on unknown slug).
+4. **Strength-tab exclusion** for mobility (`index.js:90`) — mobility is hidden from strength_tab; engine asserts the contract as second line of defense and throws `RangeError`.
 5. **State-focus path** (line 1742) — focus type `'state'` routes to `generateStateFocus({ userId, focus, bracket })`. Body-only tabs (`strength_tab` / `yoga_tab`) throw before reaching here. Missing `bracket` throws `state focus requires bracket parameter` (the substring the route maps to `state_focus_requires_bracket`).
 6. **Body-focus path** (line 1766) — `time_budget_min` must be a positive int in the entry-point's allowed budget set (`VALID_BUDGETS_BY_ENTRY`). Engine reads `user_pillar_levels` via `resolveLevels(user_id)` and then dispatches by entry point.
 
@@ -206,7 +217,7 @@ Plus helper picks (`pickBookend`, `pickStrength`, `pickStrengthCompound`, `pickY
 The engine remaps the master spec's movement-quality intent (mobility / flexibility / restorative) onto live style data — those movement-quality tokens don't exist in the DB. The remap is centralized at the top of the file:
 
 ```js
-// server/src/services/suggestionEngine.js:52-54
+// server/src/services/suggestion-engine/constants.js:18-20 (post-S15-T4)
 const WARMUP_PRACTICE_STYLES   = ['vinyasa', 'sun_salutation', 'hatha'];
 const MOBILITY_MAIN_STYLES     = ['hatha', 'yin', 'vinyasa'];
 const COOLDOWN_PRACTICE_STYLES = ['restorative', 'yin', 'hatha'];
@@ -228,26 +239,35 @@ Engine reads (but never writes) `user_excluded_exercises` for the user via `load
 
 Engine throws **`TypeError`** for programmer bugs (bad shape; should never reach prod from a real route) and **`RangeError`** for contract violations the route should turn into 400s. The route handler at `server/src/routes/sessions.js:66-74` maps RangeError-message **substrings** to stable error codes (`invalid_bracket`, `state_focus_requires_bracket`, `invalid_focus_entry_combo`, `invalid_time_budget`, or the catchall `unmapped_engine_error`). String-matching is intentional v1; the typed-error refactor is tracked at FUTURE_SCOPE #166.
 
-#### 4.4.8. Architecture-extraction debt (FS #160)
+#### 4.4.8. Architecture-extraction debt (FS #160) — ✅ SHIPPED S15-T4
 
-At 1791 LOC the engine is a single procedural file with constants, helpers, recipe functions, and the public dispatch all interleaved. FUTURE_SCOPE #160 captures the planned extraction. Proposed structure (per the FS entry):
+**Status:** Shipped May 17, 2026 in S15-T4 (feat `9aa95d6`). FS #160 closed. The 1791-LOC monolith was extracted byte-preservingly into the structure below. Smoke 3537/0 with no new failure categories vs the S15-T4 baseline.
+
+**Actual structure** (matches the FS #160 proposal plus a separate `recency.js` for the body-focus T5 helper — 12 files total instead of the proposed 11):
 
 ```
 server/src/services/suggestion-engine/
-  index.js                       — dispatch + re-exports
+  index.js                       — generateSession dispatch + public re-exports
   constants.js                   — BRACKET_TABLE, style sets, picks tables
-  helpers.js                     — compoundFilter, durationsForLevel, level rank
-  pickers.js                     — the 5 picker functions
-  item-formatters.js
+  errors.js                      — NotImplementedError + EngineContractError shell
+  helpers.js                     — pure helpers + data loaders + bracket helpers
+  pickers.js                     — 6 generic body-focus pickers
+  item-formatters.js             — bookendItem, strengthItem, yogaItem
+  recency.js                     — checkRecencyOverlap (T5 body-focus warning)
   recipes/
-    cross-pillar.js
-    strength-only.js
-    yoga-only.js
-    state-focus.js
-    available-durations.js
+    cross-pillar.js              — standard + Mobility + FullBody (~467 LOC, documented exception)
+    strength-only.js             — standard + FullBody
+    yoga-only.js                 — standard + Mobility + FullBody (~310 LOC, documented exception)
+    state-focus.js               — generateStateFocus + state-only pickers
+    available-durations.js       — getAvailableDurations
 ```
 
-Net effect: same logic, easier-to-navigate surface area; per-recipe tests can target individual files; the HTTP layer (`routes/sessions.js`) imports from the index without pulling in the whole module graph. Trigger per the FS entry was Sprint 12 close after T7 ships — that trigger slipped through S13 and S14. Note that the FS entry itself says "~1140 lines"; the file has grown to **1791 LOC** through S13–S14 layered work, so the FS entry's size estimate is stale. The proposed structure is still the right shape; the extraction is just larger than the entry anticipated. Pairs naturally with FS #166 (typed-error refactor) — both are best done in the same pass per FS #166's note.
+**Layout decisions** (per the S15-T4 prompt's drift log):
+- Two recipe files (`cross-pillar.js` 467 LOC, `yoga-only.js` 310 LOC) intentionally exceed the 300-LOC guideline. Both carry top-of-file justification comments. The three internal variants (standard / mobility / full-body) in each are cohesive — they share scaffolding, helpers, and tests; splitting by variant introduces layout asymmetry and breaks domain cohesion for a line-count win. Tracked at FS for revisit if either grows past ~500 LOC.
+- `recency.js` lives at the top level rather than inside `recipes/` because `checkRecencyOverlap` is a body-focus-only public export with non-trivial DB query construction + defensive try/catch, not a recipe.
+- `errors.js` ships `EngineContractError` as a class shell only. Its wiring to existing RangeError throw sites is S16-T2's job (typed-error refactor). The route-level `mapRangeErrorToCode` substring matching at `routes/sessions.js:66-74` remains intact until that lands.
+
+**Net effect:** same logic; the public API surface (`generateSession`, `getAvailableDurations`, `checkRecencyOverlap`, `BRACKET_TABLE`, `NotImplementedError`) is preserved across the three call sites (`routes/sessions.js`, `routes/focus-areas.js`, smoke harness); per-recipe tests can target individual files when test coverage expands (S16-T3); the engine internals are now a clean import DAG (constants → helpers → {pickers, formatters} → recipes → index) with zero cycles. Pairs with FS #166 (typed-error refactor) — best done in the same engine touch.
 
 ### 4.5. Multi-phase sessions (S14)
 
@@ -266,9 +286,10 @@ See `docs/API.md` for the full endpoint reference (74 endpoints across 20 route 
 
 A few cross-cutting notes:
 
-- **JWT and `req.user.id`.** The middleware decodes the token and assigns the payload to `req.user`; it does not coerce `id` to int. Some routes coerce defensively (`workout.js` at the top of `slot/:exerciseId/choose`); others trust PG's implicit coercion. FUTURE_SCOPE #215 is the middleware-level cleanup.
+- **JWT and `req.user.id`.** The middleware decodes the token and validates `decoded.id` is a positive integer (`Number.isInteger(decoded.id) && decoded.id > 0`); on failure it returns 401 `{ error: 'invalid_token' }`. On success it assigns the payload to `req.user`. Route handlers can trust `req.user.id` is a positive integer without re-coercing. `requireUserId` in `sessions.js` stays as belt-and-braces defense-in-depth (cheap one-line if-check) but is now technically redundant. Shipped in S15-T7, closing FS #215.
 - **Error mapping.** 4xx responses use short stable codes (`invalid_focus_slug`, `routine_name_required`). 5xx flow through `errorHandler.js` and collapse to `"Internal server error"`.
 - **`/api/sessions/*` vs `/api/session/*`.** Both exist. `/api/session/*` (singular) is the legacy single-pillar session player surface; `/api/sessions/*` (plural) is the S12-T7 engine HTTP face plus the S14-T1 `start-from-list`. Don't conflate them.
+- **`/api` suffix lives in `baseUrl`.** `ApiConfig.baseUrl` always ends in `/api` (post-S15-T1, retiring FS #196). Endpoint constants (`/sessions/suggest`, `/auth/login`, etc.) MUST NOT re-prefix `/api/` — `ApiConfig.url(path)` simply concatenates `baseUrl + path`. This is the documented standard going forward; new endpoints follow the same rule.
 
 ### 4.7. Smoke harness
 
@@ -280,11 +301,30 @@ A few cross-cutting notes:
 - swap-counter + exclusion writes via `incrementSwap` and `setPromptState`
 - substitution-ladder rank via `rankAlternatives` (S14-T6 / FS #198)
 
-The harness runs against **prod data** (Neon Singapore). The test fixtures it creates are tagged with a sentinel pattern (look for `assertSession` and the `__smoke_` prefixes inside the file) so seed cleanup scripts can identify and drop them. This is intentional pre-launch — there's only one user, so isolating the smoke from real data isn't worth the dev-DB lift. The cross-script consolidation lives at `server/scripts/lib/smoke-fixtures.mjs`.
+After S15-T1 the harness runs against **staging** (Neon Singapore) by default — the same Neon project as production but on a separate branch, so smoke fixtures never collide with real user rows. The fixtures the harness creates are still tagged with a sentinel pattern (look for `assertSession` and the `__smoke_` prefixes inside the file) so cleanup queries can identify and drop them. Running against production is still possible via the explicit `NODE_ENV=production ALLOW_PROD_MUTATION=true` override, but should be rare — the staging branch exists precisely so this isn't a daily move.
 
 The sentinel pattern is the project's standing rule on smoke cleanup (Project Instruction #17): never `DELETE WHERE user_id = ...` from a smoke harness — that works until a real user shares a slug or row identity with a fixture and the test silently destroys real data. Instead, tag every fixture row with a sentinel literal (e.g. `notes='t7-smoke-fixture'`, `slug='__t_state_test'`) and `DELETE WHERE sentinel matches`. The pattern surfaced during S12-T7 and was consolidated into the shared helper by S13-T7.
 
 Pass-count drift between runs and fixture leak on mid-block exceptions are open items at FUTURE_SCOPE #217 and #218 respectively.
+
+### 4.8. Server tests
+
+`server/test/` holds `node:test`-driven unit-level tests, spawned via `supertest` against an in-process `createApp()` instance — request-level coverage that runs in CI on every push and PR. Distinct from §4.7's smoke harness, which is integration-level: smoke writes to staging Neon, exercises the full engine + DB roundtrip, and is invoked manually (not in CI).
+
+```
+server/test/
+├── README.md              — quick-start + conventions
+├── helpers/
+│   ├── app-factory.js     — buildTestApp() wraps createApp()
+│   └── jwt-mint.js        — mintTestJwt() + bearerHeader() for auth-gated routes
+└── *.test.js              — flat layout until file count > ~15
+```
+
+Invoked via `npm test -w server`, which runs `node --test --env-file-if-exists=.env test/**/*.test.js`. The `--env-file-if-exists` flag makes `.env` optional — local dev auto-loads it; CI injects dummy `JWT_SECRET` / `DATABASE_URL` via the workflow's `env:` block on the test step. (`server/src/config/env.js` calls `process.exit(1)` if either is unset at import time, hence the need for either a file or injected values.)
+
+Tests at S15-T7 close: 13 — 4 smoke tests from T6 (health, missing-token 401, login-validation 400, authenticate-passthrough via `/api/users/pillar-levels`) plus 9 middleware tests from T7 (6 malformed-id rejections, 1 happy-path, 2 regression-guards for existing wordings). S16-T3 will add ~9 engine tests. Coverage accretes per-sprint, not by a threshold gate.
+
+Convention: tests at `test/*.test.js` flat; helpers under `test/helpers/`. If a future test writes to DB, use the §4.7 sentinel pattern — never `DELETE WHERE user_id = …`. No DB-touching unit tests exist today.
 
 ---
 
@@ -555,7 +595,7 @@ await context.read<SuggestProvider>().selectBodyFocus(focusSlug, timeBudgetMin: 
 
 `SuggestProvider.selectBodyFocus` (line 93) reads the persisted time-budget if needed, then calls `_runRequest(focusSlug, request: () => _service.requestBodyFocusSession(...))`. The race tracker inside `_runRequest` records the current request slug; if the user picks a different focus before this one returns, the late response is discarded.
 
-`SuggestService.requestBodyFocusSession` (`app/lib/services/suggest_service.dart`) calls `_api.post(ApiConfig.sessionsSuggest, body)` — the constant resolves to `/sessions/suggest`, and `ApiConfig.url()` prepends `baseUrl` which already ends in `/api`, yielding `http://192.168.0.204:3001/api/sessions/suggest` in dev.
+`SuggestService.requestBodyFocusSession` (`app/lib/services/suggest_service.dart`) calls `_api.post(ApiConfig.sessionsSuggest, body)` — the constant resolves to `/sessions/suggest`, and `ApiConfig.url()` prepends `baseUrl` which already ends in `/api`, yielding `http://localhost:3001/api/sessions/suggest` for a default emulator build, or whatever `--dart-define=API_BASE_URL=...` was passed at build time.
 
 `ApiService._send` (`app/lib/services/api_service.dart:125`) wraps the HTTP call with a 15-second timeout, JWT-auth headers, and the typed exception ladder (`UnauthorizedException` / `TimeoutApiException` / `NetworkException` / `ApiException`).
 
@@ -566,13 +606,13 @@ await context.read<SuggestProvider>().selectBodyFocus(focusSlug, timeBudgetMin: 
 1. Validates `focus_slug` shape (regex `/^[a-z_]{1,40}$/`), `entry_point` (one of 4), `time_budget_min` (5–240), `bracket` (one of 5 if present). 400 with stable codes on failure.
 2. Calls `getFocusBySlug(focus_slug, { requireActive: true })` (line 114) which queries `focus_areas WHERE is_active = true`. 400 `unknown_focus_slug` if missing.
 3. Enforces the body/state contract: body focus requires `time_budget_min`; state focus requires `bracket`.
-4. Calls `generateSession({ user_id, focus_slug, entry_point, time_budget_min, bracket })` (`server/src/services/suggestionEngine.js:1714`).
+4. Calls `generateSession({ user_id, focus_slug, entry_point, time_budget_min, bracket })` (`server/src/services/suggestion-engine/index.js:69`, post-S15-T4).
 5. Stamps `result.metadata.source = 'engine_v1'` and returns 200 JSON.
 6. Catches `RangeError` — maps the message substring to a stable code via `mapRangeErrorToCode` (line 66) and returns 400. Catches any other error → 500 `engine_error`.
 
 ### Step 4. Engine reads from DB, builds the plan
 
-Continuing in `suggestionEngine.js`:
+Continuing in `suggestion-engine/index.js`:
 
 - `resolveFocus(focus_slug)` (line 214) — confirms the focus exists and grabs `focus_type`.
 - Body-focus path dispatches by `entry_point`. For `entry_point = 'home'`, calls `generateCrossPillar({ userId, focus, levels, timeBudget })` (line 483).
@@ -651,7 +691,76 @@ The `recompute_user_pillar_level` PG function is **not** triggered from the mult
 
 ---
 
-## 8. Operating model
+## 8. Observability
+
+Sentry is the single vendor across the stack. Flutter side shipped in S15-T2 (May 16, 2026); Node side in S15-T3 (May 16, 2026). Two separate Sentry projects under the same org (`dailyforge-3i`): `dailyforge-flutter` and `dailyforge-node`. Separate projects per runtime keeps quota, release tracking, and alert rules independent.
+
+Both halves share the same discipline:
+
+- **DSN-gated init.** Empty / unset DSN = full no-op, zero network calls, zero overhead. Dev builds skip Sentry by default.
+- **PII off at the SDK level.** `sendDefaultPii: false` on both sides. The SDK never attaches email, request headers, or client IP.
+- **Org-level IP storage off.** The Sentry web console toggle **"Prevent Storing of IP Addresses"** is ON for the whole org. This is the real geographic-PII gate — `sendDefaultPii: false` alone is not enough, because Sentry derives geography server-side from the request IP unless the org toggle is set. Both layers together = belt and braces. **Do not turn the org toggle off** without an explicit privacy review.
+- **User scope is id-only.** Only `user.id` (as a string) is ever attached. No email, no username.
+- **Performance traces at 20%.** `tracesSampleRate: 0.2` on both sides. Cheap calibration; revisit after first month of beta data.
+
+### 8.1. Client (Flutter)
+
+`SentryFlutter.init` is wired in `app/lib/main.dart` and runs **only** when `--dart-define=SENTRY_DSN=...` is passed at build time. `AuthProvider` sets / clears the Sentry scope on all five user-state transitions (`login`, `register`, `initialize` for app-restart-with-stored-token, `logout`, `_handleUnauthorized` for the 401 fallback) — only `user.id` is ever passed to `SentryUser`.
+
+Build flags for a QA / production build:
+
+```
+flutter build apk \
+  --dart-define=API_BASE_URL=https://api.dailyforge.app/api \
+  --dart-define=SENTRY_DSN=https://<key>@o<org>.ingest.sentry.io/<project> \
+  --dart-define=APP_ENV=production \
+  --dart-define=SENTRY_RELEASE=dailyforge-flutter@1.0.0+1
+```
+
+Symbol / source-map upload is manual via `app/scripts/upload-sentry-symbols.sh` (requires `sentry-cli` + `SENTRY_AUTH_TOKEN` / `SENTRY_ORG` / `SENTRY_PROJECT` env vars). CI integration is queued for S15-T5.
+
+### 8.2. Server (Node)
+
+`@sentry/node` (v10+) is wired via the Sentry v8+ Express API — `Sentry.expressIntegration()` declared in `init()` plus `Sentry.setupExpressErrorHandler(app)` mounted inside `createApp()`. The deprecated v7 `Sentry.Handlers.*` middleware is not used.
+
+**Init runs via `node --import`,** not by a top-of-file call. The npm scripts in `server/package.json` reference `--import ./src/observability/instrument.js`, which loads `initSentry()` before any Express module imports. This is required: under ESM, `import` statements are hoisted, so an in-file call to `initSentry()` would run after Express had already loaded — too late for Sentry's auto-instrumentation to patch the `http` / `express` modules.
+
+```
+server/
+├── package.json                          # dev/start scripts use --import
+└── src/
+    ├── observability/
+    │   ├── instrument.js                 # node --import entry: calls initSentry()
+    │   └── sentry.js                     # initSentry() + isSentryEnabled()
+    └── middleware/
+        ├── auth.js                       # exports authChain = [authenticate, sentryUser]
+        └── sentryUser.js                 # Sentry.setUser({ id: String(req.user.id) })
+```
+
+**User scope is attached via the `authChain` bundle.** `server/src/middleware/auth.js` exports `authChain = [authenticate, sentryUser]`. Every auth-gated router uses `router.use(...authChain)` (or `(...authChain, handler)` for per-route gating). `sentryUser` is a no-op when `req.user` is absent, so the only paths that touch Sentry user scope are the auth-gated ones. The login / register endpoints in `routes/auth.js` are intentionally unauthenticated and do not run `sentryUser`.
+
+**Error capture.** `Sentry.setupExpressErrorHandler(app)` mounts AFTER all route mounts and BEFORE the project `errorHandler`. Express convention: error handlers run in declaration order; Sentry's must see the error before the project handler responds. The mount is gated on `isSentryEnabled()` so dev (no DSN) skips it entirely.
+
+**Performance tracing.** Sentry's Express integration auto-instruments routes — no per-handler wrapping needed. The three engine routes (`POST /api/sessions/suggest`, `GET /api/sessions/last`, `POST /api/sessions/save-as-routine`) are sampled at the same 20% rate as everything else; they're not specially boosted because route-level metric drilldown in the Sentry dashboard is per-route anyway.
+
+**Run with Sentry locally.** Add `SENTRY_DSN=https://<key>@o<org>.ingest.sentry.io/<project>` to `server/.env` (don't commit `.env`; `.env.example` carries the empty form). Then `npm run dev` from `server/` — the `--import ./src/observability/instrument.js` flag in the `dev` script will init Sentry before Express loads.
+
+**Trap 1 — dotenv ordering.** `instrument.js` must call `import 'dotenv/config'` *before* `import { initSentry } from './sentry.js'`. The `--import` chain runs ahead of `src/index.js` (which is where `config/env.js` would normally load dotenv), so without an explicit dotenv import inside `instrument.js`, `process.env.SENTRY_DSN` is empty at init time and the SDK silently no-ops. Failure mode is silent — no error, no log. Verified during S15-T3 deliberate-error testing.
+
+**Trap 2 — per-request user scope.** `sentryUser` middleware uses `Sentry.getIsolationScope().setUser({...})`, not the shorthand `Sentry.setUser({...})`. Both work under `expressIntegration()` today because Sentry's OTel-AsyncLocalStorage plumbing gives each request its own current scope. But pinning to the isolation scope makes the per-request boundary explicit at the call site — protects against future code paths that bypass the OTel context (workers, queue consumers, nested `Sentry.withScope()` calls in route handlers). Without this guard, user attribution could leak across concurrent requests — a real PII boundary, not a cosmetic one.
+
+Release tracking reads `process.env.npm_package_version` when run via `npm`, falling back to a `package.json` read when invoked with bare `node`. Environment tag comes from `NODE_ENV`.
+
+### 8.3. Known gaps
+
+- **Sentry sampling calibration.** `tracesSampleRate: 0.2` is a starting guess. Revisit after first month of beta data — `FUTURE_SCOPE.md` candidate flagged in S15-T3 §9.
+- **Structured logging.** `console.error` calls in route handlers remain as local-dev aids; Sentry captures uncaught errors but local-dev logs are still ad-hoc. Logger replacement (winston / pino) is out-of-scope for S15 — possibly S17.
+- **Source maps for Node.** Not needed — Node does not ship minified bundles, so stack traces are already readable.
+- **CI release upload.** Manual today via `sentry-cli`. CI integration for both client and server is queued for S15-T5.
+
+---
+
+## 9. Operating model
 
 DailyForge is built by a solo founder operating with Claude.ai as PM/architect and Claude Code as senior engineer. Specs and architectural decisions are authored in Claude.ai conversations, then handed to Claude Code as downloadable markdown prompts (the prompt that produced this document is a representative example — multi-phase, halt-and-greenlight between phases, explicit drift-flag rules). Claude Code reads the live code, executes, and reports back **without auto-committing**. The founder runs device tests on a physical Android phone before greenlighting commits. The model has shipped 14 sprints (Sprints 1–6 React PWA + Sprints 7–14 Flutter rebuild).
 
@@ -659,19 +768,19 @@ The repository carries the artifacts of this model: sprint-tagged commits, `Trac
 
 ---
 
-## 9. Known debt and deferred work
+## 10. Known debt and deferred work
 
 Pulled from `Trackers/FUTURE_SCOPE.md` (304 lines, FS #1 through #241). Grouped by severity for reviewer triage. FS numbers cited inline.
 
-### 9.1. High priority (blocks broader signups)
+### 10.1. High priority (blocks broader signups)
 
 - **Infrastructure separation.** Single Neon prod DB serves both real use and smoke testing. No dev environment. Need separate dev/staging/prod databases before opening signups beyond the founder. (No specific FS number — described in this doc §4.3 and §4.7.)
 - **FS #198** — Engine cross-pillar phase-substitution fallback. Cross-pillar sessions sometimes emit 4 phases instead of 5 when the muscle-specific pool empties (biceps cooldown drop, S14-T2 AMENDMENT-1). Home page is branded "5-phase" — a 4-phase session is a leaky abstraction. Engine substitution ladder (adjacent muscle → generic restorative → allow warmup duplicate). ~30–50 LOC + smoke assertion.
 - **FS #209** — Neon DB cold-start timeout bump. `ApiService._kRequestTimeout = 15s` is too tight for Neon cold-starts (8–12s warmup is common). Client maps the timeout to `NetworkException → "Check your connection"` which misleads users. Either bump to 30s for engine endpoints or warm via `/api/health` at app boot.
 
-### 9.2. Medium priority
+### 10.2. Medium priority
 
-- **FS #160** — Engine architecture extraction. 1791 LOC in one file is the load-bearing service of the entire product. Proposed structure (per the FS entry): `server/src/services/suggestion-engine/` directory with `index.js`, `constants.js`, `helpers.js`, `pickers.js`, `item-formatters.js`, and `recipes/{cross-pillar,strength-only,yoga-only,state-focus,available-durations}.js`. See §4.4.8 for details. FS entry text says "~1140 lines"; actual is 1791 — the entry's size estimate is stale but the proposed structure stands. Best done alongside FS #166 (typed-error refactor).
+- **FS #160** — ✅ Engine architecture extraction. **Shipped S15-T4** (May 17, 2026, feat `9aa95d6`). The 1791-LOC monolith now lives as a 12-file modular tree at `server/src/services/suggestion-engine/`. See §4.4.8 for the actual structure and the layout-decision rationale. Originally proposed alongside FS #166 (typed-error refactor); FS #166 remains open and will fold in the engine-touch follow-ups (#255 `fitMainCandidate` cleanup, #256 `MOBILITY_MAIN_STYLES` cleanup, #257 Sentry on recency catch).
 - **FS #166** — Engine `RangeError`-by-string-match → typed errors. The route mapper at `server/src/routes/sessions.js:66-74` matches substrings of engine throw messages to stable codes. Brittle — silently breaks if the engine's throw text changes.
 - **FS #199 / #200** — Engine should emit savasana for yoga sessions, and `metadata.yoga_style` for swap-style filtering.
 - **FS #201** — Body-focus yoga library audit. `hips` is a meaningful yoga concept but is not a seeded body focus slug; engine throws `Unknown or inactive focus_slug: hips`. Likely 50+ yoga poses are invisible to `yoga_tab` queries.
@@ -679,10 +788,10 @@ Pulled from `Trackers/FUTURE_SCOPE.md` (304 lines, FS #1 through #241). Grouped 
 - **FS #207** — Profile screen with pillar levels + level-up progress. Users can't see their declared/inferred levels today.
 - **FS #208** — Cross-pillar yoga style coherence. Warmup and cooldown phases may draw from different styles (vinyasa warmup, hatha cooldown) within one session.
 - **FS #212** — Unified `v_completed_sessions` Postgres VIEW. `sessions`, `breathwork_sessions`, and the FK chain require 3-way UNIONs in 4+ endpoints today.
-- **FS #215** — Coerce `req.user.id` to int at the auth-middleware boundary. Several routes coerce locally; should be one place.
+- **FS #258** — Whitelist trusted fields when assigning `req.user` post-jwt.verify, instead of attaching the entire decoded payload. Defense-in-depth against future JWT_SECRET leak or token-issuance drift that adds untrusted claims.
 - **FS #228** — `PillarSessionException` sealed parent for the launcher error ladder.
 
-### 9.3. Low priority
+### 10.3. Low priority
 
 - **FS #130** — `pg` / `pg-connection-string` SSL deprecation. Informational warning on every `node` run. SSL modes `prefer` / `require` / `verify-ca` will adopt standard libpq semantics in pg v3.0.0. Action when triggered: audit `.env` sslmode, then either pin pg or migrate the connection string to explicit `sslmode=verify-full` or `uselibpqcompat=true&sslmode=require`. Test against Neon Singapore before shipping.
 - **FS #141 / FS #194 / FS #195** — `exercises` table soft-delete + `equipment` column. Engine + adapter currently work around by dropping `is_active` filters and `equipment` fields. Close after a content sprint.
@@ -693,7 +802,7 @@ Pulled from `Trackers/FUTURE_SCOPE.md` (304 lines, FS #1 through #241). Grouped 
 - **FS #233** — `developer.log` over `debugPrint` for release-build observability.
 - **FS #239 / #240 / #241** — Yoga adapter test coverage gaps.
 
-### 9.4. Convention drift / hygiene
+### 10.4. Convention drift / hygiene
 
 - **FS #196** — `ApiConfig.baseUrl` ends in `/api`; endpoint constants must not re-prefix. Document the convention at the top of `app/lib/config/api_config.dart`.
 - **FS #216 / #234** — Dart `catch (e)` → `on Exception catch` sweep.
@@ -706,7 +815,7 @@ Pulled from `Trackers/FUTURE_SCOPE.md` (304 lines, FS #1 through #241). Grouped 
 
 ---
 
-## 10. What's intentionally NOT built yet
+## 11. What's intentionally NOT built yet
 
 Product decisions, not omissions:
 
@@ -719,7 +828,7 @@ Product decisions, not omissions:
 
 ---
 
-## 11. Glossary
+## 12. Glossary
 
 - **Approach 5** — Post-Sprint-11 strategic pivot (Apr 26, 2026) from "5-phase session as flagship daily experience" to "plan-first home with cross-pillar focus areas." Source: `Trackers/PRE_SPRINT_11_PLANNING.md`.
 - **Body focus** — One of 12 muscle-targeted focuses (biceps, chest, hamstrings, full_body, mobility, etc.). Body focuses require a `time_budget_min` parameter. State focuses are hidden from body-only entry points.
@@ -739,5 +848,5 @@ Product decisions, not omissions:
 > Notes for future regenerations:
 >
 > - This document refers to `Trackers/PRE_SPRINT_11_PLANNING.md` and `Trackers/_archive/S12-suggestion-engine-spec.md` for strategic / contractual material. If either file moves, update the link.
-> - Section 4.4 covers an engine of 1791 LOC. When that file is extracted (see §9.2), this section should be rewritten with the new module layout.
+> - Section 4.4 covers an engine of 1791 LOC. When that file is extracted (see §10.2), this section should be rewritten with the new module layout.
 > - The `// review:` markers in this document are honest uncertainty flags — they appear where the original prompt referenced details I could not verify against the code. They should be resolved or rephrased on the next regeneration, not silently dropped.

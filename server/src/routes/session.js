@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 import { recalculateForSession } from '../services/progressService.js';
 
 const router = Router();
-router.use(authenticate);
+router.use(...authChain);
 
 const ALLOWED_SESSION_TYPES = ['strength', 'yoga', 'breathwork', 'stretching', '5phase'];
 const ALLOWED_SET_TYPES = ['normal', 'warmup', 'dropset', 'failure'];

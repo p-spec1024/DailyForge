@@ -5,7 +5,7 @@
 ## Conventions
 
 - **Base URL:** `http://localhost:3000` in dev. Prod URL is the same Node server pointed at Neon prod (no separate deployment yet — see ARCHITECTURE.md "Infrastructure" section). The Flutter client's `ApiConfig.baseUrl` already ends in `/api` — endpoint constants must NOT re-prefix `/api` or requests will hit `/api/api/...` (see FUTURE_SCOPE #196).
-- **Auth:** JWT in `Authorization: Bearer <token>` header. Verified by `authenticate` middleware in `server/src/middleware/auth.js`. The decoded JWT payload is assigned to `req.user`; routes read `req.user.id`. The middleware does NOT coerce `id` to int — handlers that pass it to SQL rely on PG's implicit coercion, and a few handlers (notably `workout.js`) coerce defensively at the top of the handler (see FUTURE_SCOPE #215 for the middleware-level refactor).
+- **Auth:** JWT in `Authorization: Bearer <token>` header. Verified by `authenticate` middleware in `server/src/middleware/auth.js`. The decoded JWT payload is validated (`Number.isInteger(decoded.id) && decoded.id > 0`) and assigned to `req.user`. Route handlers can trust `req.user.id` is a positive integer without re-coercing. Validation failure returns 401 `{ error: 'invalid_token' }`. Shipped in S15-T7 (closes FS #215).
 - **Errors:** Default shape is `{ "error": "<code-or-message>" }`. Most 4xx responses use a short stable code (`invalid_focus_slug`, `routine_name_required`, etc.). The shared error handler in `server/src/middleware/errorHandler.js` produces `{ "error": "Internal server error" }` for any uncaught 5xx so SQL errors and stack details never leak. Suggestion-engine errors are mapped from `RangeError` throw messages via string-match in `server/src/routes/sessions.js` — fragile by design until typed errors land (see FUTURE_SCOPE #166).
 - **Content-Type:** `application/json` request and response unless noted.
 - **`createApp()`:** the Express app is constructed by an exported factory in `server/src/index.js`, which the test harness uses to spawn an in-process instance via `supertest`. Behavior when `index.js` is the entry point is unchanged.
@@ -849,12 +849,11 @@ Three endpoints implement the swap-counter rule: a strength swap increments a pe
 ### PUT /api/workout/slot/:exerciseId/choose
 **⚠ Writes `exercise_swap_counts`** (S12-T6 table — UPSERT + counter increment in single transaction).
 - **Handler:** `server/src/routes/workout.js`
-- **Auth:** JWT (with explicit `req.user.id` coercion to int — see inline note that FS #215 will move this to middleware)
+- **Auth:** JWT (S15-T7: `req.user.id` is guaranteed positive integer by `authenticate` middleware — handler reads it directly, no defensive coercion)
 - **Request body:** `{ chosen_exercise_id: int }`
 - **Behavior:** UPSERTs `user_exercise_prefs` for the slot. If `chosen_exercise_id !== exerciseId` (actual swap), increments `exercise_swap_counts.swap_count` and runs the prompt-decision state machine in one transaction. Same-exercise re-pick returns the current count without incrementing. After commit, calls `substitutionLadder.rankAlternatives()` to return a ranked list (errors here are caught and return `[]` so the save never fails on the secondary lookup).
 - **Response 200:** `{ success: true, slot_id, chosen_exercise_id, should_prompt: bool, swap_count: int, prompt_state: string|null, alternatives: [{...}] }`
 - **Errors:**
-  - `400 invalid_user_id` (coerced JWT id failed)
   - `400 { error: "exercise_id and chosen_exercise_id must be valid integers" }`
   - `400 { error: "Invalid alternative for this exercise" }` — chosen_exercise_id isn't in `slot_alternatives` for this slot.
 

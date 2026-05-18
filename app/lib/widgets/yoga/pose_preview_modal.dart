@@ -238,7 +238,7 @@ class PosePreviewModal extends StatelessWidget {
                           ],
                         ),
                         alignment: Alignment.center,
-                        child: Text(
+                        child: const Text(
                           'Begin session \u2192',
                           style: TextStyle(
                             fontSize: 12,

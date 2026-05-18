@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authChain } from '../middleware/auth.js';
 import { uploadMedia } from '../utils/uploadMedia.js';
 
 const router = Router();
 
-router.use(authenticate);
+router.use(...authChain);
 
 // POST /api/media/test-upload
 // Body: { base64: "data:image/png;base64,..." }

@@ -3,17 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n server,client -c blue,green \"npm run dev -w server\" \"npm run dev -w client\"",
     "dev:server": "npm run dev -w server",
-    "dev:client": "npm run dev -w client",
+    "start:server": "npm run start -w server",
     "db:migrate": "npm run db:migrate -w server",
     "db:seed": "npm run db:seed -w server",
-    "build": "npm run build -w client",
-    "start": "npm run start -w server"
+    "app:analyze": "cd app && flutter analyze",
+    "app:test": "cd app && flutter test",
+    "app:run": "cd app && flutter run",
+    "check": "npm run app:analyze && npm run app:test"
   },
   "workspaces": [
-    "server",
-    "client"
+    "server"
   ],
   "devDependencies": {
     "concurrently": "^9.1.2"
