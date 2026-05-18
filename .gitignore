@@ -13,3 +13,6 @@ Trackers/.claude/
 # Note: 16 existing files under this path are already git-tracked from prior
 # sprints and remain so; this rule applies to new additions only.
 Trackers/_archive/
+
+# Tracker scratch — pre-flight snapshots, throwaway diagnostics
+Trackers/_scratch/
