@@ -405,7 +405,7 @@ After Sprint 14 close, dedicated stabilization-prep work before Sprint 15 kicks 
 | 4 | Suggestion engine extraction (FS #160) — behavior-preserving | ✅ SHIPPED May 17, 2026 | `s15-t4` | 3537 / 0 | feat `9aa95d6` + chore (this) |
 | 5 | CI pipeline (GitHub Actions) + root `package.json` cleanup | ✅ SHIPPED May 17, 2026 | `s15-t5` | — | feat `e34eaae` + chore (this); prep `f911d79`, `51267bc` |
 | 6 | Server test infrastructure (`node:test` + supertest) | ✅ SHIPPED May 17, 2026 | `s15-t6` | — | feat `d8a0af7` + chore (this) |
-| 7 | Auth middleware integer-id validation + route handler simplification | ⏳ NOT STARTED | `s15-t7` (TBD) | — | — |
+| 7 | Auth middleware integer-id validation + route handler simplification | ✅ SHIPPED May 18, 2026 | `s15-t7` | 3543 / 0 | feat `0a35a9a` + chore (this) |
 | 8 | ImageKit prod/test separation audit + remediation | ⏳ NOT STARTED | `s15-t8` (TBD) | — | — |
 
 ---

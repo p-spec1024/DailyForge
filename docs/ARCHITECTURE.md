@@ -286,7 +286,7 @@ See `docs/API.md` for the full endpoint reference (74 endpoints across 20 route 
 
 A few cross-cutting notes:
 
-- **JWT and `req.user.id`.** The middleware decodes the token and assigns the payload to `req.user`; it does not coerce `id` to int. Some routes coerce defensively (`workout.js` at the top of `slot/:exerciseId/choose`); others trust PG's implicit coercion. FUTURE_SCOPE #215 is the middleware-level cleanup.
+- **JWT and `req.user.id`.** The middleware decodes the token and validates `decoded.id` is a positive integer (`Number.isInteger(decoded.id) && decoded.id > 0`); on failure it returns 401 `{ error: 'invalid_token' }`. On success it assigns the payload to `req.user`. Route handlers can trust `req.user.id` is a positive integer without re-coercing. `requireUserId` in `sessions.js` stays as belt-and-braces defense-in-depth (cheap one-line if-check) but is now technically redundant. Shipped in S15-T7, closing FS #215.
 - **Error mapping.** 4xx responses use short stable codes (`invalid_focus_slug`, `routine_name_required`). 5xx flow through `errorHandler.js` and collapse to `"Internal server error"`.
 - **`/api/sessions/*` vs `/api/session/*`.** Both exist. `/api/session/*` (singular) is the legacy single-pillar session player surface; `/api/sessions/*` (plural) is the S12-T7 engine HTTP face plus the S14-T1 `start-from-list`. Don't conflate them.
 - **`/api` suffix lives in `baseUrl`.** `ApiConfig.baseUrl` always ends in `/api` (post-S15-T1, retiring FS #196). Endpoint constants (`/sessions/suggest`, `/auth/login`, etc.) MUST NOT re-prefix `/api/` — `ApiConfig.url(path)` simply concatenates `baseUrl + path`. This is the documented standard going forward; new endpoints follow the same rule.
@@ -322,7 +322,7 @@ server/test/
 
 Invoked via `npm test -w server`, which runs `node --test --env-file-if-exists=.env test/**/*.test.js`. The `--env-file-if-exists` flag makes `.env` optional — local dev auto-loads it; CI injects dummy `JWT_SECRET` / `DATABASE_URL` via the workflow's `env:` block on the test step. (`server/src/config/env.js` calls `process.exit(1)` if either is unset at import time, hence the need for either a file or injected values.)
 
-Tests at S15-T6 close: 4 smoke tests covering health, missing-token 401, login-validation 400, and authenticate-passthrough via `/api/users/pillar-levels`. S15-T7 adds 7 middleware tests; S16-T3 adds ~9 engine tests. Coverage accretes per-sprint, not by a threshold gate.
+Tests at S15-T7 close: 13 — 4 smoke tests from T6 (health, missing-token 401, login-validation 400, authenticate-passthrough via `/api/users/pillar-levels`) plus 9 middleware tests from T7 (6 malformed-id rejections, 1 happy-path, 2 regression-guards for existing wordings). S16-T3 will add ~9 engine tests. Coverage accretes per-sprint, not by a threshold gate.
 
 Convention: tests at `test/*.test.js` flat; helpers under `test/helpers/`. If a future test writes to DB, use the §4.7 sentinel pattern — never `DELETE WHERE user_id = …`. No DB-touching unit tests exist today.
 
@@ -788,7 +788,7 @@ Pulled from `Trackers/FUTURE_SCOPE.md` (304 lines, FS #1 through #241). Grouped 
 - **FS #207** — Profile screen with pillar levels + level-up progress. Users can't see their declared/inferred levels today.
 - **FS #208** — Cross-pillar yoga style coherence. Warmup and cooldown phases may draw from different styles (vinyasa warmup, hatha cooldown) within one session.
 - **FS #212** — Unified `v_completed_sessions` Postgres VIEW. `sessions`, `breathwork_sessions`, and the FK chain require 3-way UNIONs in 4+ endpoints today.
-- **FS #215** — Coerce `req.user.id` to int at the auth-middleware boundary. Several routes coerce locally; should be one place.
+- **FS #258** — Whitelist trusted fields when assigning `req.user` post-jwt.verify, instead of attaching the entire decoded payload. Defense-in-depth against future JWT_SECRET leak or token-issuance drift that adds untrusted claims.
 - **FS #228** — `PillarSessionException` sealed parent for the launcher error ladder.
 
 ### 10.3. Low priority
