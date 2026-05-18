@@ -6,7 +6,7 @@
 **Sprint 12 closed Apr 30, 2026 (suggestion engine; in-line on `main`, no tag).**
 **Sprint 13 closed May 6, 2026 (Approach 5 home page; `sprint-13-close` tag on `main`).**
 **Sprint 14 closed May 14, 2026 (session start handoff; `sprint-14-close` tag on `main`).**
-**Sprint 15 PLANNED — Stabilization: Foundation (kicks off May 15+, 2026). See `Trackers/SPRINT_15_PLAN.md`.**
+**Sprint 15 closed May 18, 2026 (7 of 8 tickets shipped; T8 deferred — see Sprint 15 section). `sprint-15-close` tag on `main`.**
 
 ---
 
@@ -390,23 +390,24 @@ After Sprint 14 close, dedicated stabilization-prep work before Sprint 15 kicks 
 
 ## Sprint 15 — Stabilization: Foundation — Planned, kicks off May 15+, 2026
 
-**Status:** 🟡 PLANNED
-**Source of truth:** `Trackers/SPRINT_15_PLAN.md` (full spec — read before authoring any S15 ticket prompt)
+**Status:** ✅ CLOSED May 18, 2026 — 7 of 8 tickets shipped; T8 deferred. `sprint-15-close` tag on `main`.
 **Sprint goal:** Production-readiness foundation. Ship the infrastructure, observability, and engine refactor that gate broader invite beta.
 **Theme:** Foundation. Not features.
 **Branch strategy:** Sprint-chained off `main`, single `--no-ff` merge + `sprint-15-close` annotated tag at sprint close (per PI #20).
 **Successors:** Sprint 16 (Engine & API hardening), Sprint 17 (Security, safety, polish), Sprint 18 (UI redesign).
 
+**Close note:** Sprint shipped 7 tickets (T1–T7) and deferred T8 (ImageKit prod/test audit) — change of plans, might move to video-based exercise content instead of images, which would change ImageKit's role. Re-evaluate when media strategy is decided. Prod-safety gap on media remains open by design; DB lockdown (T1) holds; 5 prod users, low blast radius. Full reasoning: `Trackers/SPRINT_15_PLAN.md` close note.
+
 | # | Ticket | Status | Branch | Smoke | Commit |
 |---|---|---|---|---|---|
-| 1 | Environment separation (Neon staging + prod guards + API_BASE_URL dart-define) | ✅ SHIPPED May 16, 2026 | `s15-t1` | 3534 / 9 | feat `3dcd09d` + chore (this) |
-| 2 | Sentry — Flutter integration | ✅ SHIPPED May 16, 2026 | `s15-t2` | — | feat `0102a8e` + chore (this) |
-| 3 | Sentry — Node integration | ✅ SHIPPED May 16, 2026 | `s15-t3` | — | feat `3b083f0` + chore (this) |
-| 4 | Suggestion engine extraction (FS #160) — behavior-preserving | ✅ SHIPPED May 17, 2026 | `s15-t4` | 3537 / 0 | feat `9aa95d6` + chore (this) |
-| 5 | CI pipeline (GitHub Actions) + root `package.json` cleanup | ✅ SHIPPED May 17, 2026 | `s15-t5` | — | feat `e34eaae` + chore (this); prep `f911d79`, `51267bc` |
-| 6 | Server test infrastructure (`node:test` + supertest) | ✅ SHIPPED May 17, 2026 | `s15-t6` | — | feat `d8a0af7` + chore (this) |
-| 7 | Auth middleware integer-id validation + route handler simplification | ✅ SHIPPED May 18, 2026 | `s15-t7` | 3543 / 0 | feat `0a35a9a` + chore (this) |
-| 8 | ImageKit prod/test separation audit + remediation | ⏳ NOT STARTED | `s15-t8` (TBD) | — | — |
+| 1 | Environment separation (Neon staging + prod guards + API_BASE_URL dart-define) | ✅ SHIPPED May 16, 2026 | `s15-t1` | 3534 / 9 | feat `3dcd09d` + chore `d07016d` |
+| 2 | Sentry — Flutter integration | ✅ SHIPPED May 16, 2026 | `s15-t2` | — | feat `0102a8e` + chore `038de65` |
+| 3 | Sentry — Node integration | ✅ SHIPPED May 16, 2026 | `s15-t3` | — | feat `3b083f0` + chore `295ac78` |
+| 4 | Suggestion engine extraction (FS #160) — behavior-preserving | ✅ SHIPPED May 17, 2026 | `s15-t4` | 3537 / 0 | feat `9aa95d6` + chore `c5fbc21` |
+| 5 | CI pipeline (GitHub Actions) + root `package.json` cleanup | ✅ SHIPPED May 17, 2026 | `s15-t5` | — | feat `e34eaae` + chore `8ac9f4a`; prep `f911d79`, `51267bc` |
+| 6 | Server test infrastructure (`node:test` + supertest) | ✅ SHIPPED May 17, 2026 | `s15-t6` | — | feat `d8a0af7` + chore `bbf9a9d` |
+| 7 | Auth middleware integer-id validation + route handler simplification | ✅ SHIPPED May 18, 2026 | `s15-t7` | 3543 / 0 | feat `0a35a9a` + chore `9bf2c35` |
+| 8 | ImageKit prod/test separation audit + remediation | ❌ DEFERRED May 18, 2026 | — | — | Change of plans — might change to videos instead of images. Re-evaluate when media strategy is decided. |
 
 ---
 
