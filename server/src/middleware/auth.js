@@ -10,7 +10,15 @@ export function authenticate(req, res, next) {
 
   try {
     const token = header.slice(7);
-    req.user = jwt.verify(token, config.jwt.secret);
+    const decoded = jwt.verify(token, config.jwt.secret);
+    // S15-T7: validate id at the boundary so route handlers can trust
+    // req.user.id is a positive integer without re-coercing. Number.isInteger
+    // is strict — rejects strings, decimals, and undefined — so no coercion
+    // needed (coercing would silently accept string-digit ids like '123').
+    if (!Number.isInteger(decoded.id) || decoded.id <= 0) {
+      return res.status(401).json({ error: 'invalid_token' });
+    }
+    req.user = decoded;
     next();
   } catch {
     return res.status(401).json({ error: 'Invalid token' });

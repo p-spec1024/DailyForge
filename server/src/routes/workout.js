@@ -217,16 +217,7 @@ router.get('/:workoutId/slots/:exerciseId/alternatives', async (req, res, next) 
 // UPSERT + counter-increment run in a single transaction (Decision 3).
 router.put('/slot/:exerciseId/choose', async (req, res, next) => {
   try {
-    // S14-T6 Commit 1.8 (/review pass 2 W-3'): coerce req.user.id once at
-    // the top of the handler. Pre-fix, the handler trusted req.user.id in
-    // the swap-counts UPSERT + incrementSwap call but coerced separately
-    // for rankAlternatives — half-coerced handler, two defensiveness
-    // regimes. Now `userId` is the single int reference used everywhere
-    // below. FUTURE_SCOPE #215 sweeps the rest of the backend.
-    const userId = Number(req.user.id);
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({ error: 'invalid_user_id' });
-    }
+    const userId = req.user.id;
 
     const exerciseId = parseInt(req.params.exerciseId, 10);
     const chosenId = parseInt(req.body.chosen_exercise_id, 10);
