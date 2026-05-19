@@ -53,6 +53,19 @@ void main() async {
         options.release = _sentryRelease;
       }
       options.tracesSampleRate = 0.2;
+      // S16-T2: enrich ApiException events with engine_code + http_status
+      // tags so engine contract errors are filterable in the Sentry dashboard.
+      options.beforeSend = (event, hint) {
+        final throwable = event.throwable;
+        if (throwable is ApiException) {
+          event.tags = <String, String>{
+            ...?event.tags,
+            'http_status': throwable.statusCode.toString(),
+            if (throwable.code != null) 'engine_code': throwable.code!,
+          };
+        }
+        return event;
+      };
     },
     appRunner: () => runApp(const DailyForgeApp()),
   );

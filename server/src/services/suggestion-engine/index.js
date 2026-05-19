@@ -34,8 +34,8 @@
 //   - NotImplementedError
 //
 // S15-T4 (FS #160): extracted from server/src/services/suggestionEngine.js.
-// S16-T2 will migrate RangeError throw sites to typed EngineContractError
-// (defined as a shell in errors.js but not used yet).
+// S16-T2: contract-validation throws use EngineContractError; the HTTP layer
+// reads {code, details} directly. Mapping at Trackers/S16-T2-error-mapping.md.
 
 import {
   VALID_ENTRY_POINTS,
@@ -43,6 +43,7 @@ import {
   VALID_BUDGETS_BY_ENTRY,
   BODY_ONLY_ENTRY_POINTS,
 } from './constants.js';
+import { EngineContractError } from './errors.js';
 import { resolveFocus, resolveLevels } from './helpers.js';
 import { generateStateFocus } from './recipes/state-focus.js';
 import { generateCrossPillar } from './recipes/cross-pillar.js';
@@ -80,7 +81,11 @@ export async function generateSession({ user_id, focus_slug, entry_point, time_b
 
   // Stage 2: bracket value-check (independent of focus type — fail fast on garbage).
   if (bracket != null && !VALID_BRACKETS.has(bracket)) {
-    throw new RangeError(`invalid bracket value: ${bracket}`);
+    throw new EngineContractError({
+      code: 'INVALID_BRACKET',
+      message: 'invalid_bracket',
+      details: { given: bracket, valid: [...VALID_BRACKETS] },
+    });
   }
 
   const focus = await resolveFocus(focus_slug);
@@ -88,22 +93,38 @@ export async function generateSession({ user_id, focus_slug, entry_point, time_b
   // T4: mobility from strength_tab is locked out at dispatch (Sprint 13+ picker
   // UX hides this; engine asserts the contract as second line of defense).
   if (focus.slug === 'mobility' && entry_point === 'strength_tab') {
-    throw new RangeError(
-      'mobility is not available from strength_tab — use yoga_tab or home'
-    );
+    throw new EngineContractError({
+      code: 'INVALID_FOCUS_ENTRY_COMBO',
+      message: 'invalid_focus_entry_combo',
+      details: {
+        focus_slug: focus.slug,
+        entry_point: 'strength_tab',
+        reason: 'mobility_not_in_strength_tab',
+      },
+    });
   }
 
   // ── State-focus path (T3.5: bracket-driven) ───────────────────────────
   if (focus.focus_type === 'state') {
     // Body-only tabs hide state focuses in their pickers; defend anyway.
     if (BODY_ONLY_ENTRY_POINTS.has(entry_point)) {
-      throw new RangeError(
-        `state focus '${focus.slug}' is not valid from '${entry_point}'; ` +
-        `state focuses are surfaced from 'home' and 'breathwork_tab' only`
-      );
+      throw new EngineContractError({
+        code: 'INVALID_FOCUS_ENTRY_COMBO',
+        message: 'invalid_focus_entry_combo',
+        details: {
+          focus_slug: focus.slug,
+          focus_type: 'state',
+          entry_point,
+          reason: 'state_focus_not_in_body_only_tab',
+        },
+      });
     }
     if (bracket == null) {
-      throw new RangeError('state focus requires bracket parameter');
+      throw new EngineContractError({
+        code: 'STATE_FOCUS_REQUIRES_BRACKET',
+        message: 'state_focus_requires_bracket',
+        details: { focus_slug: focus.slug },
+      });
     }
     // time_budget_min is silently ignored for state focuses (per spec decision #3).
     return generateStateFocus({ userId: user_id, focus, bracket });
@@ -112,10 +133,16 @@ export async function generateSession({ user_id, focus_slug, entry_point, time_b
   // ── Body-focus path (T2: time_budget_min-driven) ──────────────────────
   // Body focus from breathwork_tab is invalid — breathwork_tab is state-only.
   if (entry_point === 'breathwork_tab') {
-    throw new RangeError(
-      `body focus '${focus.slug}' is not valid from 'breathwork_tab'; ` +
-      `breathwork_tab supports state focuses only`
-    );
+    throw new EngineContractError({
+      code: 'INVALID_FOCUS_ENTRY_COMBO',
+      message: 'invalid_focus_entry_combo',
+      details: {
+        focus_slug: focus.slug,
+        focus_type: 'body',
+        entry_point: 'breathwork_tab',
+        reason: 'body_focus_in_breathwork_tab',
+      },
+    });
   }
 
   if (!Number.isInteger(time_budget_min) || time_budget_min <= 0) {
@@ -124,10 +151,15 @@ export async function generateSession({ user_id, focus_slug, entry_point, time_b
     );
   }
   if (!VALID_BUDGETS_BY_ENTRY[entry_point].has(time_budget_min)) {
-    throw new RangeError(
-      `time_budget_min ${time_budget_min} not valid for entry_point '${entry_point}'; ` +
-      `valid: ${[...VALID_BUDGETS_BY_ENTRY[entry_point]].join(', ')}`
-    );
+    throw new EngineContractError({
+      code: 'INVALID_TIME_BUDGET',
+      message: 'invalid_time_budget',
+      details: {
+        given: time_budget_min,
+        entry_point,
+        valid: [...VALID_BUDGETS_BY_ENTRY[entry_point]],
+      },
+    });
   }
 
   const levels = await resolveLevels(user_id);

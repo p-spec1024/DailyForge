@@ -11,10 +11,17 @@ const Duration _kRequestTimeout = Duration(seconds: 15);
 class ApiException implements Exception {
   final int statusCode;
   final String message;
-  ApiException(this.statusCode, this.message);
+
+  /// S16-T2: typed engine contract code (e.g. 'INVALID_TIME_BUDGET') when the
+  /// server response carries a `code` field. Null for route-validator
+  /// responses, non-engine endpoints, and pre-S16-T2 server responses.
+  final String? code;
+
+  ApiException(this.statusCode, this.message, [this.code]);
 
   @override
-  String toString() => 'ApiException($statusCode): $message';
+  String toString() =>
+      'ApiException($statusCode): $message${code != null ? ' [$code]' : ''}';
 }
 
 class UnauthorizedException extends ApiException {
@@ -111,11 +118,16 @@ class ApiService {
 
   ApiException _buildApiException(http.Response response) {
     String? message;
+    String? code;
     try {
       final body = jsonDecode(response.body);
-      if (body is Map<String, dynamic>) message = body['error'] as String?;
+      if (body is Map<String, dynamic>) {
+        if (body['error'] is String) message = body['error'] as String;
+        if (body['code'] is String) code = body['code'] as String;
+      }
     } catch (_) {}
-    return ApiException(response.statusCode, message ?? 'Something went wrong');
+    return ApiException(
+        response.statusCode, message ?? 'Something went wrong', code);
   }
 
   Future<http.Response> _sendRaw(

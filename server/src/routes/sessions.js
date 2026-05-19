@@ -25,19 +25,9 @@
 //      `completed_at` (semantic match for "most recently completed").
 //      breathwork_sessions still uses `created_at`. Pre-flight (b1) confirmed.
 //
-//   5. Engine RangeError mapping: spec listed 6 expected substrings; engine's
-//      actual phrasing differs for 4 of them. Pre-flight (c4) inventoried all
-//      10 RangeError sites and they all collapse to:
-//         - 'invalid bracket value'        → invalid_bracket
-//         - 'state focus requires bracket' → state_focus_requires_bracket
-//         - 'is not valid from'            → invalid_focus_entry_combo
-//                                            (covers state-focus-from-X and
-//                                             body-focus-from-breathwork)
-//         - 'not available from strength_tab' → invalid_focus_entry_combo
-//                                               (covers mobility-from-strength)
-//         - 'time_budget_min' (any phrasing) → invalid_time_budget
-//      Mapper below uses these substrings. Engine refactor to typed errors is
-//      a separate FUTURE_SCOPE item per resolved-Q5; v1 string-match accepted.
+//   5. Engine errors: typed via EngineContractError ({code, message, details}).
+//      Catch block does `instanceof EngineContractError` and passes the fields
+//      through to the response. Mapping: Trackers/S16-T2-error-mapping.md.
 //
 //   6. Routine position indexing: existing routes/routines.js uses 0-indexed
 //      `position` on user_routine_exercises. We follow the same convention
@@ -47,6 +37,7 @@ import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { authChain } from '../middleware/auth.js';
 import { generateSession } from '../services/suggestion-engine/index.js';
+import { EngineContractError } from '../services/suggestion-engine/errors.js';
 import { formatLastSession } from '../services/sessionFormatter.js';
 
 const VALID_ENTRY_POINTS = new Set(['home', 'strength_tab', 'yoga_tab', 'breathwork_tab']);
@@ -61,16 +52,6 @@ async function getFocusBySlug(slug, { requireActive = false } = {}) {
     : `SELECT slug, focus_type FROM focus_areas WHERE slug = $1 LIMIT 1`;
   const { rows } = await pool.query(sql, [slug]);
   return rows[0] || null;
-}
-
-function mapRangeErrorToCode(message) {
-  if (typeof message !== 'string') return 'unmapped_engine_error';
-  if (message.includes('invalid bracket value'))               return 'invalid_bracket';
-  if (message.includes('state focus requires bracket'))        return 'state_focus_requires_bracket';
-  if (message.includes('is not valid from'))                   return 'invalid_focus_entry_combo';
-  if (message.includes('not available from strength_tab'))     return 'invalid_focus_entry_combo';
-  if (message.includes('time_budget_min'))                     return 'invalid_time_budget';
-  return 'unmapped_engine_error';
 }
 
 // Defense-in-depth: a JWT signed without an `id` claim would slip past the
@@ -122,7 +103,7 @@ router.post('/suggest', async (req, res) => {
     return res.status(400).json({ error: 'state_focus_requires_bracket' });
   }
 
-  // 3. Call engine — engine throws RangeError on remaining contract violations.
+  // 3. Call engine — engine throws EngineContractError on contract violations.
   try {
     const result = await generateSession({
       user_id: req.user.id,
@@ -134,13 +115,12 @@ router.post('/suggest', async (req, res) => {
     result.metadata = { ...(result.metadata || {}), source: 'engine_v1' };
     return res.json(result);
   } catch (err) {
-    if (err instanceof RangeError) {
-      const code = mapRangeErrorToCode(err.message);
-      if (code === 'unmapped_engine_error') {
-        // Surface mapper drift so /review or future audits catch it.
-        console.warn('[T7] /suggest unmapped engine RangeError:', err.message);
-      }
-      return res.status(400).json({ error: code });
+    if (err instanceof EngineContractError) {
+      return res.status(400).json({
+        error: err.message,
+        code: err.code,
+        details: err.details ?? undefined,
+      });
     }
     console.error('[T7] /suggest engine error:', err);
     return res.status(500).json({ error: 'engine_error' });
