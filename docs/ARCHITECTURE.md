@@ -394,7 +394,7 @@ Provider pattern with `ChangeNotifier` + `notifyListeners()`. All 21 providers a
 - On `401`, calls `_storage.deleteToken()` + `_storage.deleteUser()` + `onUnauthorized?.call()` and throws `UnauthorizedException`. The `onUnauthorized` callback is set by `AuthProvider` to trigger logout.
 - Non-2xx responses produce `ApiException(statusCode, message)` where `message` is the JSON `error` field if present.
 
-**Methods.** `get(path)` (single map response), `getList(path)` (list response — a separate code path for list endpoints), `post(path, body, {withAuth})`, `put(path, body)`, `delete(path)`.
+**Methods.** `get(path)` (single map response), `getList(path)` (list response — thin wrapper over `_sendRaw` with `List<dynamic>` decode), `post(path, body, {withAuth})`, `put(path, body)`, `delete(path)`. All five route through a single `_sendRaw()` core that handles JWT auth, timeout, 401 logout, and infrastructure-error rewrap (S16-T1).
 
 **`StorageService`** (`app/lib/services/storage_service.dart`) wraps `flutter_secure_storage` (JWT + user JSON) and `shared_preferences` (everything else). Exports two top-level constants — `kCrossPillarSessionKey` and `kStateFocusSessionKey` — used by the multi-phase orchestrator providers to persist their in-flight session snapshots. The `_v1` suffix on each key reserves room for a schema migration.
 
