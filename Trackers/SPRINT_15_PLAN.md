@@ -1,5 +1,35 @@
 # Sprint 15 Plan — Foundation (Stabilization Part 1)
 
+---
+
+## ⚠️ Sprint Close Note (May 18, 2026)
+
+**Status:** ✅ CLOSED — 7 of 8 tickets shipped. Tag: `sprint-15-close` on `main`.
+
+**Shipped:**
+- T1: Environment separation (Neon staging + prod guards + `API_BASE_URL` dart-define)
+- T2: Sentry — Flutter integration
+- T3: Sentry — Node integration
+- T4: Suggestion engine extraction (FS #160 closed)
+- T5: CI pipeline (GitHub Actions) + root `package.json` cleanup
+- T6: Server test infrastructure (`node:test` + supertest)
+- T7: Auth middleware integer-id validation + route handler simplification
+
+**Deferred:**
+- T8: ImageKit prod/test separation audit + remediation — **change of plans, might change to videos instead of images**. Re-evaluate when media strategy is decided.
+
+**Why T8 deferred:**
+
+Real workout apps (Hevy, Strong, Down Dog) ship exercise demonstrations as **video**, not static images. Static exercise images may not survive product evolution. Locking down prod/test separation on infrastructure that may be deprecated or restructured is wasted work. T8 returns to the queue once the media direction is decided.
+
+**Prod-safety gap acknowledged:**
+
+T8 was the last "I could accidentally hurt my 5 prod users" risk in the stabilization phase. Sprint 15 ships with DB locked down (T1) but media not. Low blast radius (5 prod users, ImageKit access tightly held), but the sprint's stated goal of "production-readiness foundation" closes partially complete by design. Sprint 16 onwards proceeds with this known gap; mitigations are operational discipline (no ImageKit dashboard work during dev sessions) until media strategy resolves.
+
+**Successor:** Sprint 16 (Engine & API hardening) is ready to start.
+
+---
+
 **Sprint goal:** Production-readiness foundation. Ship the infrastructure, observability, and engine refactor that gate broader invite beta.
 
 **Theme:** Foundation. Not features.
