@@ -22,9 +22,11 @@ Hardening. Tightening the seams between modules. Test-first refactors.
 
 ## Tickets
 
-### S16-T1 — ApiService consolidation
+### S16-T1 — ApiService consolidation — ✅ SHIPPED 2026-05-19
 
 Consolidate `app/lib/services/api_service.dart` into a single `_sendRaw()` core. Unified handling of timeout, 401 logout, JSON parsing, network exception wrapping. `get`/`getList`/`post`/`put`/`delete` become thin wrappers. Resolves `getList()` divergence ChatGPT flagged in §5.2. Touches every Flutter service that uses ApiService — incidental verification across the app.
+
+**Open question resolved:** `getList` stays as a thin wrapper, not folded into `get<T>()`. Pre-flight enumerated 58 call sites total (3 `getList` + 31 `get` + 13 `post` + 7 `put` + 4 `delete`); folding would require touching all 34 `get`/`getList` sites to add type parameters for zero behavioral gain. See `Trackers/S16-T1-consumers.md`. Feat `a9b314c`.
 
 ### S16-T2 — Typed engine errors + endpoint-aware timeouts
 
@@ -79,7 +81,7 @@ Split into: session state machine, set logging, routine handling. Behavior-prese
 
 ## Open questions
 
-- Should `ApiService.getList()` actually remain or fold entirely into `get()` with type signatures? Defer to spec authoring.
+- ~~Should `ApiService.getList()` actually remain or fold entirely into `get()` with type signatures? Defer to spec authoring.~~ **Resolved at S16-T1 spec time, confirmed by 58-call-site inventory:** `getList` stays as a thin wrapper. See S16-T1 ticket entry above.
 - Are there latent endpoints in `routes/session.js` worth deleting during the split, vs. preserving? Defer to pre-flight audit.
 
 ---

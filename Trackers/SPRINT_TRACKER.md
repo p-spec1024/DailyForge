@@ -411,12 +411,17 @@ After Sprint 14 close, dedicated stabilization-prep work before Sprint 15 kicks 
 
 ---
 
-## Sprint 16 — Engine & API Hardening (Stabilization Part 2) — OUTLINED
+## Sprint 16 — Engine & API Hardening (Stabilization Part 2) — 🟡 IN PROGRESS
 
-**Status:** OUTLINED. Full spec authored at S15 close.
+**Status:** 🟡 IN PROGRESS — kicked off May 19, 2026 with T1.
 **Outline source:** `Trackers/SPRINT_16_OUTLINE.md`
 **Theme:** Harden the public API and the engine error surface. Reduce blast radius of suggestion-engine changes. Establish meaningful test coverage now that staging DB exists.
 **Ticket count:** 6 (server-heavy with a small app slice).
+**Branch strategy:** Sprint-chained off `main`, single `--no-ff` merge + `sprint-16-close` annotated tag at sprint close (per PI #20).
+
+| # | Ticket | Status | Branch | Smoke | Commit |
+|---|---|---|---|---|---|
+| 1 | ApiService consolidation — single `_sendRaw()` core + 5 thin wrappers (resolves ChatGPT review §5.2 / finding #30) | ✅ SHIPPED May 19, 2026 | `s16-t1` | 20 / 0 | feat `a9b314c` + chore (this) |
 
 ---
 
