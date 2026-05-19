@@ -27,7 +27,7 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 |---|---|---|---|---|
 | 1 | Single production database (no staging/dev) | §3.1 | **S15-T1** Environment separation | Shipped [2026-05-16, 3dcd09d] |
 | 2 | Suggestion engine monolithic at 1791 LOC | §3.2 | **S15-T4** Suggestion engine extraction (FS #160) | Shipped [2026-05-17, 9aa95d6] |
-| 3 | Engine error mapping via RangeError substring matching | §3.3 | **S16-T2** Typed engine errors | Pending |
+| 3 | Engine error mapping via RangeError substring matching | §3.3 | **S16-T2** Typed engine errors | Shipped [2026-05-19, `89b3e06`] |
 | 4 | Root `package.json` stale `client` workspace | §3.4 | **S15-T5** CI pipeline (bundled cleanup) | Shipped [2026-05-17, e34eaae] |
 | 5 | `ApiConfig` LAN IP fallback `192.168.0.204` | §3.5 | **S15-T1** Environment separation (bundled) | Shipped [2026-05-16, 3dcd09d] |
 | 6 | CORS `origin: true` reflects every origin | §3.6 | **S17-T1** Security hygiene | Pending |

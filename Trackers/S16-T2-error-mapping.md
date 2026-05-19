@@ -1,8 +1,9 @@
 # S16-T2 Engine Error Mapping
 
-**Status:** Approved by Prashob 2026-05-19. Step 1 (EngineContractError impl) authorized.
+**Status:** ✅ Shipped 2026-05-19. All 10 throws migrated; route handler simplified; Flutter consumer + Sentry tagging + docs updated.
 **Source:** Pre-flight (b) of S16-T2 prompt, run on 2026-05-19.
 **Approval gate:** Passed 2026-05-19 — all 10 rows + 4 wire codes + user-facing copy signed off.
+**Smoke:** `server/scripts/test-engine-errors-s16-t2.js` — 71 pass / 0 fail against staging Neon.
 
 ---
 

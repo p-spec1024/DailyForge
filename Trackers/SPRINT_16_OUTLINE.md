@@ -28,9 +28,13 @@ Consolidate `app/lib/services/api_service.dart` into a single `_sendRaw()` core.
 
 **Open question resolved:** `getList` stays as a thin wrapper, not folded into `get<T>()`. Pre-flight enumerated 58 call sites total (3 `getList` + 31 `get` + 13 `post` + 7 `put` + 4 `delete`); folding would require touching all 34 `get`/`getList` sites to add type parameters for zero behavioral gain. See `Trackers/S16-T1-consumers.md`. Feat `a9b314c`.
 
-### S16-T2 — Typed engine errors + endpoint-aware timeouts
+### S16-T2 — Typed engine errors — ✅ SHIPPED 2026-05-19
 
-Replace `RangeError` substring matching in `server/src/routes/sessions.js` with `EngineContractError({ code, message, detail })` instances thrown from the engine. Route mapper becomes `if (err instanceof EngineContractError) return res.status(400).json({ error: err.code })`. Pairs with timeout work: `defaultTimeout = 20s`, `engineTimeout = 35s` for `/sessions/suggest` and engine-heavy routes. Updates timeout copy from "Check your connection" to "DailyForge took too long to respond. Please try again." Depends on S15-T4 having extracted the `errors.js` shell.
+`RangeError` substring matching in `server/src/routes/sessions.js` replaced with `EngineContractError({ code, message, details })` thrown from the engine. Route catch is a single `instanceof EngineContractError` branch that emits `{ error: err.message, code: err.code, details: err.details }` with HTTP 400. Response shape is additive — `error` field byte-identical to legacy lowercase code for old-APK backward compat; `code` (SCREAMING_SNAKE_CASE) + `details` are new. Flutter `ApiException` carries nullable `code`; `_mapApiException` switches on it with legacy substring fallback. Sentry `beforeSend` tags `engine_code` + `http_status` for filterable observability. 4 wire codes (INVALID_BRACKET, INVALID_FOCUS_ENTRY_COMBO, INVALID_TIME_BUDGET, STATE_FOCUS_REQUIRES_BRACKET) from 10 throw sites. Resolves ChatGPT review §3.3 / FS #166. Smoke `71 / 0`. Feat `89b3e06` + chore (this).
+
+### S16-T2b — Endpoint-aware timeouts — ⏳ STILL-OUTLINED
+
+Originally bundled into S16-T2; split out after pre-flight scope review. `defaultTimeout = 20s`, `engineTimeout = 35s` for `/sessions/suggest` and engine-heavy routes. Updates timeout copy from "Check your connection" to "DailyForge took too long to respond. Please try again." Resolves ChatGPT review §5.3 / findings #31 + #32, FS #209.
 
 ### S16-T3 — Test coverage expansion (9 high-value tests)
 

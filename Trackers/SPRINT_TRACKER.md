@@ -422,6 +422,7 @@ After Sprint 14 close, dedicated stabilization-prep work before Sprint 15 kicks 
 | # | Ticket | Status | Branch | Smoke | Commit |
 |---|---|---|---|---|---|
 | 1 | ApiService consolidation — single `_sendRaw()` core + 5 thin wrappers (resolves ChatGPT review §5.2 / finding #30) | ✅ SHIPPED May 19, 2026 | `s16-t1` | 20 / 0 | feat `a9b314c` + chore (this) |
+| 2 | Typed engine errors — `EngineContractError({code, message, details})` replaces RangeError substring matching (resolves ChatGPT review §3.3 / finding #3 / FS #166) | ✅ SHIPPED May 19, 2026 | `s16-t1` | 71 / 0 | feat `89b3e06` + chore (this) |
 
 ---
 
