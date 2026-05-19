@@ -1,8 +1,8 @@
-# S16-T2 Engine Error Mapping — DRAFT for review
+# S16-T2 Engine Error Mapping
 
-**Status:** Awaiting row-by-row approval from Prashob.
+**Status:** Approved by Prashob 2026-05-19. Step 1 (EngineContractError impl) authorized.
 **Source:** Pre-flight (b) of S16-T2 prompt, run on 2026-05-19.
-**Approval gate:** No engine throws may be migrated until every row below is approved.
+**Approval gate:** Passed 2026-05-19 — all 10 rows + 4 wire codes + user-facing copy signed off.
 
 ---
 
@@ -41,30 +41,24 @@ This matches the existing 4 Flutter exception classes in `suggest_service.dart` 
 
 ---
 
-## Backward-compatibility decision (per spec acceptance #5)
+## Backward-compatibility decision (per spec acceptance #5) — APPROVED
 
-**Proposed:** `err.message` set to the **exact legacy lowercase code string** (e.g. `'invalid_bracket'`, `'state_focus_requires_bracket'`, `'invalid_focus_entry_combo'`, `'invalid_time_budget'`). Route emits `{ error: err.message, code: err.code, details: err.details }`. Old APKs continue to see `{error: 'invalid_bracket'}` byte-identical to today, and their existing equality matcher in `suggest_service.dart:64-83` keeps working. New APKs read `code` (SCREAMING form) and ignore `error`.
+`err.message` set to the **exact legacy lowercase code string** (e.g. `'invalid_bracket'`, `'state_focus_requires_bracket'`, `'invalid_focus_entry_combo'`, `'invalid_time_budget'`). Route emits `{ error: err.message, code: err.code, details: err.details }`. Old APKs continue to see `{error: 'invalid_bracket'}` byte-identical to today, and their existing equality matcher in `suggest_service.dart:64-83` keeps working. New APKs read `code` (SCREAMING form) and ignore `error`.
 
-**Trade-off:** server logs / Sentry will see `err.message = 'invalid_bracket'` (lowercase code, not a human sentence). That's slightly ugly for log readability. Mitigation: the Sentry `engine_code` tag carries the SCREAMING form, and the `details` field carries rich context. Devs reading logs lose the "human sentence" affordance but gain perfect Flutter backward-compat.
-
-**Alternative not taken:** set `err.message` to a human sentence (e.g. `'Bracket "99" is not allowed. Use one of: 0-10, 10-20, ...'`). This breaks old-Flutter equality match. Old APKs would render `EngineError` generic copy ("Couldn't generate a session right now") instead of the case-specific copy. Acceptable per spec, but unnecessary loss of UX on old APKs when the safer alternative is one line.
-
-**Prashob decision needed:** approve this trade-off, or override on specific rows where human-sentence is preferred.
+**Trade-off accepted:** server logs see `err.message = 'invalid_bracket'` (lowercase code, not a human sentence). Sentry `engine_code` tag (SCREAMING form) + `details` payload (structured machine-readable context) provide the observability story. Server-log readability is the acceptable trade for byte-identical wire format with old APKs.
 
 ---
 
-## User-facing copy (Prashob to fill in)
+## User-facing copy — APPROVED
 
-The Flutter consumer copy currently lives in `suggest_service.dart` `userFacingMessage` getters on each exception class. After T2, the consumer switches on `exception.code` and shows these strings. The legacy exception classes already carry copy — listed here for confirmation, not invention.
+Each typed exception class in `suggest_service.dart` overrides `userFacingMessage` with the copy below. The Flutter consumer (Step 9) switches on `exception.code` and shows the matching copy. Legacy substring-match fallback (defensive against server rollback) shows the same copy.
 
-| # | code | Current Flutter copy (from `SuggestServiceException` subclasses) | Approve? |
-|---|---|---|---|
-| 1 | `INVALID_BRACKET` | _none defined — falls to `SuggestServiceException.userFacingMessage` = "Something went wrong. Please report."_ | _Prashob: keep, or write new copy?_ |
-| 2 | `INVALID_FOCUS_ENTRY_COMBO` | _none defined — falls to `SuggestServiceException` default_ | _Prashob: keep, or write new copy?_ |
-| 3 | `INVALID_TIME_BUDGET` | _none defined — falls to default_ | _Prashob: keep, or write new copy?_ |
-| 4 | `STATE_FOCUS_REQUIRES_BRACKET` | _none defined — falls to default_ | _Prashob: keep, or write new copy?_ |
-
-Observation: the current Flutter exception classes are typed-but-copy-less — they all use the generic default "Something went wrong. Please report." This is a UX hygiene opportunity worth taking in T2 (free since we're already touching the consumer). Recommend: write 1-line user copy per code now.
+| # | code | User-facing copy |
+|---|---|---|
+| A | `INVALID_BRACKET` | That time range isn't supported yet. Pick another option. |
+| B | `INVALID_FOCUS_ENTRY_COMBO` | This focus isn't available from here. Try opening it from Home. |
+| C | `INVALID_TIME_BUDGET` | That time doesn't fit this workout. Try a different length. |
+| D | `STATE_FOCUS_REQUIRES_BRACKET` | Pick a time range to continue. |
 
 ---
 
@@ -94,3 +88,16 @@ Not in this ticket (deferred to S16-T2b / T2c / T4):
 Not touched in this ticket (different error surface):
 - `routes/sessions.js` `/start-from-list` endpoint route-level validation codes (`unsupported_session_type`, `invalid_exercises`, etc.). These are not engine RangeError throws; the `_friendlyError` helper in `session_launcher.dart:407` handles them and stays as-is.
 - `routes/sessions.js` `/suggest` upstream validators (`invalid_focus_slug`, `invalid_entry_point`, `unknown_focus_slug`, `body_focus_requires_time_budget`). These return their own `{error: '...'}` directly without going through the engine catch block.
+
+---
+
+## Defense-in-depth note (rows 7-10)
+
+Rows **7, 8, 9, 10** are recipe-level defense — they mirror the top-level dispatch validators in `index.js`. In normal operation through `/api/sessions/suggest`, these throws are **unreachable**: dispatch throws #2 / #6 fire first, the recipe is never entered with bad input. The recipe-level throws exist for non-route callers (direct engine usage, test harnesses, future surfaces) and as a guard against dispatch refactors that might silently let bad input through.
+
+**Operational implication:** a Sentry event tagged `engine_code: INVALID_TIME_BUDGET` or `INVALID_FOCUS_ENTRY_COMBO` originating from a stack frame inside `recipes/cross-pillar.js:44`, `recipes/strength-only.js:23`, `recipes/strength-only.js:30-32`, or `recipes/yoga-only.js:39` in **production** is a bug worth investigating. It would mean either:
+- A new non-route caller (smoke harness, future API surface) is reaching the engine with input the dispatch validator wouldn't allow, OR
+- The dispatch validator has drifted and is letting bad input slip past, OR
+- An internal refactor reordered dispatch in a way that bypassed top-level validation.
+
+The Sentry `details` payload (which includes `entry_point` and `given` value) plus the stack frame file:line identifies the path. Watch for these in the Sentry dashboard post-ship.
