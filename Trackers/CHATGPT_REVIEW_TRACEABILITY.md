@@ -104,7 +104,7 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 | # | Finding | Source | Destination | Status |
 |---|---|---|---|---|
 | 49 | Route validation utilities (`parsePositiveInt`, etc.) | §10 P4 | **F6** FUTURE_SCOPE (helper layer, can wait) | Deferred |
-| 50 | `v_completed_sessions` DB view | §10 P5 | **F7 — merged into existing FS #212** (cross-referenced May 15, 2026). Duplicate detected during patch application; ChatGPT independently corroborated S14-T6 `/review` finding. | Resolved |
+| 50 | `v_completed_sessions` DB view | §10 P5 | **S16-T2c** Unified sessions VIEW (closes FS #212 + FS #260; F7 merged into FS #212 on May 15, 2026 — two independent reviewers reached the same conclusion) | Shipped [2026-05-20, `6a6f53e`] |
 
 ### §12. FUTURE_SCOPE priority adjustments
 
