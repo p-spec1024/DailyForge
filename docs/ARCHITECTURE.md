@@ -575,6 +575,20 @@ Backed by `GET /api/body-map/{muscle-volumes,flexibility,recent-wins}` (`server/
 
 Both functions live in the same `s11t4Functions` block of `migrate.js`. Neither is invoked from an HTTP endpoint today — they're written to be called by background jobs / future inference triggers. The `POST /api/users/pillar-levels` onboarding endpoint UPSERTs directly with `source = 'declared'`, deliberately bypassing the inference function so user-stated levels never get overwritten.
 
+**Postgres VIEWs**
+- `v_completed_sessions` — S16-T2c. UNION ALL over `sessions` (filter `completed = true`) and `breathwork_sessions` (filter `completed = true`), with normalized columns. Lives in the `views` block of migrate.js.
+
+  Columns (9): `row_id` text (`<id>:sessions` or `<id>:breathwork`), `user_id`, `pillar` (`'strength' | 'yoga' | '5phase' | 'breathwork'`), `completed_at` (timestamptz; for sessions `COALESCE(completed_at, started_at, date+23:59:59)`; for breathwork `created_at`), `started_at`, `duration_min` (numeric; `sessions.duration / 60.0` or `duration_seconds / 60.0`), `focus_slug`, `multi_phase_session_id`, `completed_date` (date; for sessions `sessions.date`, for breathwork `(created_at AT TIME ZONE 'UTC')::date` — preserves the per-table date semantics the home handlers relied on pre-migration).
+
+  **Semantics:**
+  - **Does NOT auto-dedupe.** A 5-phase cross-pillar session that writes 2-3 per-pillar rows returns 2-3 rows from the VIEW. Endpoints that need to count "unique sessions" dedupe by `multi_phase_session_id` in the handler (see `routes/home.js` `/daily-counts`).
+  - **No JOIN against `multi_phase_sessions`.** Keeps the query plan narrow. Endpoints that need header data join `multi_phase_sessions ON v_completed_sessions.multi_phase_session_id = multi_phase_sessions.id` themselves.
+  - **Filter is `completed = true`**, matching the canonical handler convention — NOT `completed_at IS NOT NULL`.
+
+  **Round-trip impact:** `/api/home/stats` dropped from 6 DB round-trips per request (10 `pg-pool.connect` events including auth) to 1. `/api/home/weekly-activity`, `/daily-load`, `/daily-counts` each dropped from 2 to 1.
+
+  **Consumers (as of S16-T2c):** `routes/home.js` (4 endpoints). Future endpoints that need "completed sessions for user X" should query the VIEW.
+
 ---
 
 ## 7. Round-trip flow — "user taps Start on home"
