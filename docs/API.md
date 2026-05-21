@@ -381,18 +381,32 @@ The legacy single-pillar session player surface. Strength sessions live here; yo
 
 S12-T7 and S14-T1 endpoints — the only Approach-5 surface that talks to `services/suggestionEngine.js` directly. All four require both `authenticate` AND `requireUserId` middleware: `requireUserId` is defense-in-depth in case a JWT was issued without an `id` claim and would otherwise slip through to the engine as `undefined` and crash with a TypeError.
 
-The engine throws `RangeError` on contract violations. The route maps RangeError-message substrings to stable error codes:
+### Engine validation errors (S16-T2 typed contract)
 
-| RangeError contains | Mapped code | Status |
-|---|---|---|
-| `invalid bracket value` | `invalid_bracket` | 400 |
-| `state focus requires bracket` | `state_focus_requires_bracket` | 400 |
-| `is not valid from` | `invalid_focus_entry_combo` | 400 |
-| `not available from strength_tab` | `invalid_focus_entry_combo` | 400 |
-| `time_budget_min` (any phrasing) | `invalid_time_budget` | 400 |
-| anything else | `unmapped_engine_error` | 400 (logged) |
+The engine throws `EngineContractError({code, message, details})` on contract violations. The route catches via `instanceof EngineContractError` and emits an **additive** 400 response:
 
-This string-match approach is intentional v1; the typed-error refactor is FUTURE_SCOPE #166.
+```json
+{
+  "error": "invalid_time_budget",
+  "code": "INVALID_TIME_BUDGET",
+  "details": { "given": 99, "entry_point": "home", "valid": [30, 60] }
+}
+```
+
+- `error` — legacy lowercase code string. **Byte-identical to the pre-S16-T2 wire format**, so old APKs continue to work without update.
+- `code` — SCREAMING_SNAKE_CASE stable enum (new in S16-T2). New clients branch on this.
+- `details` — machine-readable context object. Shape varies per code (see table below).
+
+All engine contract errors return HTTP 400.
+
+| code | Triggered when | Example `details` | Client guidance |
+|---|---|---|---|
+| `INVALID_BRACKET` | State-focus request carries a `bracket` outside the enum (`0-10`, `10-20`, `21-30`, `30-45`, `endless`). Defense-in-depth — route normally validates `bracket` first. | `{ given: 'not_a_bracket', valid: ['0-10','10-20','21-30','30-45','endless'] }` | Flutter: `InvalidBracketException` — "That time range isn't supported yet. Pick another option." |
+| `INVALID_FOCUS_ENTRY_COMBO` | Focus + entry_point combination is invalid: mobility from strength_tab, state focus from a body-only tab, body focus from breathwork_tab. `details.reason` disambiguates. | `{ focus_slug, entry_point, reason: 'mobility_not_in_strength_tab' \| 'state_focus_not_in_body_only_tab' \| 'body_focus_in_breathwork_tab' }` | Flutter: `InvalidFocusEntryComboException` — "This focus isn't available from here. Try opening it from Home." |
+| `INVALID_TIME_BUDGET` | `time_budget_min` is not in the entry_point's allowed set. `home`/`strength_tab` accept `{30, 60}`; `yoga_tab` accepts `{15, 30, 45, 60}`. | `{ given: 99, entry_point: 'home', valid: [30, 60] }` | Flutter: `InvalidTimeBudgetException` — "That time doesn't fit this workout. Try a different length." |
+| `STATE_FOCUS_REQUIRES_BRACKET` | State focus called without `bracket`. Defense-in-depth — route normally validates this first. | `{ focus_slug }` | Flutter: `StateFocusRequiresBracketException` — "Pick a time range to continue." |
+
+Full code-to-throw-site mapping: `Trackers/S16-T2-error-mapping.md`.
 
 ### POST /api/sessions/suggest
 - **Handler:** `server/src/routes/sessions.js`
@@ -408,10 +422,10 @@ This string-match approach is intentional v1; the typed-error refactor is FUTURE
   ```
 - **Response 200:** engine `SuggestedSession` shape (`{ session_shape, phases: [{ phase, items: [...] }], metadata: { ..., source: 'engine_v1' } }`).
 - **Errors:**
-  - `400 invalid_focus_slug | invalid_entry_point | invalid_time_budget | invalid_bracket`
+  - `400 invalid_focus_slug | invalid_entry_point | invalid_time_budget | invalid_bracket` (route validators; no `code` field)
   - `400 unknown_focus_slug` — slug doesn't exist or `is_active=false`.
-  - `400 body_focus_requires_time_budget | state_focus_requires_bracket`
-  - `400 invalid_focus_entry_combo | unmapped_engine_error` (from engine RangeError)
+  - `400 body_focus_requires_time_budget | state_focus_requires_bracket` (route validators; no `code` field)
+  - `400 invalid_focus_entry_combo | invalid_time_budget` from `EngineContractError` — also carries `code` (SCREAMING) + `details` payload per the engine validation table above.
   - `500 engine_error` — uncaught engine exception, logged via `console.error`.
 
 ### GET /api/sessions/last

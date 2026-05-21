@@ -38,10 +38,15 @@ import {
 } from '../pickers.js';
 import { bookendItem, strengthItem, yogaItem } from '../item-formatters.js';
 import { checkRecencyOverlap } from '../recency.js';
+import { EngineContractError } from '../errors.js';
 
 export async function generateCrossPillar({ userId, focus, levels, timeBudget }) {
   if (![30, 60].includes(timeBudget)) {
-    throw new RangeError(`time_budget_min must be 30 or 60 for home entry; got ${timeBudget}`);
+    throw new EngineContractError({
+      code: 'INVALID_TIME_BUDGET',
+      message: 'invalid_time_budget',
+      details: { given: timeBudget, entry_point: 'home', valid: [30, 60] },
+    });
   }
   // T4 special-case branches: see below the keyworded path.
   if (focus.slug === 'mobility') {

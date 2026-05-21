@@ -360,7 +360,7 @@ CREATE TABLE IF NOT EXISTS exercise_swap_counts (
 -- exclusion UI can reuse the same table. content_id is a SOFT FK (no
 -- constraint) because it can point at exercises.id OR breathwork_techniques.id
 -- depending on content_type — same pattern as focus_content_compatibility.
--- Engine reads `WHERE content_type = 'strength'` today.
+-- Engine reads \`WHERE content_type = 'strength'\` today.
 CREATE TABLE IF NOT EXISTS user_excluded_exercises (
   id           SERIAL PRIMARY KEY,
   user_id      INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -931,6 +931,57 @@ CREATE INDEX IF NOT EXISTS idx_breathwork_sessions_mps
   WHERE multi_phase_session_id IS NOT NULL;
 `;
 
+// S16-T2c: unified VIEW over both per-pillar session tables. Normalizes the
+// per-table column names so endpoints can query a single relation instead of
+// repeating UNION ALL boilerplate. `completed_at` for sessions falls back
+// through started_at and date+23:59:59 to match the /api/sessions/last
+// COALESCE pattern. breathwork has no completed_at/started_at — created_at
+// serves both roles. Durations come from the explicit per-table columns
+// (sessions.duration, breathwork_sessions.duration_seconds); both stored in
+// seconds, normalized to minutes in the VIEW. Filter is completed = true,
+// matching the canonical handler convention. The VIEW does NOT auto-dedupe
+// multi-phase rows — that's the caller's responsibility (see
+// docs/ARCHITECTURE.md §4.7).
+const views = `
+CREATE OR REPLACE VIEW v_completed_sessions AS
+SELECT
+  s.id::text || ':sessions' AS row_id,
+  s.user_id,
+  s.type AS pillar,
+  COALESCE(
+    s.completed_at,
+    s.started_at,
+    (s.date::timestamp + TIME '23:59:59')::timestamptz
+  ) AS completed_at,
+  s.started_at,
+  s.duration / 60.0 AS duration_min,
+  s.focus_slug,
+  s.multi_phase_session_id,
+  -- completed_date preserves the per-table date semantics the home endpoints
+  -- relied on before the VIEW: sessions.date is the client-local date set at
+  -- session start; breathwork has no date column, so the handler used
+  -- (created_at AT TIME ZONE 'UTC')::date. New column kept at the end so
+  -- CREATE OR REPLACE VIEW can re-run idempotently.
+  s.date AS completed_date
+FROM sessions s
+WHERE s.completed = true
+
+UNION ALL
+
+SELECT
+  b.id::text || ':breathwork' AS row_id,
+  b.user_id,
+  'breathwork'::text AS pillar,
+  b.created_at AS completed_at,
+  b.created_at AS started_at,
+  b.duration_seconds / 60.0 AS duration_min,
+  b.focus_slug,
+  b.multi_phase_session_id,
+  (b.created_at AT TIME ZONE 'UTC')::date AS completed_date
+FROM breathwork_sessions b
+WHERE b.completed = true;
+`;
+
 async function migrate() {
   console.log('Running migrations...');
   await pool.query(schema);
@@ -940,6 +991,8 @@ async function migrate() {
   await pool.query(indexes);
   console.log('Defining functions...');
   await pool.query(s11t4Functions);
+  console.log('Creating views...');
+  await pool.query(views);
   console.log('Migrations complete.');
   await pool.end();
 }

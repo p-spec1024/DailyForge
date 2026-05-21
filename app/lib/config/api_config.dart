@@ -101,4 +101,22 @@ class ApiConfig {
 
   // Helper to build full URL
   static String url(String endpoint) => '$baseUrl$endpoint';
+
+  // === Timeout policy (S16-T2b, closes FS #209) =============================
+  // Default for endpoints not in the override map. Bumped 15s → 20s; the prior
+  // 15s ceiling was always tight for the whole app. Engine-heavy endpoints get
+  // their own override below — slowness is opt-in, added by deliberately
+  // listing a path here, not inferred from prefix or pattern.
+  static const Duration defaultTimeout = Duration(seconds: 20);
+
+  static const Map<String, Duration> _endpointTimeouts = <String, Duration>{
+    sessionsSuggest: Duration(seconds: 35),
+    sessionsStartFromList: Duration(seconds: 35),
+  };
+
+  /// Returns the timeout configured for [path], or [defaultTimeout].
+  /// [path] is the endpoint path exactly as ApiConfig declares it (no /api
+  /// prefix; that lives in [baseUrl]).
+  static Duration timeoutFor(String path) =>
+      _endpointTimeouts[path] ?? defaultTimeout;
 }

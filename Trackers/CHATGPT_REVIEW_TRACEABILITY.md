@@ -27,7 +27,7 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 |---|---|---|---|---|
 | 1 | Single production database (no staging/dev) | §3.1 | **S15-T1** Environment separation | Shipped [2026-05-16, 3dcd09d] |
 | 2 | Suggestion engine monolithic at 1791 LOC | §3.2 | **S15-T4** Suggestion engine extraction (FS #160) | Shipped [2026-05-17, 9aa95d6] |
-| 3 | Engine error mapping via RangeError substring matching | §3.3 | **S16-T2** Typed engine errors | Pending |
+| 3 | Engine error mapping via RangeError substring matching | §3.3 | **S16-T2** Typed engine errors | Shipped [2026-05-19, `89b3e06`] |
 | 4 | Root `package.json` stale `client` workspace | §3.4 | **S15-T5** CI pipeline (bundled cleanup) | Shipped [2026-05-17, e34eaae] |
 | 5 | `ApiConfig` LAN IP fallback `192.168.0.204` | §3.5 | **S15-T1** Environment separation (bundled) | Shipped [2026-05-16, 3dcd09d] |
 | 6 | CORS `origin: true` reflects every origin | §3.6 | **S17-T1** Security hygiene | Pending |
@@ -64,9 +64,9 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 | 27 | Large file: `yoga_session_player.dart` (611) | §5.1 | **S17-T6** | Pending |
 | 28 | Large file: `strength_player.dart` (591) | §5.1 | **S17-T6** | Pending |
 | 29 | Large file: `seed-breathwork-techniques.js` (1417) | §5.1 | **F2** FUTURE_SCOPE (data file, low priority) | Deferred |
-| 30 | `ApiService.getList()` separated handling | §5.2 | **S16-T1** ApiService consolidation | Pending |
-| 31 | Timeout 15s flat, no endpoint awareness | §5.3 | **S16-T2** (bundled with typed errors) | Pending |
-| 32 | Timeout copy misleading ("Check your connection") | §5.3 | **S16-T2** (bundled) | Pending |
+| 30 | `ApiService.getList()` separated handling | §5.2 | **S16-T1** ApiService consolidation | Shipped [2026-05-19, `a9b314c`] |
+| 31 | Timeout 15s flat, no endpoint awareness | §5.3 | **S16-T2b** Endpoint-aware timeouts (`ApiConfig.timeoutFor`) | Shipped [2026-05-21, `3d1aecb`] |
+| 32 | Timeout copy misleading ("Check your connection") | §5.3 | **S16-T2b** Service-layer Timeout variants with distinct copy | Shipped [2026-05-21, `3d1aecb`] |
 | 33 | Auth middleware not validating JWT `id` integer | §5.4 | **S15-T7** Auth integer-id validation (renumbered from S15-T6 on 2026-05-17) | Shipped [2026-05-18, 0a35a9a] |
 | 34 | `/api/media/test-upload` ships to production | §5.5 | **S17-T1** Security hygiene (bundled) | Pending |
 | 35 | Test coverage narrow — 9 high-value tests missing | §5.6 | **S16-T3** Test coverage expansion | Pending |
@@ -104,7 +104,7 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 | # | Finding | Source | Destination | Status |
 |---|---|---|---|---|
 | 49 | Route validation utilities (`parsePositiveInt`, etc.) | §10 P4 | **F6** FUTURE_SCOPE (helper layer, can wait) | Deferred |
-| 50 | `v_completed_sessions` DB view | §10 P5 | **F7 — merged into existing FS #212** (cross-referenced May 15, 2026). Duplicate detected during patch application; ChatGPT independently corroborated S14-T6 `/review` finding. | Resolved |
+| 50 | `v_completed_sessions` DB view | §10 P5 | **S16-T2c** Unified sessions VIEW (closes FS #212 + FS #260; F7 merged into FS #212 on May 15, 2026 — two independent reviewers reached the same conclusion) | Shipped [2026-05-20, `6a6f53e`] |
 
 ### §12. FUTURE_SCOPE priority adjustments
 

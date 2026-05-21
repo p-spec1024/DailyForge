@@ -411,12 +411,20 @@ After Sprint 14 close, dedicated stabilization-prep work before Sprint 15 kicks 
 
 ---
 
-## Sprint 16 — Engine & API Hardening (Stabilization Part 2) — OUTLINED
+## Sprint 16 — Engine & API Hardening (Stabilization Part 2) — 🟡 IN PROGRESS
 
-**Status:** OUTLINED. Full spec authored at S15 close.
+**Status:** 🟡 IN PROGRESS — kicked off May 19, 2026 with T1.
 **Outline source:** `Trackers/SPRINT_16_OUTLINE.md`
 **Theme:** Harden the public API and the engine error surface. Reduce blast radius of suggestion-engine changes. Establish meaningful test coverage now that staging DB exists.
 **Ticket count:** 6 (server-heavy with a small app slice).
+**Branch strategy:** Sprint-chained off `main`, single `--no-ff` merge + `sprint-16-close` annotated tag at sprint close (per PI #20).
+
+| # | Ticket | Status | Branch | Smoke | Commit |
+|---|---|---|---|---|---|
+| 1 | ApiService consolidation — single `_sendRaw()` core + 5 thin wrappers (resolves ChatGPT review §5.2 / finding #30) | ✅ SHIPPED May 19, 2026 | `s16-t1` | 20 / 0 | feat `a9b314c` + chore (this) |
+| 2 | Typed engine errors — `EngineContractError({code, message, details})` replaces RangeError substring matching (resolves ChatGPT review §3.3 / finding #3 / FS #166) | ✅ SHIPPED May 19, 2026 | `s16-t1` | 71 / 0 | feat `89b3e06` + chore (this) |
+| 2c | Unified sessions VIEW — `v_completed_sessions` UNIONs sessions + breathwork_sessions; 4 home endpoints query the VIEW; 12 → 4 round-trips per home render (resolves ChatGPT F7 / finding #50, closes FS #212 + FS #260) | ✅ SHIPPED May 20, 2026 | `s16-t1` | 23 / 0 | feat `6a6f53e` + chore (this) |
+| 2b | Endpoint-aware timeouts + differentiated timeout/network copy — `ApiConfig.timeoutFor(path)` (20s default, 35s for engine paths); service-layer `TimeoutError` / `.timeout()` factory carry distinct copy; Sentry `timeout_seconds` + `endpoint_path` tags (resolves ChatGPT review rows #31 + #32, closes FS #209) | ✅ SHIPPED May 21, 2026 | `s16-t1` | 5 / 0 | feat `3d1aecb` + chore (this) |
 
 ---
 

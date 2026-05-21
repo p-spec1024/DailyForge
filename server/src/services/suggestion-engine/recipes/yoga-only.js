@@ -33,10 +33,15 @@ import {
 } from '../pickers.js';
 import { yogaItem } from '../item-formatters.js';
 import { checkRecencyOverlap } from '../recency.js';
+import { EngineContractError } from '../errors.js';
 
 export async function generateYogaOnly({ userId, focus, levels, timeBudget }) {
   if (![15, 30, 45, 60].includes(timeBudget)) {
-    throw new RangeError(`time_budget_min must be 15/30/45/60 for yoga_tab entry; got ${timeBudget}`);
+    throw new EngineContractError({
+      code: 'INVALID_TIME_BUDGET',
+      message: 'invalid_time_budget',
+      details: { given: timeBudget, entry_point: 'yoga_tab', valid: [15, 30, 45, 60] },
+    });
   }
   // T4 special-case branches.
   if (focus.slug === 'mobility') {

@@ -22,13 +22,23 @@ Hardening. Tightening the seams between modules. Test-first refactors.
 
 ## Tickets
 
-### S16-T1 — ApiService consolidation
+### S16-T1 — ApiService consolidation — ✅ SHIPPED 2026-05-19
 
 Consolidate `app/lib/services/api_service.dart` into a single `_sendRaw()` core. Unified handling of timeout, 401 logout, JSON parsing, network exception wrapping. `get`/`getList`/`post`/`put`/`delete` become thin wrappers. Resolves `getList()` divergence ChatGPT flagged in §5.2. Touches every Flutter service that uses ApiService — incidental verification across the app.
 
-### S16-T2 — Typed engine errors + endpoint-aware timeouts
+**Open question resolved:** `getList` stays as a thin wrapper, not folded into `get<T>()`. Pre-flight enumerated 58 call sites total (3 `getList` + 31 `get` + 13 `post` + 7 `put` + 4 `delete`); folding would require touching all 34 `get`/`getList` sites to add type parameters for zero behavioral gain. See `Trackers/S16-T1-consumers.md`. Feat `a9b314c`.
 
-Replace `RangeError` substring matching in `server/src/routes/sessions.js` with `EngineContractError({ code, message, detail })` instances thrown from the engine. Route mapper becomes `if (err instanceof EngineContractError) return res.status(400).json({ error: err.code })`. Pairs with timeout work: `defaultTimeout = 20s`, `engineTimeout = 35s` for `/sessions/suggest` and engine-heavy routes. Updates timeout copy from "Check your connection" to "DailyForge took too long to respond. Please try again." Depends on S15-T4 having extracted the `errors.js` shell.
+### S16-T2 — Typed engine errors — ✅ SHIPPED 2026-05-19
+
+`RangeError` substring matching in `server/src/routes/sessions.js` replaced with `EngineContractError({ code, message, details })` thrown from the engine. Route catch is a single `instanceof EngineContractError` branch that emits `{ error: err.message, code: err.code, details: err.details }` with HTTP 400. Response shape is additive — `error` field byte-identical to legacy lowercase code for old-APK backward compat; `code` (SCREAMING_SNAKE_CASE) + `details` are new. Flutter `ApiException` carries nullable `code`; `_mapApiException` switches on it with legacy substring fallback. Sentry `beforeSend` tags `engine_code` + `http_status` for filterable observability. 4 wire codes (INVALID_BRACKET, INVALID_FOCUS_ENTRY_COMBO, INVALID_TIME_BUDGET, STATE_FOCUS_REQUIRES_BRACKET) from 10 throw sites. Resolves ChatGPT review §3.3 / FS #166. Smoke `71 / 0`. Feat `89b3e06` + chore (this).
+
+### S16-T2c — Unified sessions VIEW — ✅ SHIPPED 2026-05-20
+
+Postgres VIEW `v_completed_sessions` UNIONs `sessions` (filter `completed = true`) and `breathwork_sessions` (filter `completed = true`) with normalized columns (`row_id`, `user_id`, `pillar`, `completed_at`, `started_at`, `duration_min`, `focus_slug`, `multi_phase_session_id`, `completed_date`). 4 home endpoints migrated to query the VIEW instead of per-table UNION ALLs: `/api/home/stats` (6→1), `/weekly-activity` (2→1), `/daily-load` (2→1), `/daily-counts` (2→1 with multi-phase dedupe). Response shapes byte-identical to pre-migration snapshots (captured at `b6aaf06`). Drive-by fix: line 363 of `migrate.js` had unescaped backticks in a SQL comment that prematurely closed the schema template literal — pre-existing parse error blocking `node src/db/migrate.js`; escaped, file now runs cleanly + idempotently. Resolves ChatGPT review §10 P5 / F7 / finding #50. Closes FS #212 + FS #260. Smoke `23 / 0`. Feat `6a6f53e` + chore (this).
+
+### S16-T2b — Endpoint-aware timeouts — ✅ SHIPPED 2026-05-21
+
+`ApiConfig.timeoutFor(path)` returns 35s for `/sessions/suggest` and `/sessions/start-from-list`; 20s default elsewhere (bumped from a flat 15s). Override map keys reference path constants directly so any rename fails the build — slowness is opt-in, compile-time-checked. `_sendRaw` reads the policy per request; old `_kRequestTimeout` constant deleted. User-facing timeout copy ("DailyForge took too long to respond. Please try again.") differentiated from network copy ("Check your connection and try again.") at the service layer — `TimeoutError` class in `suggest_service.dart` + `.timeout()` factory in `focus_duration_service.dart` (HTTP-layer `TimeoutApiException` keeps the technical message for logs/Sentry). Sentry `beforeSend` tags timeout events with `timeout_seconds` + `endpoint_path` alongside the existing `http_status`. Resolves ChatGPT review §5.3 / rows #31 + #32. Closes FS #209. Smoke `5 / 0`. Feat `3d1aecb` + chore (this).
 
 ### S16-T3 — Test coverage expansion (9 high-value tests)
 
@@ -79,7 +89,7 @@ Split into: session state machine, set logging, routine handling. Behavior-prese
 
 ## Open questions
 
-- Should `ApiService.getList()` actually remain or fold entirely into `get()` with type signatures? Defer to spec authoring.
+- ~~Should `ApiService.getList()` actually remain or fold entirely into `get()` with type signatures? Defer to spec authoring.~~ **Resolved at S16-T1 spec time, confirmed by 58-call-site inventory:** `getList` stays as a thin wrapper. See S16-T1 ticket entry above.
 - Are there latent endpoints in `routes/session.js` worth deleting during the split, vs. preserving? Defer to pre-flight audit.
 
 ---

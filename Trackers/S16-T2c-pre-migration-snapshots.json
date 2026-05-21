@@ -1,0 +1,249 @@
+{
+  "captured_at": "2026-05-20T07:28:48.282Z",
+  "test_user_id": 1,
+  "snapshots": [
+    {
+      "endpoint": "GET /api/home/stats",
+      "response_status": 200,
+      "response_body": {
+        "streakDays": 0,
+        "minutesThisWeek": 0,
+        "sessionsThisYear": 128,
+        "pillarDurations": {
+          "strength": 5,
+          "yoga": 10,
+          "breath": 10
+        }
+      },
+      "round_trip_count": 6
+    },
+    {
+      "endpoint": "GET /api/home/weekly-activity",
+      "response_status": 200,
+      "response_body": {
+        "weeks": [
+          {
+            "weekStart": "2026-04-27",
+            "strength": 0,
+            "yoga": 0,
+            "breath": 0
+          },
+          {
+            "weekStart": "2026-05-04",
+            "strength": 0,
+            "yoga": 0,
+            "breath": 0
+          },
+          {
+            "weekStart": "2026-05-11",
+            "strength": 0,
+            "yoga": 0,
+            "breath": 0
+          },
+          {
+            "weekStart": "2026-05-18",
+            "strength": 0,
+            "yoga": 0,
+            "breath": 0
+          }
+        ]
+      },
+      "round_trip_count": 2
+    },
+    {
+      "endpoint": "GET /api/home/daily-load",
+      "response_status": 200,
+      "response_body": {
+        "points": [
+          {
+            "date": "2026-04-21",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-04-22",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-04-23",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-04-24",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-04-25",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-04-26",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-04-27",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-04-28",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-04-29",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-04-30",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-01",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-02",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-03",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-04",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-05",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-06",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-07",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-08",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-09",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-10",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-11",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-12",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-13",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-14",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-15",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-16",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-17",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-18",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-19",
+            "load_minutes": 0
+          },
+          {
+            "date": "2026-05-20",
+            "load_minutes": 0
+          }
+        ],
+        "delta_pct": null
+      },
+      "round_trip_count": 2
+    },
+    {
+      "endpoint": "GET /api/home/daily-counts",
+      "response_status": 200,
+      "response_body": {
+        "points": [
+          {
+            "date": "2026-05-07",
+            "sessions": 0
+          },
+          {
+            "date": "2026-05-08",
+            "sessions": 0
+          },
+          {
+            "date": "2026-05-09",
+            "sessions": 0
+          },
+          {
+            "date": "2026-05-10",
+            "sessions": 0
+          },
+          {
+            "date": "2026-05-11",
+            "sessions": 0
+          },
+          {
+            "date": "2026-05-12",
+            "sessions": 0
+          },
+          {
+            "date": "2026-05-13",
+            "sessions": 0
+          },
+          {
+            "date": "2026-05-14",
+            "sessions": 0
+          },
+          {
+            "date": "2026-05-15",
+            "sessions": 0
+          },
+          {
+            "date": "2026-05-16",
+            "sessions": 0
+          },
+          {
+            "date": "2026-05-17",
+            "sessions": 0
+          },
+          {
+            "date": "2026-05-18",
+            "sessions": 0
+          },
+          {
+            "date": "2026-05-19",
+            "sessions": 0
+          },
+          {
+            "date": "2026-05-20",
+            "sessions": 0
+          }
+        ]
+      },
+      "round_trip_count": 2
+    }
+  ]
+}

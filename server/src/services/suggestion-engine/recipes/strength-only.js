@@ -3,8 +3,9 @@
 // Standard keyworded path + T4 full_body variant.
 //   generateStrengthOnly, generateStrengthOnlyFullBody
 //
-// mobility from strength_tab is locked out at dispatch (RangeError); the
-// keyworded path also asserts this defensively.
+// mobility from strength_tab is locked out at dispatch (EngineContractError
+// code INVALID_FOCUS_ENTRY_COMBO); the keyworded path also asserts this
+// defensively.
 //
 // S15-T4 (FS #160): extracted from server/src/services/suggestionEngine.js.
 
@@ -17,19 +18,30 @@ import {
 import { pickStrength, pickStrengthCompound } from '../pickers.js';
 import { strengthItem } from '../item-formatters.js';
 import { checkRecencyOverlap } from '../recency.js';
+import { EngineContractError } from '../errors.js';
 
 export async function generateStrengthOnly({ userId, focus, levels, timeBudget }) {
   if (![30, 60].includes(timeBudget)) {
-    throw new RangeError(`time_budget_min must be 30 or 60 for strength_tab entry; got ${timeBudget}`);
+    throw new EngineContractError({
+      code: 'INVALID_TIME_BUDGET',
+      message: 'invalid_time_budget',
+      details: { given: timeBudget, entry_point: 'strength_tab', valid: [30, 60] },
+    });
   }
-  // T4 S3 defensive: dispatch already throws RangeError for mobility/strength_tab,
-  // but mirror the throw here in case a future refactor reorders dispatch — without
-  // this guard, mobility would fall through to the keyworded path below and emit a
-  // misleading "No muscle keywords" error.
+  // T4 S3 defensive: dispatch already throws EngineContractError for mobility/
+  // strength_tab, but mirror the throw here in case a future refactor reorders
+  // dispatch — without this guard, mobility would fall through to the keyworded
+  // path below and emit a misleading "No muscle keywords" error.
   if (focus.slug === 'mobility') {
-    throw new RangeError(
-      'mobility is not available from strength_tab — use yoga_tab or home'
-    );
+    throw new EngineContractError({
+      code: 'INVALID_FOCUS_ENTRY_COMBO',
+      message: 'invalid_focus_entry_combo',
+      details: {
+        focus_slug: focus.slug,
+        entry_point: 'strength_tab',
+        reason: 'mobility_not_in_strength_tab',
+      },
+    });
   }
   // T4: full_body uses compound predicate.
   if (focus.slug === 'full_body') {

@@ -74,115 +74,77 @@ router.get('/stats', async (req, res, next) => {
     const sundayStr = fmtDate(sunday);
     const yearStart = `${today.getFullYear()}-01-01`;
 
-    const [
-      datesRows,
-      weekSecsRows,
-      yearCountRows,
-      strengthRows,
-      yogaRows,
-      breathRows,
-    ] = await Promise.all([
-      // Active dates for streak — UNION of completed sessions + breathwork,
-      // same shape dashboard.js uses.
-      pool.query(
-        `SELECT date FROM (
-           SELECT DISTINCT date FROM sessions
-            WHERE user_id = $1 AND completed = true AND date IS NOT NULL
-           UNION
-           SELECT DISTINCT (created_at AT TIME ZONE 'UTC')::date AS date
-             FROM breathwork_sessions
-            WHERE user_id = $1 AND completed = true
-         ) d ORDER BY date DESC`,
-        [userId]
-      ),
+    // S16-T2c: single query against v_completed_sessions replaces 6 per-table
+    // queries. duration_min (numeric minutes) and completed_date (DATE) come
+    // pre-normalized from the VIEW; pillar is the source-table type column,
+    // 'breathwork' for the breathwork half. ORDER BY id DESC keeps the
+    // median-window pick deterministic vs the prior date-DESC-then-id-DESC
+    // ordering (rows from the same date order by their insertion id).
+    const { rows } = await pool.query(
+      `SELECT pillar, completed_date, duration_min
+         FROM v_completed_sessions
+        WHERE user_id = $1
+        ORDER BY completed_date DESC NULLS LAST,
+                 split_part(row_id, ':', 1)::int DESC`,
+      [userId]
+    );
 
-      // Minutes this week: sessions.duration (seconds, see migrate.js:290)
-      // + breathwork_sessions.duration_seconds. Converted to minutes after
-      // summing.
-      pool.query(
-        `SELECT
-           (SELECT COALESCE(SUM(duration), 0)::bigint
-              FROM sessions
-             WHERE user_id = $1 AND completed = true
-               AND duration IS NOT NULL
-               AND date >= $2::date AND date <= $3::date) AS session_secs,
-           (SELECT COALESCE(SUM(duration_seconds), 0)::bigint
-              FROM breathwork_sessions
-             WHERE user_id = $1 AND completed = true
-               AND created_at >= $2::date
-               AND created_at < ($3::date + INTERVAL '1 day')) AS breath_secs`,
-        [userId, mondayStr, sundayStr]
-      ),
-
-      // Completed sessions this calendar year — both pillars.
-      pool.query(
-        `SELECT
-           (SELECT COUNT(*)::int FROM sessions
-             WHERE user_id = $1 AND completed = true
-               AND date >= $2::date) AS session_count,
-           (SELECT COUNT(*)::int FROM breathwork_sessions
-             WHERE user_id = $1 AND completed = true
-               AND created_at >= $2::date) AS breath_count`,
-        [userId, yearStart]
-      ),
-
-      // Last N strength durations (seconds) — for median pillar time.
-      pool.query(
-        `SELECT duration FROM sessions
-          WHERE user_id = $1 AND completed = true
-            AND duration IS NOT NULL AND duration > 0
-            AND type IN ('strength', '5phase')
-          ORDER BY date DESC NULLS LAST, id DESC
-          LIMIT $2`,
-        [userId, PILLAR_MEDIAN_WINDOW]
-      ),
-
-      pool.query(
-        `SELECT duration FROM sessions
-          WHERE user_id = $1 AND completed = true
-            AND duration IS NOT NULL AND duration > 0
-            AND type = 'yoga'
-          ORDER BY date DESC NULLS LAST, id DESC
-          LIMIT $2`,
-        [userId, PILLAR_MEDIAN_WINDOW]
-      ),
-
-      pool.query(
-        `SELECT duration_seconds AS duration FROM breathwork_sessions
-          WHERE user_id = $1 AND completed = true
-            AND duration_seconds IS NOT NULL AND duration_seconds > 0
-          ORDER BY created_at DESC
-          LIMIT $2`,
-        [userId, PILLAR_MEDIAN_WINDOW]
-      ),
-    ]);
-
+    // Streak: distinct completed_date values, formatted YYYY-MM-DD.
     const dateSet = new Set(
-      datesRows.rows.map((r) =>
-        r.date instanceof Date ? fmtDate(r.date) : String(r.date).slice(0, 10)
-      )
+      rows
+        .map((r) => r.completed_date)
+        .filter((d) => d != null)
+        .map((d) => (d instanceof Date ? fmtDate(d) : String(d).slice(0, 10)))
     );
     const streakDays = calculateStreak(dateSet, today);
 
-    const sessionSecs = Number(weekSecsRows.rows[0]?.session_secs || 0);
-    const breathSecs = Number(weekSecsRows.rows[0]?.breath_secs || 0);
-    const minutesThisWeek = Math.round((sessionSecs + breathSecs) / 60);
+    // Minutes this week: sum duration_min for rows in [monday, sunday] window.
+    let minutesThisWeek = 0;
+    for (const r of rows) {
+      if (r.completed_date == null || r.duration_min == null) continue;
+      const ds = r.completed_date instanceof Date
+        ? fmtDate(r.completed_date)
+        : String(r.completed_date).slice(0, 10);
+      if (ds >= mondayStr && ds <= sundayStr) {
+        minutesThisWeek += Number(r.duration_min);
+      }
+    }
+    minutesThisWeek = Math.round(minutesThisWeek);
 
-    const sessionsThisYear =
-      Number(yearCountRows.rows[0]?.session_count || 0) +
-      Number(yearCountRows.rows[0]?.breath_count || 0);
+    // Sessions this year: count rows with completed_date >= yearStart.
+    let sessionsThisYear = 0;
+    for (const r of rows) {
+      if (r.completed_date == null) continue;
+      const ds = r.completed_date instanceof Date
+        ? fmtDate(r.completed_date)
+        : String(r.completed_date).slice(0, 10);
+      if (ds >= yearStart) sessionsThisYear += 1;
+    }
 
+    // Pillar median durations: last N per pillar in seconds (duration_min × 60
+    // to match the prior pillarDurationMinutes helper, which expects seconds).
+    // Strength bucket includes both 'strength' and '5phase' types.
+    const pickLastN = (filterFn) => {
+      const picked = [];
+      for (const r of rows) {
+        if (picked.length >= PILLAR_MEDIAN_WINDOW) break;
+        if (!filterFn(r)) continue;
+        if (r.duration_min == null || Number(r.duration_min) <= 0) continue;
+        picked.push(Number(r.duration_min) * 60);
+      }
+      return picked;
+    };
     const pillarDurations = {
       strength: pillarDurationMinutes(
-        strengthRows.rows.map((r) => r.duration),
+        pickLastN((r) => r.pillar === 'strength' || r.pillar === '5phase'),
         PILLAR_FALLBACKS.strength
       ),
       yoga: pillarDurationMinutes(
-        yogaRows.rows.map((r) => r.duration),
+        pickLastN((r) => r.pillar === 'yoga'),
         PILLAR_FALLBACKS.yoga
       ),
       breath: pillarDurationMinutes(
-        breathRows.rows.map((r) => r.duration),
+        pickLastN((r) => r.pillar === 'breathwork'),
         PILLAR_FALLBACKS.breath
       ),
     };
@@ -207,22 +169,16 @@ router.get('/weekly-activity', async (req, res, next) => {
     oldestMonday.setDate(oldestMonday.getDate() - 21);
     const oldestStr = fmtDate(oldestMonday);
 
-    const [sessionRows, breathRows] = await Promise.all([
-      pool.query(
-        `SELECT date, type FROM sessions
-          WHERE user_id = $1 AND completed = true
-            AND date IS NOT NULL
-            AND date >= $2::date`,
-        [userId, oldestStr]
-      ),
-      pool.query(
-        `SELECT (created_at AT TIME ZONE 'UTC')::date AS date
-           FROM breathwork_sessions
-          WHERE user_id = $1 AND completed = true
-            AND created_at >= $2::date`,
-        [userId, oldestStr]
-      ),
-    ]);
+    // S16-T2c: single query against v_completed_sessions. pillar values
+    // 'strength' + '5phase' both bucket into the strength count.
+    const { rows } = await pool.query(
+      `SELECT pillar, completed_date
+         FROM v_completed_sessions
+        WHERE user_id = $1
+          AND completed_date IS NOT NULL
+          AND completed_date >= $2::date`,
+      [userId, oldestStr]
+    );
 
     const buckets = [];
     for (let i = 0; i < 4; i++) {
@@ -249,25 +205,19 @@ router.get('/weekly-activity', async (req, res, next) => {
       return -1;
     };
 
-    for (const row of sessionRows.rows) {
-      const ds = row.date instanceof Date
-        ? fmtDate(row.date)
-        : String(row.date).slice(0, 10);
+    for (const row of rows) {
+      const ds = row.completed_date instanceof Date
+        ? fmtDate(row.completed_date)
+        : String(row.completed_date).slice(0, 10);
       const idx = bucketIndexFor(ds);
       if (idx < 0) continue;
-      if (row.type === 'strength' || row.type === '5phase') {
+      if (row.pillar === 'strength' || row.pillar === '5phase') {
         buckets[idx].strength += 1;
-      } else if (row.type === 'yoga') {
+      } else if (row.pillar === 'yoga') {
         buckets[idx].yoga += 1;
+      } else if (row.pillar === 'breathwork') {
+        buckets[idx].breath += 1;
       }
-    }
-    for (const row of breathRows.rows) {
-      const ds = row.date instanceof Date
-        ? fmtDate(row.date)
-        : String(row.date).slice(0, 10);
-      const idx = bucketIndexFor(ds);
-      if (idx < 0) continue;
-      buckets[idx].breath += 1;
     }
 
     res.json({
@@ -298,46 +248,39 @@ router.get('/daily-load', async (req, res, next) => {
     oldest.setDate(oldest.getDate() - 29); // 30-day window inclusive
     const oldestStr = fmtDate(oldest);
 
-    const [sessionRows, breathRows] = await Promise.all([
-      pool.query(
-        `SELECT date, COALESCE(SUM(duration), 0)::bigint AS secs
-           FROM sessions
-          WHERE user_id = $1 AND completed = true
-            AND date IS NOT NULL AND duration IS NOT NULL
-            AND date >= $2::date
-          GROUP BY date`,
-        [userId, oldestStr]
-      ),
-      pool.query(
-        `SELECT (created_at AT TIME ZONE 'UTC')::date AS date,
-                COALESCE(SUM(duration_seconds), 0)::bigint AS secs
-           FROM breathwork_sessions
-          WHERE user_id = $1 AND completed = true
-            AND duration_seconds IS NOT NULL
-            AND created_at >= $2::date
-          GROUP BY (created_at AT TIME ZONE 'UTC')::date`,
-        [userId, oldestStr]
-      ),
-    ]);
+    // S16-T2c: single query against v_completed_sessions. duration_min comes
+    // pre-normalized from the VIEW (sessions.duration / 60.0 or
+    // breathwork.duration_seconds / 60.0). Aggregate per-date in JS rather
+    // than SQL since the round-trip target is 1.
+    const { rows } = await pool.query(
+      `SELECT completed_date, duration_min
+         FROM v_completed_sessions
+        WHERE user_id = $1
+          AND completed_date IS NOT NULL
+          AND duration_min IS NOT NULL
+          AND completed_date >= $2::date`,
+      [userId, oldestStr]
+    );
 
     // Build a date → minutes map, then walk every day in the window so
     // empty days emit `load_minutes: 0` (clients should never see gaps).
-    const byDate = new Map();
-    const addSecs = (dateRaw, secs) => {
-      const ds = dateRaw instanceof Date
-        ? fmtDate(dateRaw)
-        : String(dateRaw).slice(0, 10);
-      byDate.set(ds, (byDate.get(ds) || 0) + Number(secs || 0));
-    };
-    for (const r of sessionRows.rows) addSecs(r.date, r.secs);
-    for (const r of breathRows.rows) addSecs(r.date, r.secs);
+    // Accumulate in seconds and divide once at the end to preserve the
+    // pre-migration rounding semantics.
+    const secsByDate = new Map();
+    for (const r of rows) {
+      const ds = r.completed_date instanceof Date
+        ? fmtDate(r.completed_date)
+        : String(r.completed_date).slice(0, 10);
+      const secs = Math.round(Number(r.duration_min) * 60);
+      secsByDate.set(ds, (secsByDate.get(ds) || 0) + secs);
+    }
 
     const points = [];
     for (let i = 0; i < 30; i++) {
       const d = new Date(oldest);
       d.setDate(oldest.getDate() + i);
       const ds = fmtDate(d);
-      const secs = byDate.get(ds) || 0;
+      const secs = secsByDate.get(ds) || 0;
       points.push({ date: ds, load_minutes: Math.round(secs / 60) });
     }
 
@@ -370,35 +313,32 @@ router.get('/daily-counts', async (req, res, next) => {
     oldest.setDate(oldest.getDate() - 13); // 14-day window inclusive
     const oldestStr = fmtDate(oldest);
 
-    const [sessionRows, breathRows] = await Promise.all([
-      pool.query(
-        `SELECT date, COUNT(*)::int AS n
-           FROM sessions
-          WHERE user_id = $1 AND completed = true AND date IS NOT NULL
-            AND date >= $2::date
-          GROUP BY date`,
-        [userId, oldestStr]
-      ),
-      pool.query(
-        `SELECT (created_at AT TIME ZONE 'UTC')::date AS date,
-                COUNT(*)::int AS n
-           FROM breathwork_sessions
-          WHERE user_id = $1 AND completed = true
-            AND created_at >= $2::date
-          GROUP BY (created_at AT TIME ZONE 'UTC')::date`,
-        [userId, oldestStr]
-      ),
-    ]);
+    // S16-T2c: single query against v_completed_sessions, with multi-phase
+    // dedupe. A 5-phase session that writes 2-3 per-pillar rows counts as 1,
+    // not 2-3. Dedupe key uses multi_phase_session_id when present; else the
+    // VIEW's row_id (unique per source-table row).
+    const { rows } = await pool.query(
+      `SELECT row_id, multi_phase_session_id, completed_date
+         FROM v_completed_sessions
+        WHERE user_id = $1
+          AND completed_date IS NOT NULL
+          AND completed_date >= $2::date`,
+      [userId, oldestStr]
+    );
 
     const byDate = new Map();
-    const add = (dateRaw, n) => {
-      const ds = dateRaw instanceof Date
-        ? fmtDate(dateRaw)
-        : String(dateRaw).slice(0, 10);
-      byDate.set(ds, (byDate.get(ds) || 0) + Number(n || 0));
-    };
-    for (const r of sessionRows.rows) add(r.date, r.n);
-    for (const r of breathRows.rows) add(r.date, r.n);
+    const seenKeys = new Set();
+    for (const row of rows) {
+      const dedupeKey = row.multi_phase_session_id != null
+        ? `mp:${row.multi_phase_session_id}`
+        : row.row_id;
+      if (seenKeys.has(dedupeKey)) continue;
+      seenKeys.add(dedupeKey);
+      const ds = row.completed_date instanceof Date
+        ? fmtDate(row.completed_date)
+        : String(row.completed_date).slice(0, 10);
+      byDate.set(ds, (byDate.get(ds) || 0) + 1);
+    }
 
     const points = [];
     for (let i = 0; i < 14; i++) {
