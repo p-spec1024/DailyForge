@@ -65,8 +65,8 @@ This file gets updated at sprint close to mark items as `Shipped` or `Re-deferre
 | 28 | Large file: `strength_player.dart` (591) | §5.1 | **S17-T6** | Pending |
 | 29 | Large file: `seed-breathwork-techniques.js` (1417) | §5.1 | **F2** FUTURE_SCOPE (data file, low priority) | Deferred |
 | 30 | `ApiService.getList()` separated handling | §5.2 | **S16-T1** ApiService consolidation | Shipped [2026-05-19, `a9b314c`] |
-| 31 | Timeout 15s flat, no endpoint awareness | §5.3 | **S16-T2** (bundled with typed errors) | Pending |
-| 32 | Timeout copy misleading ("Check your connection") | §5.3 | **S16-T2** (bundled) | Pending |
+| 31 | Timeout 15s flat, no endpoint awareness | §5.3 | **S16-T2b** Endpoint-aware timeouts (`ApiConfig.timeoutFor`) | Shipped [2026-05-21, `3d1aecb`] |
+| 32 | Timeout copy misleading ("Check your connection") | §5.3 | **S16-T2b** Service-layer Timeout variants with distinct copy | Shipped [2026-05-21, `3d1aecb`] |
 | 33 | Auth middleware not validating JWT `id` integer | §5.4 | **S15-T7** Auth integer-id validation (renumbered from S15-T6 on 2026-05-17) | Shipped [2026-05-18, 0a35a9a] |
 | 34 | `/api/media/test-upload` ships to production | §5.5 | **S17-T1** Security hygiene (bundled) | Pending |
 | 35 | Test coverage narrow — 9 high-value tests missing | §5.6 | **S16-T3** Test coverage expansion | Pending |
