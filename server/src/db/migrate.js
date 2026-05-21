@@ -3,6 +3,18 @@ import { assertSafeMutation } from '../../scripts/lib/prod-guard.mjs';
 
 assertSafeMutation();
 
+// ============================================================================
+// Audit point: 2026-05-21 (FS #261)
+// On this date, migrate.js was verified to produce a schema identical to the
+// staging Neon branch (modulo the in-flight v_completed_sessions VIEW from
+// PR #4 s16-t1, which self-resolves at sprint-close merge). See
+// Trackers/S16-FS261-schema-audit-2026-05-21.md for the full audit.
+//
+// Going forward, ALL schema changes go through this file. No raw psql, no
+// Neon Console SQL editor, no Node-REPL ALTER. See Trackers/DEV_PROCESS.md
+// "Schema discipline" section. Future audits move this timestamp forward.
+// ============================================================================
+
 const schema = `
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
@@ -108,13 +120,18 @@ CREATE TABLE IF NOT EXISTS breathwork_techniques (
   name VARCHAR(100) NOT NULL,
   sanskrit_name VARCHAR(100),
   tradition VARCHAR(50) NOT NULL CHECK (tradition IN ('pranayama', 'western', 'therapeutic', 'goal_specific', 'advanced')),
-  category VARCHAR(50) NOT NULL CHECK (category IN ('energizing', 'calming', 'focus', 'sleep', 'performance', 'recovery', 'therapeutic')),
+  -- FS #261 audit 2026-05-21: DEFAULT added to converge fresh-DB CREATE TABLE
+  -- with the ALTER ADD COLUMN block below (S11-T1.5 evolution). Without this,
+  -- a fresh DB that took the CREATE path got no default while a migrated DB
+  -- that took the ALTER path got 'calming'.
+  category VARCHAR(50) NOT NULL DEFAULT 'calming' CHECK (category IN ('energizing', 'calming', 'focus', 'sleep', 'performance', 'recovery', 'therapeutic')),
   purposes TEXT[] NOT NULL,
   difficulty VARCHAR(20) NOT NULL CHECK (difficulty IN ('beginner', 'intermediate', 'advanced')),
   safety_level VARCHAR(10) NOT NULL DEFAULT 'green' CHECK (safety_level IN ('green', 'yellow', 'red')),
   protocol JSONB NOT NULL,
   description TEXT NOT NULL,
-  instructions TEXT NOT NULL,
+  -- FS #261 audit 2026-05-21: DEFAULT '' added to converge with ALTER block below.
+  instructions TEXT NOT NULL DEFAULT '',
   benefits TEXT[],
   contraindications TEXT[],
   caution_note TEXT,
@@ -794,8 +811,9 @@ ALTER TABLE breathwork_techniques ADD COLUMN IF NOT EXISTS advanced_duration_max
 -- recency UNION shape, only created_at. State-focus rows land here (calm/
 -- energize/etc.); body-focus rows live in sessions(type=...). Persisting the
 -- slug here is useful for state-focus analytics down the road.
--- (sessions.focus_slug was added by S12-T1 directly to prod DB out-of-band;
---  not duplicated here. T1 schema reconciliation tracked separately.)
+-- (sessions.focus_slug was originally added out-of-band by S12-T1; backfilled
+--  into migrate.js by FS #261 audit on 2026-05-21. See backfill block at the
+--  end of this alterations const.)
 ALTER TABLE breathwork_sessions ADD COLUMN IF NOT EXISTS focus_slug VARCHAR(40);
 
 -- S14-T4 (renamed S14-T5): multi-phase FK on per-pillar session rows. The
@@ -834,6 +852,94 @@ DO $migrate_t5_breathwork_fk$ BEGIN
 END $migrate_t5_breathwork_fk$;
 ALTER TABLE breathwork_sessions
   ADD COLUMN IF NOT EXISTS multi_phase_session_id INT REFERENCES multi_phase_sessions(id);
+
+-- ============================================================================
+-- FS #261 backfill — out-of-band drift detected during the 2026-05-21 audit.
+-- See Trackers/S16-FS261-schema-audit-2026-05-21.md for the full diff and the
+-- per-item classification. Each block here is idempotent.
+-- ============================================================================
+
+-- ---- C2a: S14-T5 rename residue (cross_pillar_sessions → multi_phase_sessions)
+-- The S14-T5 rename blocks above moved the table + columns + user-defined
+-- indexes, but Postgres does not auto-rename the implicit PK/FK/CHECK
+-- constraint names or the SERIAL-owned sequence. Staging retained the
+-- cross_pillar_sessions_* names; a fresh CREATE TABLE produces the new names.
+-- These blocks bring staging's names forward.
+
+DO $migrate_fs261_rename_pk_cross_pillar_to_mps$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'cross_pillar_sessions_pkey')
+     AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'multi_phase_sessions_pkey') THEN
+    ALTER TABLE multi_phase_sessions
+      RENAME CONSTRAINT cross_pillar_sessions_pkey TO multi_phase_sessions_pkey;
+  END IF;
+END $migrate_fs261_rename_pk_cross_pillar_to_mps$;
+
+DO $migrate_fs261_rename_user_fk_cross_pillar_to_mps$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'cross_pillar_sessions_user_id_fkey')
+     AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'multi_phase_sessions_user_id_fkey') THEN
+    ALTER TABLE multi_phase_sessions
+      RENAME CONSTRAINT cross_pillar_sessions_user_id_fkey TO multi_phase_sessions_user_id_fkey;
+  END IF;
+END $migrate_fs261_rename_user_fk_cross_pillar_to_mps$;
+
+DO $migrate_fs261_rename_end_intent_check_cross_pillar_to_mps$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'cross_pillar_sessions_end_intent_check')
+     AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'multi_phase_sessions_end_intent_check') THEN
+    ALTER TABLE multi_phase_sessions
+      RENAME CONSTRAINT cross_pillar_sessions_end_intent_check TO multi_phase_sessions_end_intent_check;
+  END IF;
+END $migrate_fs261_rename_end_intent_check_cross_pillar_to_mps$;
+
+DO $migrate_fs261_rename_sessions_mps_fk_cross_pillar_to_mps$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'sessions_cross_pillar_session_id_fkey')
+     AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'sessions_multi_phase_session_id_fkey') THEN
+    ALTER TABLE sessions
+      RENAME CONSTRAINT sessions_cross_pillar_session_id_fkey TO sessions_multi_phase_session_id_fkey;
+  END IF;
+END $migrate_fs261_rename_sessions_mps_fk_cross_pillar_to_mps$;
+
+DO $migrate_fs261_rename_breathwork_mps_fk_cross_pillar_to_mps$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'breathwork_sessions_cross_pillar_session_id_fkey')
+     AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'breathwork_sessions_multi_phase_session_id_fkey') THEN
+    ALTER TABLE breathwork_sessions
+      RENAME CONSTRAINT breathwork_sessions_cross_pillar_session_id_fkey TO breathwork_sessions_multi_phase_session_id_fkey;
+  END IF;
+END $migrate_fs261_rename_breathwork_mps_fk_cross_pillar_to_mps$;
+
+-- PK index name: Postgres does NOT auto-rename the implicit unique index when
+-- a primary-key constraint is renamed via ALTER TABLE RENAME CONSTRAINT.
+-- IF EXISTS guards the no-op case (fresh DBs already have the new name).
+ALTER INDEX IF EXISTS cross_pillar_sessions_pkey RENAME TO multi_phase_sessions_pkey;
+
+DO $migrate_fs261_rename_seq_cross_pillar_to_mps$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'cross_pillar_sessions_id_seq' AND relkind = 'S')
+     AND NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = 'multi_phase_sessions_id_seq' AND relkind = 'S') THEN
+    ALTER SEQUENCE cross_pillar_sessions_id_seq RENAME TO multi_phase_sessions_id_seq;
+  END IF;
+END $migrate_fs261_rename_seq_cross_pillar_to_mps$;
+
+-- ---- C2b: out-of-band schema changes that hit staging while migrate.js was
+-- parse-broken (S12-T1 through ~S16-T2c, parse fix landed at 6a6f53e).
+
+-- breathwork_techniques_category_check + breathwork_techniques_safety_level_check
+-- were DROPPED from staging during the parse-broken window. Original product
+-- justification is undocumented (was this deliberate loosening of the enums,
+-- or accidental cleanup?). Backfilling DROP to match staging; audit artifact
+-- flags the open question for retroactive documentation.
+ALTER TABLE breathwork_techniques
+  DROP CONSTRAINT IF EXISTS breathwork_techniques_category_check;
+ALTER TABLE breathwork_techniques
+  DROP CONSTRAINT IF EXISTS breathwork_techniques_safety_level_check;
+
+-- S12-T3.5 settle_eligible_for: TEXT[] tagging which state-focus brackets a
+-- breathwork technique can settle into. Added to staging out-of-band.
+ALTER TABLE breathwork_techniques
+  ADD COLUMN IF NOT EXISTS settle_eligible_for TEXT[] DEFAULT '{}';
+
+-- sessions.focus_slug: the canonical FS #261 finding — originally added by
+-- S12-T1 out-of-band per the inline comment near the breathwork_sessions
+-- focus_slug ALTER above. Backfilled here so fresh DBs match staging.
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS focus_slug VARCHAR(40);
 `;
 
 const indexes = `
@@ -929,6 +1035,20 @@ CREATE INDEX IF NOT EXISTS idx_sessions_mps
 CREATE INDEX IF NOT EXISTS idx_breathwork_sessions_mps
   ON breathwork_sessions(multi_phase_session_id)
   WHERE multi_phase_session_id IS NOT NULL;
+
+-- ============================================================================
+-- FS #261 backfill — indexes that hit staging out-of-band during the
+-- migrate.js parse-broken window. See
+-- Trackers/S16-FS261-schema-audit-2026-05-21.md for classification.
+-- ============================================================================
+CREATE INDEX IF NOT EXISTS idx_breathwork_settle_eligible
+  ON breathwork_techniques USING gin (settle_eligible_for);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_exercises_sanskrit_unique
+  ON exercises USING btree (sanskrit_name)
+  WHERE type::text = 'yoga' AND sanskrit_name IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sessions_user_focus_date
+  ON sessions USING btree (user_id, focus_slug, date)
+  WHERE completed = true;
 `;
 
 async function migrate() {
