@@ -23,7 +23,7 @@ class FocusDurationService {
       final raw = await _api.get(path);
       return AvailableDurations.fromJson(raw);
     } on TimeoutApiException {
-      throw FocusDurationServiceException.network();
+      throw FocusDurationServiceException.timeout();
     } on NetworkException catch (e) {
       throw FocusDurationServiceException.network(e.message);
     } on UnauthorizedException {
@@ -43,7 +43,7 @@ class FocusDurationService {
       final raw = await _api.get(path);
       return SuggestedDefault.fromJson(raw);
     } on TimeoutApiException {
-      throw FocusDurationServiceException.network();
+      throw FocusDurationServiceException.timeout();
     } on NetworkException catch (e) {
       throw FocusDurationServiceException.network(e.message);
     } on UnauthorizedException {
@@ -85,6 +85,12 @@ class FocusDurationServiceException implements Exception {
         message: message ?? 'Check your connection and try again.',
       );
 
+  factory FocusDurationServiceException.timeout([String? message]) =>
+      FocusDurationServiceException(
+        code: 'timeout_error',
+        message: message ?? 'DailyForge took too long to respond. Please try again.',
+      );
+
   String get userFacingMessage {
     switch (code) {
       case 'breathwork_level_not_set':
@@ -95,6 +101,8 @@ class FocusDurationServiceException implements Exception {
         return "Couldn't find that focus area.";
       case 'network_error':
         return 'Check your connection and try again.';
+      case 'timeout_error':
+        return 'DailyForge took too long to respond. Please try again.';
       default:
         return "Couldn't load duration options.";
     }

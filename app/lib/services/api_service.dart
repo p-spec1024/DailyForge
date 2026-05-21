@@ -6,8 +6,6 @@ import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 import 'storage_service.dart';
 
-const Duration _kRequestTimeout = Duration(seconds: 15);
-
 class ApiException implements Exception {
   final int statusCode;
   final String message;
@@ -35,7 +33,14 @@ class NetworkException extends ApiException {
 }
 
 class TimeoutApiException extends ApiException {
-  TimeoutApiException()
+  /// S16-T2b: carry the timeout value + endpoint path so the Sentry
+  /// beforeSend hook can tag events with timeout_seconds + endpoint_path.
+  /// Both fields are optional for backward-compat with construction sites
+  /// that don't have the values handy (none after S16-T2b, but defensive).
+  final int? timeoutSeconds;
+  final String? endpointPath;
+
+  TimeoutApiException({this.timeoutSeconds, this.endpointPath})
       : super(0, 'Request timed out. Is the API server reachable?');
 }
 
@@ -138,7 +143,8 @@ class ApiService {
   }) async {
     final url = ApiConfig.url(path);
     final uri = Uri.parse(url);
-    if (kDebugMode) debugPrint('[API] $method $url');
+    final timeout = ApiConfig.timeoutFor(path);
+    if (kDebugMode) debugPrint('[API] $method $url (timeout=${timeout.inSeconds}s)');
     try {
       final headers = await _getHeaders(withAuth: withAuth);
       late final Future<http.Response> future;
@@ -158,7 +164,7 @@ class ApiService {
         default:
           throw ArgumentError('Unsupported HTTP method: $method');
       }
-      final response = await future.timeout(_kRequestTimeout);
+      final response = await future.timeout(timeout);
       if (kDebugMode) {
         debugPrint('[API] $method $url → ${response.statusCode}');
       }
@@ -170,8 +176,11 @@ class ApiService {
       }
       return response;
     } on TimeoutException {
-      if (kDebugMode) debugPrint('[API] $method $url → TIMEOUT');
-      throw TimeoutApiException();
+      if (kDebugMode) debugPrint('[API] $method $url → TIMEOUT (${timeout.inSeconds}s)');
+      throw TimeoutApiException(
+        timeoutSeconds: timeout.inSeconds,
+        endpointPath: path,
+      );
     } on SocketException catch (e) {
       if (kDebugMode) debugPrint('[API] $method $url → SOCKET ${e.message}');
       throw NetworkException();

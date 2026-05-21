@@ -47,7 +47,7 @@ class SuggestService {
       final raw = await _api.post(ApiConfig.sessionsSuggest, body);
       return SuggestedSession.fromJson(raw);
     } on TimeoutApiException {
-      throw NetworkError();
+      throw TimeoutError();
     } on NetworkException catch (e) {
       throw NetworkError(e.message);
     } on UnauthorizedException {
@@ -184,4 +184,12 @@ class NetworkError extends SuggestServiceException {
 
   @override
   String get userFacingMessage => 'Check your connection and try again.';
+}
+
+class TimeoutError extends SuggestServiceException {
+  TimeoutError([super.code = 'timeout_error']);
+
+  @override
+  String get userFacingMessage =>
+      'DailyForge took too long to respond. Please try again.';
 }

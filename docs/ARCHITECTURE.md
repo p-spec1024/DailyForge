@@ -389,7 +389,7 @@ Provider pattern with `ChangeNotifier` + `notifyListeners()`. All 21 providers a
 **`ApiService`** (`app/lib/services/api_service.dart`) is the only HTTP entry point. Responsibilities:
 
 - Builds `Authorization: Bearer <token>` from `StorageService.getToken()` (`_getHeaders`, line 43).
-- 15-second timeout via `_kRequestTimeout = Duration(seconds: 15)` (line 9). Too tight for Neon cold starts on the `/suggest` and `/start-from-list` endpoints — see FUTURE_SCOPE #209.
+- Endpoint-aware timeout via `ApiConfig.timeoutFor(path)`. Default `20s`; `/sessions/suggest` and `/sessions/start-from-list` get `35s` (engine-heavy paths covered for Neon cold starts and large-history users). Adding a new slow endpoint requires an explicit entry in `ApiConfig._endpointTimeouts` — slowness is opt-in. Shipped in S16-T2b, closing FS #209.
 - Wraps every method in a try-catch that translates infrastructure errors into typed exceptions: `TimeoutApiException`, `NetworkException` (covers `SocketException`, `HttpException`, and `http.ClientException` — the Android-specific class must be caught explicitly or it propagates unwrapped, see the inline note referencing FUTURE_SCOPE #107).
 - On `401`, calls `_storage.deleteToken()` + `_storage.deleteUser()` + `onUnauthorized?.call()` and throws `UnauthorizedException`. The `onUnauthorized` callback is set by `AuthProvider` to trigger logout.
 - Non-2xx responses produce `ApiException(statusCode, message)` where `message` is the JSON `error` field if present.
@@ -611,7 +611,7 @@ await context.read<SuggestProvider>().selectBodyFocus(focusSlug, timeBudgetMin: 
 
 `SuggestService.requestBodyFocusSession` (`app/lib/services/suggest_service.dart`) calls `_api.post(ApiConfig.sessionsSuggest, body)` — the constant resolves to `/sessions/suggest`, and `ApiConfig.url()` prepends `baseUrl` which already ends in `/api`, yielding `http://localhost:3001/api/sessions/suggest` for a default emulator build, or whatever `--dart-define=API_BASE_URL=...` was passed at build time.
 
-`ApiService._send` (`app/lib/services/api_service.dart:125`) wraps the HTTP call with a 15-second timeout, JWT-auth headers, and the typed exception ladder (`UnauthorizedException` / `TimeoutApiException` / `NetworkException` / `ApiException`).
+`ApiService._sendRaw` (`app/lib/services/api_service.dart`) wraps the HTTP call with an endpoint-aware timeout via `ApiConfig.timeoutFor(path)` (35s for `/sessions/suggest`; 20s default elsewhere), JWT-auth headers, and the typed exception ladder (`UnauthorizedException` / `TimeoutApiException` / `NetworkException` / `ApiException`). On timeout, `TimeoutApiException` carries `timeoutSeconds` + `endpointPath` so Sentry can tag the event for filterable observability.
 
 ### Step 3. Route handler validates → calls engine
 
@@ -790,7 +790,7 @@ Pulled from `Trackers/FUTURE_SCOPE.md` (304 lines, FS #1 through #241). Grouped 
 
 - **Infrastructure separation.** Single Neon prod DB serves both real use and smoke testing. No dev environment. Need separate dev/staging/prod databases before opening signups beyond the founder. (No specific FS number — described in this doc §4.3 and §4.7.)
 - **FS #198** — Engine cross-pillar phase-substitution fallback. Cross-pillar sessions sometimes emit 4 phases instead of 5 when the muscle-specific pool empties (biceps cooldown drop, S14-T2 AMENDMENT-1). Home page is branded "5-phase" — a 4-phase session is a leaky abstraction. Engine substitution ladder (adjacent muscle → generic restorative → allow warmup duplicate). ~30–50 LOC + smoke assertion.
-- **FS #209** — Neon DB cold-start timeout bump. `ApiService._kRequestTimeout = 15s` is too tight for Neon cold-starts (8–12s warmup is common). Client maps the timeout to `NetworkException → "Check your connection"` which misleads users. Either bump to 30s for engine endpoints or warm via `/api/health` at app boot.
+- **FS #209** — ✅ Neon DB cold-start timeout bump. **Shipped S16-T2b** (May 20, 2026). `ApiConfig.timeoutFor(path)` now returns 35s for `/sessions/suggest` and `/sessions/start-from-list`, 20s default elsewhere (bumped from a flat 15s). Misleading "Check your connection" copy on timeout replaced with "DailyForge took too long to respond" via service-layer Timeout variants (`TimeoutError` in `suggest_service.dart`; `FocusDurationServiceException.timeout()` factory in `focus_duration_service.dart`). NetworkException copy unchanged.
 
 ### 10.2. Medium priority
 
