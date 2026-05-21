@@ -360,7 +360,7 @@ CREATE TABLE IF NOT EXISTS exercise_swap_counts (
 -- exclusion UI can reuse the same table. content_id is a SOFT FK (no
 -- constraint) because it can point at exercises.id OR breathwork_techniques.id
 -- depending on content_type — same pattern as focus_content_compatibility.
--- Engine reads `WHERE content_type = 'strength'` today.
+-- Engine reads \`WHERE content_type = 'strength'\` today.
 CREATE TABLE IF NOT EXISTS user_excluded_exercises (
   id           SERIAL PRIMARY KEY,
   user_id      INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
